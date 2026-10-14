@@ -1,0 +1,1750 @@
+<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">
+	<Meta name="ExplicitAutoJoints">true</Meta>
+	<External>null</External>
+	<External>nil</External>
+	<Item class="Folder" referent="RBX8F1D660C8B1E444D9F6CE99FA2B60107">
+		<Properties>
+			<Color3 name="IconTint">
+				<R>0</R>
+				<G>0</G>
+				<B>0</B>
+			</Color3>
+			<BinaryString name="AttributesSerialize"></BinaryString>
+			<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+			<bool name="DefinesCapabilities">false</bool>
+			<string name="Name">Shared</string>
+			<BinaryString name="SerializedOverrides"></BinaryString>
+			<int64 name="SourceAssetId">-1</int64>
+			<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+		</Properties>
+		<Item class="Folder" referent="RBXD6AA768EC3974B978AF5C8475D529119">
+			<Properties>
+				<Color3 name="IconTint">
+					<R>0</R>
+					<G>0</G>
+					<B>0</B>
+				</Color3>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">TimeLoop</string>
+				<BinaryString name="SerializedOverrides"></BinaryString>
+				<int64 name="SourceAssetId">-1</int64>
+				<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+			</Properties>
+			<Item class="ModuleScript" referent="RBX1A84BE43997C4B0DA731B03EB0D8590C">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	TimeLoopConfig
+	Constantes partagées (serveur + client) du système de Time-Loop.
+	Toute valeur d'équilibrage se règle ici, jamais en dur dans la logique.
+]]
+
+local TimeLoopConfig = {
+	-- Enregistrement ---------------------------------------------------------
+	RECORD_INTERVAL = 0.1, -- secondes entre deux snapshots (0.1 = 10 Hz)
+	BUFFER_DURATION = 6, -- secondes d'historique conservées (> REWIND_WINDOW pour garder une marge)
+
+	-- Rembobinage ------------------------------------------------------------
+	REWIND_WINDOW = 5, -- secondes de timeline remontées par un rewind
+	REWIND_PLAYBACK_DURATION = 1.5, -- durée réelle de la lecture inversée (5 s rejouées en 1.5 s)
+	REWIND_COOLDOWN = 3, -- secondes minimum entre la fin d'un rewind et le suivant
+
+	-- Anomalie temporelle : état critique ouvert par TimeLoopService.openAnomaly().
+	-- Le joueur est figé et a ANOMALY_WINDOW secondes pour rembobiner, sinon il meurt.
+	ANOMALY_WINDOW = 4,
+
+	-- Si true, le serveur accepte aussi un rewind hors anomalie (soumis au cooldown).
+	-- À passer à false pour le vrai jeu : R ne fonctionnera alors que pendant une anomalie.
+	DEBUG_FREE_REWIND = true,
+	DEBUG_LOGS = true,
+
+	-- Identification ---------------------------------------------------------
+	ENTITY_TAG = "TimeLoopEntity", -- tag CollectionService des PNJ/boss à enregistrer
+	COMBAT_STATE_ATTRIBUTE = "CombatState", -- attribut (string) du Model lu/restauré par le logger
+
+	-- Client -----------------------------------------------------------------
+	REWIND_KEY = Enum.KeyCode.R,
+
+	-- Immersion du rembobinage (client) -----------------------------------------
+	-- >>> SON DU TIME LOOP : mets ici l'ID de ton chœur, au format "rbxassetid://123456" ("" = silence).
+	-- Placeholder : "Heavenly Presence Eerie Choral Tones Dark" (ProSoundEffects, bibliothèque Roblox),
+	-- des voix chorales sombres et réverbérées. Autre piste du même catalogue : 9125439864
+	-- "Choral Drone Eerie Tones Hollow Reverberant".
+	REWIND_SOUND_ID = "rbxassetid://9125602726",
+	REWIND_SOUND_VOLUME = 0.7,
+	-- Le son se déforme pendant le rewind : sa hauteur glisse jusqu'à cette valeur (1 = normal, 0.5 = une octave plus bas).
+	REWIND_SOUND_END_OCTAVE = 0.5,
+	REWIND_SOUND_FADE_OUT = 1.6, -- secondes de fondu de sortie, à la fin du rembobinage
+	-- Lassitude : chaque rewind lancé moins de REWIND_SOUND_FATIGUE_WINDOW secondes après le précédent
+	-- joue le chœur un cran moins fort (x REWIND_SOUND_FATIGUE_FACTOR), sans descendre sous le minimum.
+	REWIND_SOUND_FATIGUE_WINDOW = 90,
+	REWIND_SOUND_FATIGUE_FACTOR = 0.75,
+	REWIND_SOUND_MIN_VOLUME_RATIO = 0.35,
+
+	-- >>> IMAGES DE GLITCH : des textures de "neige" plaquées sur tout l'écran pendant l'anomalie et
+	-- le rembobinage. Ajoute les tiennes à la liste (une liste vide = glitch sans images).
+	-- Placeholders : deux decals gratuits de la bibliothèque Roblox, lus par leur aperçu.
+	GLITCH_IMAGES = {
+		"rbxthumb://type=Asset&id=16174602951&w=420&h=420", -- neige cathodique à bandes
+		"rbxthumb://type=Asset&id=15455049436&w=420&h=420", -- bruit de pixels
+	},
+	ANOMALY_MESSAGE = "ANOMALIE TEMPORELLE - REMBOBINEZ !",
+}
+
+return table.freeze(TimeLoopConfig)
+]]></ProtectedString>
+					<string name="ScriptGuid">{7A5B32AA-7E75-4037-A9DE-8B20145CDBCC}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">TimeLoopConfig</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX0ABB3CC1E6EA45FA82CA62CAE2D08BF3">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	TimeLoopRemotes
+	Point d'accès unique aux RemoteEvents du Time-Loop.
+	Le serveur les crée au premier require ; le client attend leur réplication.
+
+	Sens des événements :
+		RequestRewind  client  -> serveur   (aucun argument : le serveur ne fait confiance à rien)
+		AnomalyOpened  serveur -> 1 client  (windowDuration: number)
+		AnomalyClosed  serveur -> 1 client  ()   quelle que soit l'issue : rewind, mort, respawn
+		RewindStarted  serveur -> clients   (playbackDuration: number)
+		RewindEnded    serveur -> clients   ()
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local FOLDER_NAME = "TimeLoopRemotes"
+local IS_SERVER = RunService:IsServer()
+
+local function getFolder(): Instance
+	if IS_SERVER then
+		local folder = Instance.new("Folder")
+		folder.Name = FOLDER_NAME
+		folder.Parent = ReplicatedStorage
+		return folder
+	end
+	return ReplicatedStorage:WaitForChild(FOLDER_NAME)
+end
+
+local folder = getFolder()
+
+local function getRemote(name: string): RemoteEvent
+	if IS_SERVER then
+		local remote = Instance.new("RemoteEvent")
+		remote.Name = name
+		remote.Parent = folder
+		return remote
+	end
+	return folder:WaitForChild(name) :: RemoteEvent
+end
+
+return table.freeze({
+	RequestRewind = getRemote("RequestRewind"),
+	AnomalyOpened = getRemote("AnomalyOpened"),
+	AnomalyClosed = getRemote("AnomalyClosed"),
+	RewindStarted = getRemote("RewindStarted"),
+	RewindEnded = getRemote("RewindEnded"),
+})
+]]></ProtectedString>
+					<string name="ScriptGuid">{B4FCA573-8317-4E78-AE0A-3E0FF395E7FA}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">TimeLoopRemotes</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+		</Item>
+		<Item class="Folder" referent="RBXDE73142891D44574B6932C471DD44B6F">
+			<Properties>
+				<Color3 name="IconTint">
+					<R>0</R>
+					<G>0</G>
+					<B>0</B>
+				</Color3>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">Avatar</string>
+				<BinaryString name="SerializedOverrides"></BinaryString>
+				<int64 name="SourceAssetId">-1</int64>
+				<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+			</Properties>
+			<Item class="ModuleScript" referent="RBX36CC7C3C50F745AA9B38F11D72A57FAA">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	AvatarConfig
+	Catalogue du Hub de création de personnage, partagé serveur + client.
+
+	Tout est piloté par les listes ci-dessous : ajouter une coiffure, un visage ou une marque,
+	c'est ajouter UNE ligne. Le Hub, la validation serveur et la sauvegarde suivent tout seuls.
+
+	Deux règles :
+		- le client n'envoie que des INDEX dans ces listes (jamais d'ID d'asset) : le serveur
+		  reste seul à décider quels assets peuvent être portés ;
+		- chaque option a un `id` : c'est lui qui est écrit dans la sauvegarde du joueur (pas l'index,
+		  qui change dès qu'on réordonne une liste). Ne jamais renommer un `id` une fois le jeu en
+		  ligne ; un `id` devenu introuvable retombe sur la première option de sa liste.
+
+	Les assets ci-dessous sont des PLACEHOLDERS du catalogue Roblox, à remplacer par ceux du jeu.
+]]
+
+-- Base du corps : les 5 parties (R15) d'un bundle.
+export type BaseOption = {
+	id: string,
+	name: string,
+	torsoId: number,
+	rightArmId: number,
+	leftArmId: number,
+	leftLegId: number,
+	rightLegId: number,
+}
+
+-- Visage : un Decal plaqué sur l'avant de la tête (il épouse sa courbure).
+-- `texture` est une adresse d'image complète (voir image() et decalThumbnail() plus bas).
+export type FaceLayerOption = {
+	id: string,
+	name: string,
+	texture: string,
+}
+
+-- Marque (cicatrice, tatouage, blessure) : une image posée DEVANT le visage, sur un petit panneau
+-- invisible (SurfaceGui). Contrairement à un Decal, on la place et on la dimensionne librement :
+--   offset   : décalage depuis le centre du visage, en fraction du panneau. Vu de face :
+--              X positif = vers la droite, Y positif = vers le bas. (0.1 = un dixième du visage.)
+--   scale    : taille de l'image. 1 = toute la largeur du visage.
+--   rotation : degrés, sens horaire.
+-- Pour régler une marque au millimètre : lancer le jeu, ouvrir dans l'Explorateur
+-- ton personnage > Head > FaceCanvas > MarkSurface > Mark, ajuster Position / Size / Rotation
+-- à la main, puis reporter ici (Position = 0.5 + offset, Size = scale).
+export type MarkOption = {
+	id: string,
+	name: string,
+	texture: string, -- "" = aucune marque
+	offset: Vector2,
+	scale: number,
+	rotation: number,
+}
+
+export type HairOption = {
+	id: string,
+	name: string,
+	assetId: number, -- accessoire de type Hair
+}
+
+export type OutfitOption = {
+	id: string,
+	name: string,
+	shirtId: number, -- vêtement classique (Shirt)
+	pantsId: number, -- vêtement classique (Pants)
+	backAccessoryId: number, -- accessoire de type Back (cape), 0 = aucun
+}
+
+export type ScaleRange = {
+	min: number,
+	max: number,
+	step: number,
+	default: number,
+}
+
+-- Choix du joueur dans le Hub, tel qu'il transite dans les RemoteEvents (index dans les listes).
+export type Selection = {
+	baseIndex: number,
+	faceIndex: number,
+	markIndex: number,
+	hairIndex: number,
+	outfitIndex: number,
+	heightScale: number,
+	widthScale: number,
+	magicIndex: number, -- index dans MagicConfig.MAGICS
+}
+
+-- Image que TU as importée (ou une image du catalogue) : on donne l'ID de l'IMAGE.
+local function image(imageId: number): string
+	return `rbxassetid://{imageId}`
+end
+
+-- Decal publié par quelqu'un d'autre : on ne connaît que l'ID du Decal, pas celui de son image.
+-- Roblox sait en fournir l'aperçu 420x420, fond transparent conservé : suffisant pour un visage.
+local function decalThumbnail(decalId: number): string
+	return `rbxthumb://type=Asset&id={decalId}&w=420&h=420`
+end
+
+local BASE_OPTIONS: { BaseOption } = {
+	{ -- bundle Roblox "Man"
+		id = "man",
+		name = "Homme",
+		torsoId = 86500008,
+		rightArmId = 86500036,
+		leftArmId = 86500054,
+		leftLegId = 86500064,
+		rightLegId = 86500078,
+	},
+	{ -- bundle Roblox "Woman"
+		id = "woman",
+		name = "Femme",
+		torsoId = 86499666,
+		rightArmId = 86499698,
+		leftArmId = 86499716,
+		leftLegId = 86499753,
+		rightLegId = 86499793,
+	},
+}
+
+local FACE_OPTIONS: { FaceLayerOption } = {
+	{ id = "stoic", name = "Impassible", texture = image(83017053) }, -- texture de "Man Face"
+	{ id = "serene", name = "Sereine", texture = image(83022608) }, -- texture de "Woman Face"
+	{ id = "defiant", name = "Défiant", texture = image(7074780) }, -- texture de "Check It"
+	{ id = "detached", name = "Détaché", texture = image(7074749) }, -- texture de "Chill"
+	{ id = "freckles", name = "Taches de son", texture = image(12145059) }, -- texture de "Freckles"
+}
+
+-- Raccourci pour déclarer une marque : mark(id, nom, image, décalageX, décalageY, taille, rotation).
+local function mark(
+	id: string,
+	name: string,
+	texture: string,
+	offsetX: number,
+	offsetY: number,
+	scale: number,
+	rotation: number
+): MarkOption
+	return {
+		id = id,
+		name = name,
+		texture = texture,
+		offset = Vector2.new(offsetX, offsetY),
+		scale = scale,
+		rotation = rotation,
+	}
+end
+
+-- Cicatrices, tatouages, blessures. Les images doivent être à fond transparent.
+-- Les quatre derniers nombres de chaque ligne placent la marque : voir le type MarkOption.
+-- Placeholders : decals gratuits de la bibliothèque Roblox (série "[FACE] Extras" de morscore).
+local MARK_OPTIONS: { MarkOption } = {
+	mark("none", "Aucune", "", 0, 0, 1, 0),
+	mark("scar_eye", "Cicatrice à l'œil", decalThumbnail(3524093836), 0, 0, 1, 0),
+	mark("scar_slash", "Balafre", decalThumbnail(3524095179), 0, 0, 1, 0),
+	mark("scar_cheek", "Entaille à la joue", decalThumbnail(3524096392), 0, 0, 1, 0),
+	mark("scar_cross", "Croix du parjure", decalThumbnail(3524097066), 0, 0, 1, 0),
+	mark("scar_claw", "Griffure", decalThumbnail(3524097803), 0, 0, 1, 0),
+	-- Tatouage facial dessiné par un fan (motif inspiré d'un manga) : à remplacer avant de publier.
+	mark("curse_seal", "Sceau maudit", decalThumbnail(16324571137), 0, 0, 1, 0),
+}
+
+-- La liste peut grandir sans limite : le Hub affiche "3 / 15" et boucle en fin de liste.
+local HAIR_OPTIONS: { HairOption } = {
+	{ id = "pal", name = "Mèches du pèlerin", assetId = 63690008 }, -- "Pal Hair"
+	{ id = "spiked", name = "Crinière de cendre", assetId = 376524487 }, -- "Blonde Spiked Hair"
+	{ id = "brown", name = "Coupe de l'écuyer", assetId = 62234425 }, -- "Brown Hair"
+	{ id = "bun", name = "Chignon de la servante", assetId = 62724852 }, -- "Chestnut Bun"
+	{ id = "ninja_updo", name = "Chignon de l'ombre", assetId = 2907260402 }, -- "Dark Age Ninja Updo Hair"
+	{ id = "princess", name = "Chevelure de la princesse", assetId = 13477162 }, -- "Star Princess Hair"
+	{ id = "azure", name = "Azur de l'héroïne", assetId = 164482409 }, -- "Blue Anime Girl Hair"
+	{ id = "long_pale", name = "Longue chevelure pâle", assetId = 727320877 }, -- "Long Pastel Hair"
+	{ id = "vagabond", name = "Mèche du vagabond", assetId = 65941324 }, -- "Black Indie Hair"
+	{ id = "duelist", name = "Pointes du duelliste", assetId = 30332157 }, -- "Pointy Boy Hair"
+	{ id = "bed_head", name = "Réveil difficile", assetId = 20372960 }, -- "Bed Hair"
+	{ id = "dragon_heir", name = "Héritier du dragon", assetId = 2804642677 }, -- "Half-Dragon Heir Hair"
+	{ id = "abyss", name = "Sirène des abysses", assetId = 4041570918 }, -- "Dark Mermaid Hair"
+	{ id = "specter", name = "Spectre au ruban noir", assetId = 1425141074 }, -- "Ghostly White Hair with Black Bow"
+	{ id = "crimson", name = "Tignasse écarlate", assetId = 259423003 }, -- "Crimson Bed Head Hair"
+	{ id = "cinnamon", name = "Mèches cannelle", assetId = 13745548 }, -- "Cinnamon Hair"
+	{ id = "ember", name = "Chevelure de braise", assetId = 77359955 }, -- "Lava Hair"
+	{ id = "eccentric", name = "Rose de l'excentrique", assetId = 61885694 }, -- "Extreme Pink Hair"
+	{ id = "azure_fringe", name = "Frange d'azur", assetId = 293316132 }, -- "Blue Scene Hair"
+	{ id = "hazel_fringe", name = "Frange noisette", assetId = 323476364 }, -- "Brown Scene Hair"
+	{ id = "librarian", name = "Bibliothécaire bicolore", assetId = 319642720 }, -- "Monochrome Library Hair"
+	{ id = "bat_queen", name = "Reine des chauves-souris", assetId = 1074737868 }, -- "Queen of Bats Hair"
+}
+
+local OUTFIT_OPTIONS: { OutfitOption } = {
+	{
+		id = "midnight_traveler",
+		name = "Voyageur de minuit",
+		shirtId = 3267725621,
+		pantsId = 3267727546,
+		backAccessoryId = 878915975, -- "Cape of Midnight's Wisdom"
+	},
+	{
+		id = "black_iron_knight",
+		name = "Chevalier de fer noir",
+		shirtId = 8991866831,
+		pantsId = 8991863926,
+		backAccessoryId = 2163546691, -- "Black Iron Cape"
+	},
+	{
+		id = "oathbreaker",
+		name = "Parjure",
+		shirtId = 560184638,
+		pantsId = 560182503,
+		backAccessoryId = 1772350677, -- "Sinister Cape"
+	},
+}
+
+local HEIGHT_SCALE: ScaleRange = { min = 0.9, max = 1.15, step = 0.05, default = 1 }
+local WIDTH_SCALE: ScaleRange = { min = 0.75, max = 1.1, step = 0.05, default = 1 }
+
+return table.freeze({
+	-- Attribut (boolean) posé par le serveur sur le Player tant qu'il est dans le Hub.
+	-- Les interfaces de jeu (jauge de Tension...) le lisent pour se masquer.
+	CUSTOMIZING_ATTRIBUTE = "IsCustomizing",
+
+	-- >>> MUSIQUE DU HUB : mets ici l'ID de ton son, au format "rbxassetid://123456" ("" = silence).
+	-- Placeholder : "Nursery Crime 60" (APM Music, sous licence Roblox, utilisable dans tous les jeux),
+	-- une comptine à la boîte à musique volontairement dérangeante.
+	-- Autres pistes du même catalogue : 1837786350 "Music Box Of Death 30", 1840004224 "Twinkle (a 30)".
+	HUB_MUSIC_ID = "rbxassetid://1839911004",
+	HUB_MUSIC_VOLUME = 0.4,
+
+	-- true = ignore la sauvegarde et rouvre le Hub à chaque connexion (pour le tester).
+	-- Rien n'est effacé : repasser à false retrouve le personnage sauvegardé, ou le remplace
+	-- par le nouveau si on a validé le Hub entre-temps.
+	DEBUG_ALWAYS_OPEN_CREATOR = false,
+
+	-- Panneau des marques : un carré invisible tenu devant le visage, sur lequel l'image est posée.
+	FACE_CANVAS_SIZE = 1.25, -- côté du carré (studs) : la largeur visible de la tête classique
+	-- Distance (studs) entre le centre de la tête et le panneau. Trop petit : la marque disparaît
+	-- dans la tête. Trop grand : elle flotte devant le visage.
+	FACE_CANVAS_DEPTH = 0.64,
+
+	BASE_OPTIONS = BASE_OPTIONS,
+	FACE_OPTIONS = FACE_OPTIONS,
+	MARK_OPTIONS = MARK_OPTIONS,
+	HAIR_OPTIONS = HAIR_OPTIONS,
+	OUTFIT_OPTIONS = OUTFIT_OPTIONS,
+	HEIGHT_SCALE = HEIGHT_SCALE, -- HumanoidDescription.HeightScale (BodyHeightScale)
+	WIDTH_SCALE = WIDTH_SCALE, -- HumanoidDescription.WidthScale (BodyWidthScale)
+})
+]]></ProtectedString>
+					<string name="ScriptGuid">{602417F6-68E6-48F2-A739-B0CB4945E85A}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">AvatarConfig</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX20056452996345598768FE16D46EF3CB">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	AvatarRemotes
+	Point d'accès unique aux RemoteEvents de la création de personnage.
+	Le serveur les crée au premier require ; le client attend leur réplication.
+
+	Sens des événements :
+		OpenCreator    serveur -> 1 client  ()                      ouvre l'écran de création
+		PreviewAvatar  client  -> serveur   (selection: Selection)  aperçu en direct, sans valider
+		ApplyAvatar    client  -> serveur   (selection: Selection)  choix final
+		CreatorClosed  serveur -> 1 client  ()                      choix appliqué, le joueur est libéré
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local FOLDER_NAME = "AvatarRemotes"
+local IS_SERVER = RunService:IsServer()
+
+local function getFolder(): Instance
+	if IS_SERVER then
+		local folder = Instance.new("Folder")
+		folder.Name = FOLDER_NAME
+		folder.Parent = ReplicatedStorage
+		return folder
+	end
+	return ReplicatedStorage:WaitForChild(FOLDER_NAME)
+end
+
+local folder = getFolder()
+
+local function getRemote(name: string): RemoteEvent
+	if IS_SERVER then
+		local remote = Instance.new("RemoteEvent")
+		remote.Name = name
+		remote.Parent = folder
+		return remote
+	end
+	return folder:WaitForChild(name) :: RemoteEvent
+end
+
+return table.freeze({
+	OpenCreator = getRemote("OpenCreator"),
+	PreviewAvatar = getRemote("PreviewAvatar"),
+	ApplyAvatar = getRemote("ApplyAvatar"),
+	CreatorClosed = getRemote("CreatorClosed"),
+})
+]]></ProtectedString>
+					<string name="ScriptGuid">{FA3EBC07-CCC5-4C65-A94B-9692298EAF9D}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">AvatarRemotes</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+		</Item>
+		<Item class="Folder" referent="RBXFB5FA036074242879A4E1EB3BACCF3FA">
+			<Properties>
+				<Color3 name="IconTint">
+					<R>0</R>
+					<G>0</G>
+					<B>0</B>
+				</Color3>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">Combat</string>
+				<BinaryString name="SerializedOverrides"></BinaryString>
+				<int64 name="SourceAssetId">-1</int64>
+				<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+			</Properties>
+			<Item class="ModuleScript" referent="RBXDEDE38EF37514DD4B6C1444A8F6ACD39">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	CombatConfig
+	Constantes partagées (serveur + client) du combat : épée, Tension et pouvoir ultime.
+	(Les caractéristiques propres à chaque ultime sont dans Shared/Magic/MagicConfig.)
+
+	>>> ANIMATIONS : c'est ici qu'on renseigne les ID, dans le champ `animationId` de chaque coup
+	>>> du COMBO, au format "rbxassetid://1234567890". Un champ vide ("") = coup sans animation.
+	>>> Les ID actuels sont les animations d'épée officielles de Roblox (jouables dans tous les jeux).
+	>>> Une animation personnalisée doit appartenir au propriétaire du jeu, sinon elle ne se charge pas.
+	>>> En changeant d'animation, ajuster duration / hitStart / hitEnd pour coller à elle.
+]]
+
+export type ComboStep = {
+	name: string,
+	damage: number,
+	duration: number, -- durée totale du coup (s) ; le coup suivant ne peut pas partir avant
+	hitStart: number, -- début de la fenêtre de frappe, depuis le début du coup (s)
+	hitEnd: number, -- fin de la fenêtre de frappe (s)
+	reachBonus: number, -- allonge supplémentaire (studs) : la zone de frappe s'étire d'autant vers l'avant
+	knockback: number, -- vitesse (studs/s) à laquelle la cible est éjectée en arrière ; 0 = aucune
+	animationId: string,
+	animationSpeed: number, -- 1 = vitesse d'origine ; plus haut = coup plus sec
+}
+
+local SWORD_SLASH_ANIMATION = "rbxassetid://522635514" -- "R15 Sword Slash" (Roblox)
+local SWORD_LUNGE_ANIMATION = "rbxassetid://522638767" -- "R15 Sword Lunge" (Roblox)
+
+local COMBO: { ComboStep } = {
+	{
+		name = "Entaille", -- ouverture très rapide
+		damage = 10,
+		duration = 0.32,
+		hitStart = 0.04,
+		hitEnd = 0.24,
+		reachBonus = 0,
+		knockback = 0,
+		animationId = SWORD_SLASH_ANIMATION,
+		animationSpeed = 1.6,
+	},
+	{
+		name = "Revers", -- encore plus sec (même animation en attendant un vrai slash inversé)
+		damage = 10,
+		duration = 0.3,
+		hitStart = 0.04,
+		hitEnd = 0.22,
+		reachBonus = 0,
+		knockback = 0,
+		animationId = SWORD_SLASH_ANIMATION,
+		animationSpeed = 1.8,
+	},
+	{
+		name = "Brise-ciel", -- coup final lourd : de l'allonge, et la cible est éjectée
+		damage = 26,
+		duration = 0.65,
+		hitStart = 0.12,
+		hitEnd = 0.45,
+		reachBonus = 2.5,
+		knockback = 55,
+		animationId = SWORD_LUNGE_ANIMATION,
+		animationSpeed = 1.2,
+	},
+}
+
+return table.freeze({
+	-- Combo ------------------------------------------------------------------
+	COMBO = COMBO,
+	COMBO_RESET_DELAY = 0.5, -- après la fin d'un coup, délai (s) pour enchaîner avant de repartir au coup 1
+	ATTACK_INPUT = Enum.UserInputType.MouseButton1,
+	ANIMATION_FADE_TIME = 0.05, -- fondu d'entrée des animations de coup (s) : court = nerveux
+	-- Hit-stop : à chaque coup qui porte, attaquant et cible se figent ce court instant.
+	-- C'est ce micro-arrêt qui donne du poids à la lame.
+	HIT_STOP_DURATION = 0.05,
+
+	-- Zone de frappe -----------------------------------------------------------
+	-- Une boîte posée juste devant le joueur : largeur (X), hauteur (Y), profondeur (Z) en studs.
+	-- Tout ennemi qui y a ne serait-ce qu'une pièce pendant la fenêtre de frappe prend le coup,
+	-- où que passe le modèle 3D de l'épée.
+	HITBOX_SIZE = Vector3.new(6, 6, 6),
+	-- Marge du serveur (studs) quand il revérifie la distance : absorbe la latence et les déplacements.
+	HITBOX_RANGE_TOLERANCE = 3,
+
+	-- Soft-lock : au départ de chaque coup, le joueur se tourne vers l'ennemi le plus proche
+	-- dans ce rayon (studs). 0 = désactivé.
+	SOFT_LOCK_RADIUS = 15,
+
+	-- Éjection (coups dont `knockback` > 0) ---------------------------------------
+	KNOCKBACK_DURATION = 0.2, -- secondes de poussée
+	KNOCKBACK_LIFT = 14, -- vitesse verticale (studs/s) : la cible décolle légèrement du sol
+
+	-- Épée -------------------------------------------------------------------
+	-- Modèle optionnel : ServerStorage > Assets > Sword. S'il est absent, une épée provisoire en Parts est générée.
+	ASSETS_FOLDER_NAME = "Assets",
+	SWORD_NAME = "Sword",
+	SWORD_MOTOR_NAME = "SwordGrip", -- Motor6D main -> épée
+	HAND_NAME = "RightHand", -- main qui tient l'épée (rig R15)
+	GRIP_ATTACHMENT_NAME = "RightGripAttachment", -- point de prise dans cette main
+	BLADE_START_NAME = "BladeStart", -- Attachment à la base de la lame
+	BLADE_END_NAME = "BladeEnd", -- Attachment à la pointe
+	BLADE_TRAIL_NAME = "BladeTrail", -- Trail tendu entre ces deux Attachments
+	SWORD_GRIP_OFFSET = CFrame.new(), -- correction de la prise en main (position / rotation)
+
+	-- Validation (serveur) -----------------------------------------------------
+	LATENCY_TOLERANCE = 0.25, -- marge (s) sur tous les contrôles de timing
+	PVP_ENABLED = true, -- les joueurs peuvent-ils se blesser entre eux ?
+	-- Attribut (boolean) qu'un système serveur pose sur un Model pour le rendre intouchable
+	-- (ex. : le boss pendant sa charge). Ni l'épée ni l'ultime ne blessent une cible qui le porte.
+	INVULNERABLE_ATTRIBUTE = "Invulnerable",
+
+	-- Tension ------------------------------------------------------------------
+	-- Stockée par le serveur dans un attribut du Player : elle est répliquée toute seule
+	-- au client, qui ne peut que la lire.
+	TENSION_ATTRIBUTE = "Tension",
+	TENSION_MAX = 100,
+	TENSION_PER_HIT = 20, -- gagnée à chaque coup d'épée validé par le serveur
+
+	-- Pouvoir ultime -------------------------------------------------------------
+	-- Nom, rayon, dégâts et couleurs dépendent de la Magie Innée du joueur : voir MagicConfig.
+	ULTIMATE_INPUT = Enum.KeyCode.E,
+	-- Arrêt sur image joué par les clients avant l'explosion ; le serveur attend la même durée
+	-- avant d'infliger les dégâts, pour qu'ils tombent au moment où l'onde de choc part.
+	ULTIMATE_HIT_STOP = 0.2,
+
+	DEBUG_LOGS = true,
+})
+]]></ProtectedString>
+					<string name="ScriptGuid">{A34ABA16-C416-4DA9-98B6-430600B41954}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">CombatConfig</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBXBA63BB8BC4FD430AAEAE5C670699F922">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	CombatRemotes
+	Point d'accès unique aux RemoteEvents du combat.
+	Le serveur les crée au premier require ; le client attend leur réplication.
+
+	Sens des événements :
+		RequestAttack    client  -> serveur          (comboIndex: number)
+		ReportHit        client  -> serveur          (target: Model)   simple demande, le serveur vérifie tout
+		RequestUltimate  client  -> serveur          ()                le serveur vérifie la Tension
+		AttackStarted    serveur -> autres clients   (attacker: Model, comboIndex: number)   pour leurs VFX
+		HitConfirmed     serveur -> clients          (attacker: Model, target: Model, damage: number)
+		UltimateFired    serveur -> clients          (caster: Model, origin: Vector3, targets: { Model }, magicId: string)
+
+	La Tension ne passe par aucun remote : c'est un attribut du Player (voir CombatConfig).
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local FOLDER_NAME = "CombatRemotes"
+local IS_SERVER = RunService:IsServer()
+
+local function getFolder(): Instance
+	if IS_SERVER then
+		local folder = Instance.new("Folder")
+		folder.Name = FOLDER_NAME
+		folder.Parent = ReplicatedStorage
+		return folder
+	end
+	return ReplicatedStorage:WaitForChild(FOLDER_NAME)
+end
+
+local folder = getFolder()
+
+local function getRemote(name: string): RemoteEvent
+	if IS_SERVER then
+		local remote = Instance.new("RemoteEvent")
+		remote.Name = name
+		remote.Parent = folder
+		return remote
+	end
+	return folder:WaitForChild(name) :: RemoteEvent
+end
+
+return table.freeze({
+	RequestAttack = getRemote("RequestAttack"),
+	ReportHit = getRemote("ReportHit"),
+	RequestUltimate = getRemote("RequestUltimate"),
+	AttackStarted = getRemote("AttackStarted"),
+	HitConfirmed = getRemote("HitConfirmed"),
+	UltimateFired = getRemote("UltimateFired"),
+})
+]]></ProtectedString>
+					<string name="ScriptGuid">{E0BD1914-F1C5-43FA-A88A-FF3707FA4D5A}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">CombatRemotes</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBXADEC7720763647E4A53818C4A8CBCEDA">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	SpatialHitbox
+	Zone de frappe spatiale : une boîte posée juste devant un personnage, interrogée avec
+	workspace:GetPartBoundsInBox (aucun événement .Touched, aucun rayon le long de la lame).
+
+	Tant que la hitbox est active, à chaque frame :
+		1. la boîte est replacée devant le RootPart (elle suit le joueur qui avance ou pivote) ;
+		2. toutes les pièces qui la touchent sont récupérées, et ramenées à leur personnage ;
+		3. chaque personnage vivant trouvé est signalé UNE fois par activation.
+
+	La forme de l'épée n'entre plus en jeu : si l'ennemi est dans la zone, le coup porte.
+	Seul le décor protège encore : un mur entre l'attaquant et la cible bloque le coup.
+]]
+
+local RunService = game:GetService("RunService")
+
+export type HitCallback = (character: Model, position: Vector3) -> ()
+
+local SpatialHitbox = {}
+SpatialHitbox.__index = SpatialHitbox
+
+type HitboxData = {
+	_rootPart: BasePart,
+	_size: Vector3,
+	_overlapParams: OverlapParams,
+	_raycastParams: RaycastParams,
+	_hitCharacters: { [Model]: boolean },
+	_connection: RBXScriptConnection?,
+}
+
+export type SpatialHitbox = typeof(setmetatable({} :: HitboxData, SpatialHitbox))
+
+-- Remonte la hiérarchie depuis une pièce jusqu'au personnage (Model avec Humanoid) qui la contient.
+function SpatialHitbox.getCharacterFromPart(part: Instance): Model?
+	local current: Instance? = part
+	while current and current ~= workspace do
+		if current:IsA("Model") and current:FindFirstChildOfClass("Humanoid") then
+			return current
+		end
+		current = current.Parent
+	end
+	return nil
+end
+
+-- Position de la boîte de taille `size` pour un personnage dont le RootPart est en `rootCFrame` :
+-- collée devant lui, centrée sur sa hauteur.
+function SpatialHitbox.getBoxCFrame(rootCFrame: CFrame, size: Vector3): CFrame
+	return rootCFrame * CFrame.new(0, 0, -size.Z / 2)
+end
+
+local function isAlive(character: Model): boolean
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	return humanoid ~= nil and humanoid.Health > 0
+end
+
+-- Vrai si aucun élément de décor solide ne sépare le RootPart de `part`.
+local function isReachable(self: SpatialHitbox, character: Model, part: BasePart): boolean
+	local origin = self._rootPart.Position
+	local result = workspace:Raycast(origin, part.Position - origin, self._raycastParams)
+	if result == nil or result.Instance:IsDescendantOf(character) then
+		return true
+	end
+	-- Un autre personnage sur la trajectoire ne protège pas la cible : seul le décor compte.
+	return SpatialHitbox.getCharacterFromPart(result.Instance) ~= nil
+end
+
+local function step(self: SpatialHitbox, onHit: HitCallback)
+	local boxCFrame = SpatialHitbox.getBoxCFrame(self._rootPart.CFrame, self._size)
+
+	for _, part in workspace:GetPartBoundsInBox(boxCFrame, self._size, self._overlapParams) do
+		local character = SpatialHitbox.getCharacterFromPart(part)
+		if character and not self._hitCharacters[character] and isAlive(character) and isReachable(self, character, part) then
+			self._hitCharacters[character] = true
+			onHit(character, part.Position)
+		end
+	end
+end
+
+-- `rootPart` : le HumanoidRootPart de l'attaquant. `ignoreList` : instances jamais touchées
+-- (typiquement son propre personnage).
+function SpatialHitbox.new(rootPart: BasePart, ignoreList: { Instance }): SpatialHitbox
+	local overlapParams = OverlapParams.new()
+	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
+	overlapParams.FilterDescendantsInstances = ignoreList
+
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+	raycastParams.FilterDescendantsInstances = ignoreList
+	raycastParams.RespectCanCollide = true
+
+	local data: HitboxData = {
+		_rootPart = rootPart,
+		_size = Vector3.one,
+		_overlapParams = overlapParams,
+		_raycastParams = raycastParams,
+		_hitCharacters = {},
+		_connection = nil,
+	}
+	return setmetatable(data, SpatialHitbox)
+end
+
+-- Active une zone de taille `size` (largeur, hauteur, profondeur) pour `duration` secondes, puis
+-- elle se coupe TOUTE SEULE : aucune détection n'a lieu en dehors de cette fenêtre.
+-- `onHit` est appelé une fois par personnage touché, avec la position de la pièce atteinte.
+function SpatialHitbox.start(self: SpatialHitbox, duration: number, size: Vector3, onHit: HitCallback)
+	self:stop()
+	self._size = size
+	self._hitCharacters = {}
+
+	local stopClock = os.clock() + duration
+
+	-- Heartbeat : après la physique, le personnage est à sa position finale de la frame.
+	self._connection = RunService.Heartbeat:Connect(function()
+		if os.clock() >= stopClock then
+			self:stop()
+			return
+		end
+		step(self, onHit)
+	end)
+	step(self, onHit) -- dès la première frame : un ennemi déjà au contact est touché sans délai
+end
+
+function SpatialHitbox.stop(self: SpatialHitbox)
+	if self._connection then
+		self._connection:Disconnect()
+		self._connection = nil
+	end
+end
+
+return SpatialHitbox
+]]></ProtectedString>
+					<string name="ScriptGuid">{E59FD338-4CB8-4151-974F-EC21F09A5896}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">SpatialHitbox</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+		</Item>
+		<Item class="Folder" referent="RBX2FCB9C4C27E94D9BA7408560159E8BF1">
+			<Properties>
+				<Color3 name="IconTint">
+					<R>0</R>
+					<G>0</G>
+					<B>0</B>
+				</Color3>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">Movement</string>
+				<BinaryString name="SerializedOverrides"></BinaryString>
+				<int64 name="SourceAssetId">-1</int64>
+				<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+			</Properties>
+			<Item class="ModuleScript" referent="RBXEF2A6BC37933409B876ADEC2DA66476B">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	MovementConfig
+	Constantes partagées (serveur + client) de la mobilité : pour l'instant, le dash.
+]]
+
+return table.freeze({
+	-- Attention : Shift gauche est aussi la touche du "Shift Lock" de Roblox. Pour qu'elle ne
+	-- serve qu'au dash, décocher StarterPlayer > EnableMouseLockOption dans Studio.
+	DASH_INPUT = Enum.KeyCode.LeftShift,
+
+	DASH_SPEED = 85, -- studs/s pendant le dash
+	DASH_DURATION = 0.18, -- secondes de propulsion (85 x 0.18 = environ 15 studs)
+	DASH_COOLDOWN = 2, -- secondes entre deux dashs
+
+	-- Après un dash accepté par le serveur, le joueur ne peut pas être blessé pendant cette durée
+	-- (un peu plus longue que le dash, pour absorber la latence) : c'est ce qui en fait une esquive.
+	DASH_INVULNERABILITY = 0.3,
+
+	LATENCY_TOLERANCE = 0.25, -- marge (s) du serveur sur le contrôle du cooldown
+	DEBUG_LOGS = true,
+})
+]]></ProtectedString>
+					<string name="ScriptGuid">{A31F0957-1E1A-4759-A12A-12C920738A4C}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">MovementConfig</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX310399DD96D147568952850A58629594">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	MovementRemotes
+	Point d'accès unique aux RemoteEvents de la mobilité.
+	Le serveur les crée au premier require ; le client attend leur réplication.
+
+	Sens des événements :
+		RequestDash  client  -> serveur          ()                  le serveur vérifie le cooldown
+		DashStarted  serveur -> autres clients   (character: Model)  pour leurs VFX
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local FOLDER_NAME = "MovementRemotes"
+local IS_SERVER = RunService:IsServer()
+
+local function getFolder(): Instance
+	if IS_SERVER then
+		local folder = Instance.new("Folder")
+		folder.Name = FOLDER_NAME
+		folder.Parent = ReplicatedStorage
+		return folder
+	end
+	return ReplicatedStorage:WaitForChild(FOLDER_NAME)
+end
+
+local folder = getFolder()
+
+local function getRemote(name: string): RemoteEvent
+	if IS_SERVER then
+		local remote = Instance.new("RemoteEvent")
+		remote.Name = name
+		remote.Parent = folder
+		return remote
+	end
+	return folder:WaitForChild(name) :: RemoteEvent
+end
+
+return table.freeze({
+	RequestDash = getRemote("RequestDash"),
+	DashStarted = getRemote("DashStarted"),
+})
+]]></ProtectedString>
+					<string name="ScriptGuid">{129EF2EF-BE51-45D6-86A3-A39E627A5BBA}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">MovementRemotes</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+		</Item>
+		<Item class="Folder" referent="RBXEF2A440E570443F7A471C483ABC53ECD">
+			<Properties>
+				<Color3 name="IconTint">
+					<R>0</R>
+					<G>0</G>
+					<B>0</B>
+				</Color3>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">Boss</string>
+				<BinaryString name="SerializedOverrides"></BinaryString>
+				<int64 name="SourceAssetId">-1</int64>
+				<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+			</Properties>
+			<Item class="ModuleScript" referent="RBX532CA59273994049B585C91C17B9770F">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	BossConfig
+	Constantes partagées (serveur + client) du boss.
+
+	Pour créer un boss : poser un rig R15 dans le Workspace et lui donner le tag TAG.
+	BossService fait le reste (PV, vitesse, inscription au Time-Loop, IA).
+]]
+
+-- États de l'IA, publiés par le serveur dans l'attribut STATE_ATTRIBUTE du Model.
+-- Le client les lit pour jouer les effets visuels correspondants.
+local STATES = table.freeze({
+	Idle = "Idle", -- personne à poursuivre
+	Chasing = "Chasing", -- poursuit sa cible (pathfinding)
+	Attacking = "Attacking", -- coup de corps-à-corps en cours
+	Charging = "Charging", -- charge son attaque fatale : immobile et invulnérable
+	Staggered = "Staggered", -- sonné après un rewind : c'est la faille à exploiter
+	Dead = "Dead",
+})
+
+return table.freeze({
+	TAG = "Boss",
+	STATE_ATTRIBUTE = "BossState",
+	STATES = STATES,
+
+	-- Caractéristiques -----------------------------------------------------------
+	DISPLAY_NAME = "Gardien de l'Anomalie",
+	MAX_HEALTH = 600,
+	WALK_SPEED = 14,
+
+	-- Perception et poursuite ------------------------------------------------------
+	AGGRO_RANGE = 150, -- studs : au-delà, le boss ignore le joueur
+	THINK_INTERVAL = 0.2, -- secondes entre deux décisions de l'IA (et deux calculs de chemin)
+
+	-- Corps-à-corps --------------------------------------------------------------
+	ATTACK_RANGE = 6, -- studs : distance à laquelle le boss s'arrête pour frapper
+	ATTACK_RANGE_TOLERANCE = 1.5, -- marge à l'impact : au-delà, le joueur a esquivé en reculant
+	ATTACK_WINDUP = 0.35, -- secondes entre le début du geste et l'impact (le temps d'esquiver)
+	ATTACK_COOLDOWN = 1.4, -- secondes entre deux coups
+	ATTACK_DAMAGE = 8,
+
+	-- Attaque fatale (ouvre l'anomalie temporelle) -----------------------------------
+	ULTIMATE_HEALTH_RATIO = 0.2, -- se déclenche quand les PV passent sous 20 %
+	CHARGE_DURATION = 1.5, -- secondes de charge avant que l'attaque ne parte
+	ULTIMATE_COOLDOWN = 25, -- secondes avant de pouvoir recharger l'attaque fatale
+	STAGGER_DURATION = 3, -- secondes où le boss reste sonné après un rewind
+
+	-- Animations (officielles Roblox, jouables dans tous les jeux) ---------------------
+	WALK_ANIMATION_ID = "rbxassetid://507777826", -- "R15Walk"
+	ATTACK_ANIMATION_ID = "rbxassetid://522635514", -- "R15 Sword Slash"
+
+	DEBUG_LOGS = true,
+})
+]]></ProtectedString>
+					<string name="ScriptGuid">{59C4D919-C245-4ACD-869A-CB09527E5F11}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">BossConfig</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+		</Item>
+		<Item class="Folder" referent="RBX0BB7F61546CA4D7CA409C0BA1A86105D">
+			<Properties>
+				<Color3 name="IconTint">
+					<R>0</R>
+					<G>0</G>
+					<B>0</B>
+				</Color3>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">Magic</string>
+				<BinaryString name="SerializedOverrides"></BinaryString>
+				<int64 name="SourceAssetId">-1</int64>
+				<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+			</Properties>
+			<Item class="ModuleScript" referent="RBX28D43DC4ED6147B4BA932F295CCC6BE9">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	MagicConfig
+	Catalogue des Magies Innées, partagé serveur + client.
+
+	Chaque joueur en choisit UNE dans le Hub de création ; elle décide de son pouvoir ultime (touche E).
+	Le serveur la range dans l'attribut ATTRIBUTE du Player (répliqué, lisible par les clients).
+
+	Ajouter une magie = ajouter une entrée à MAGICS. Rien d'autre à toucher :
+		- le Hub l'affiche tout seul dans "Le Choix du Destin" ;
+		- CombatService lit `radius` et `damage` au moment de l'ultime ;
+		- CombatEffects joue la chorégraphie commune avec sa `palette`, ou une chorégraphie
+		  dédiée si on en enregistre une pour son `id` (voir ULTIMATE_PLAYERS dans CombatEffects).
+
+	IMPORTANT : `id` est ce qui est écrit dans la sauvegarde du joueur. Ne jamais le renommer
+	une fois le jeu en ligne (le nom affiché, lui, peut changer librement).
+]]
+
+export type Palette = {
+	void: Color3, -- cœur sombre de l'arrêt sur image
+	main: Color3, -- couleur dominante (anneau au sol, lumière, particules)
+	glow: Color3, -- couleur claire (onde de choc, colonne, flash d'écran)
+}
+
+export type Magic = {
+	id: string,
+	name: string,
+	ultimateName: string,
+	description: string,
+	radius: number, -- studs autour du lanceur
+	damage: number,
+	palette: Palette,
+}
+
+local MAGICS: { Magic } = {
+	{
+		id = "antimatter",
+		name = "Antimatière",
+		ultimateName = "Éruption d'Antimatière",
+		description = "Le vide qui dévore. L'explosion aspire les survivants jusqu'à vous, à portée de lame.",
+		radius = 30,
+		damage = 60,
+		palette = {
+			void = Color3.fromRGB(6, 3, 12),
+			main = Color3.fromRGB(150, 70, 255),
+			glow = Color3.fromRGB(228, 200, 255),
+		},
+	},
+	{
+		id = "pyromancy",
+		name = "Pyromancie",
+		ultimateName = "Brasier du Parjure",
+		description = "Une colère qui ne s'éteint pas. Zone resserrée ; les survivants continuent de brûler.",
+		radius = 26,
+		damage = 70,
+		palette = {
+			void = Color3.fromRGB(24, 5, 0),
+			main = Color3.fromRGB(255, 110, 30),
+			glow = Color3.fromRGB(255, 226, 170),
+		},
+	},
+	{
+		id = "lightning",
+		name = "Foudre",
+		ultimateName = "Jugement Céleste",
+		description = "Le ciel répond à votre appel. Frappe très loin, moins fort, et paralyse un instant.",
+		radius = 34,
+		damage = 50,
+		palette = {
+			void = Color3.fromRGB(10, 8, 30),
+			main = Color3.fromRGB(255, 220, 70),
+			glow = Color3.fromRGB(255, 250, 215),
+		},
+	},
+	{
+		id = "ice",
+		name = "Glace",
+		ultimateName = "Hiver Éternel",
+		description = "Un froid venu d'avant le monde. Ceux qu'il touche avancent comme dans un rêve.",
+		radius = 30,
+		damage = 55,
+		palette = {
+			void = Color3.fromRGB(2, 10, 22),
+			main = Color3.fromRGB(90, 200, 255),
+			glow = Color3.fromRGB(222, 246, 255),
+		},
+	},
+	{
+		id = "shadow",
+		name = "Ombre",
+		ultimateName = "Marée d'Ombres",
+		description = "Ce qui rampe sous vos pas vous obéit. Courte portée, dégâts dévastateurs, et leur vie devient la vôtre.",
+		radius = 24,
+		damage = 80,
+		palette = {
+			void = Color3.fromRGB(4, 0, 2),
+			main = Color3.fromRGB(170, 20, 60),
+			glow = Color3.fromRGB(255, 170, 190),
+		},
+	},
+}
+
+-- Retourne la magie d'identifiant `id`. Un identifiant inconnu ou absent (joueur qui n'a pas
+-- encore choisi, magie retirée du jeu) donne la première magie de la liste.
+local function getById(id: any): Magic
+	for _, magic in MAGICS do
+		if magic.id == id then
+			return magic
+		end
+	end
+	return MAGICS[1]
+end
+
+return table.freeze({
+	ATTRIBUTE = "InnateMagic", -- attribut (string = id de la magie) posé par le serveur sur le Player
+	MAGICS = MAGICS,
+	getById = getById,
+})
+]]></ProtectedString>
+					<string name="ScriptGuid">{FFD680D1-B795-464D-A6E6-B9DBD391FF65}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">MagicConfig</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+		</Item>
+		<Item class="Folder" referent="RBX4ECF680253324B22A2820C314D6168F0">
+			<Properties>
+				<Color3 name="IconTint">
+					<R>0</R>
+					<G>0</G>
+					<B>0</B>
+				</Color3>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">World</string>
+				<BinaryString name="SerializedOverrides"></BinaryString>
+				<int64 name="SourceAssetId">-1</int64>
+				<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+			</Properties>
+			<Item class="ModuleScript" referent="RBXFD792C9A00F04D9A8864B2DC3B8F7412">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	WorldRemotes
+	Point d'accès unique aux RemoteEvents du monde.
+	Le serveur les crée au premier require ; le client attend leur réplication.
+
+	Sens des événements :
+		Omen  serveur -> clients  (text: string)   un présage à afficher chez tous les joueurs
+
+	(La météo et l'humeur du monde ne passent par aucun remote : ce sont des attributs du Workspace.)
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local FOLDER_NAME = "WorldRemotes"
+local IS_SERVER = RunService:IsServer()
+
+local function getFolder(): Instance
+	if IS_SERVER then
+		local folder = Instance.new("Folder")
+		folder.Name = FOLDER_NAME
+		folder.Parent = ReplicatedStorage
+		return folder
+	end
+	return ReplicatedStorage:WaitForChild(FOLDER_NAME)
+end
+
+local folder = getFolder()
+
+local function getRemote(name: string): RemoteEvent
+	if IS_SERVER then
+		local remote = Instance.new("RemoteEvent")
+		remote.Name = name
+		remote.Parent = folder
+		return remote
+	end
+	return folder:WaitForChild(name) :: RemoteEvent
+end
+
+return table.freeze({
+	Omen = getRemote("Omen"),
+})
+]]></ProtectedString>
+					<string name="ScriptGuid">{3027922A-3AEF-446D-A0E7-80095305DE6F}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">WorldRemotes</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX03AD81BC515B4689BBE24581723DCE6A">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	WorldConfig
+	Constantes partagées (serveur + client) du monde : heure, météo, humeur et présages.
+
+	Répartition des rôles :
+		- le SERVEUR décide de l'état du monde et le publie dans des attributs du Workspace
+		  (répliqués à tous les joueurs) : la météo en cours et l'humeur (normale / anomalie) ;
+		- chaque CLIENT met cet état en image chez lui (WorldAtmosphere) : lumière, brouillard,
+		  nuages, vent, particules, son. Tous voient donc le même monde, sans aucun effet visuel
+		  calculé par le serveur.
+	L'heure, elle, n'est même pas transmise : elle se déduit de l'horloge du serveur, que Roblox
+	synchronise déjà chez tous les clients (voir getClockTime).
+]]
+
+export type Weather = {
+	name: string,
+	weight: number, -- chances d'être tirée au sort, par rapport aux autres
+	fog: number, -- brouillard ajouté (Atmosphere.Density, 0 à 1)
+	haze: number, -- voile ajouté (Atmosphere.Haze)
+	cloudCover: number, -- couverture nuageuse (0 = ciel vide, 1 = ciel bouché)
+	windSpeed: number, -- studs/s : agite l'herbe, les nuages et les particules
+}
+
+local MOODS = table.freeze({
+	Normal = "Normal",
+	Anomaly = "Anomaly", -- un boss charge son attaque fatale : le monde entier bascule
+})
+
+local WEATHERS: { [string]: Weather } = {
+	clear = { name = "Ciel dégagé", weight = 5, fog = 0, haze = 0, cloudCover = 0.45, windSpeed = 6 },
+	mist = { name = "Brume", weight = 3, fog = 0.22, haze = 2.5, cloudCover = 0.8, windSpeed = 2 },
+	gale = { name = "Vent des plaines", weight = 2, fog = 0.04, haze = 0.6, cloudCover = 0.65, windSpeed = 28 },
+}
+
+-- Durée d'une journée complète (24 h de jeu), en secondes réelles.
+local DAY_LENGTH = 900
+-- Décalage (heures) de l'horloge du monde. À changer pour décider de l'heure qu'il est maintenant.
+local CLOCK_OFFSET = 0
+
+-- Heure du monde (0 à 24), identique sur le serveur et chez tous les clients au même instant.
+local function getClockTime(): number
+	return (CLOCK_OFFSET + workspace:GetServerTimeNow() / DAY_LENGTH * 24) % 24
+end
+
+return table.freeze({
+	-- Attributs du Workspace écrits par WorldService.
+	MOOD_ATTRIBUTE = "WorldMood",
+	WEATHER_ATTRIBUTE = "WorldWeather",
+	MOODS = MOODS,
+
+	-- Heure ------------------------------------------------------------------------
+	DAY_LENGTH = DAY_LENGTH,
+	getClockTime = getClockTime,
+	NIGHT_START = 19.6, -- à partir de cette heure (et jusqu'à NIGHT_END) : lucioles, etc.
+	NIGHT_END = 5.8,
+
+	-- Météo ------------------------------------------------------------------------
+	WEATHERS = WEATHERS,
+	DEFAULT_WEATHER = "clear",
+	WEATHER_MIN_DURATION = 150, -- secondes avant un nouveau tirage
+	WEATHER_MAX_DURATION = 330,
+	WIND_DIRECTION = Vector3.new(1, 0, 0.35).Unit,
+
+	-- Présages : de temps à autre, quelque chose murmure à tous les joueurs ---------------
+	OMEN_MIN_INTERVAL = 240, -- secondes entre deux présages
+	OMEN_MAX_INTERVAL = 540,
+	OMEN_DURATION = 5, -- secondes d'affichage
+	OMENS = {
+		"Elle vous regarde.",
+		"Vous êtes déjà mort ici.",
+		"Ne vous retournez pas.",
+		"Combien de fois, cette fois-ci ?",
+		"L'odeur revient.",
+		"Je t'aime. Je t'aime. Je t'aime.",
+		"Le temps se souvient de vous.",
+	},
+
+	-- Sons d'ambiance (joués par les clients) --------------------------------------------
+	-- Bourdon grave pendant l'anomalie. Placeholder : "DARK DRONE 13" (APM Music, bibliothèque Roblox).
+	ANOMALY_DRONE_ID = "rbxassetid://9043359885",
+	ANOMALY_DRONE_VOLUME = 0.55,
+	-- >>> VENT : mets ici une boucle de vent ("rbxassetid://123456"). Vide = pas de son de vent.
+	-- Son volume suit la force du vent de la météo en cours.
+	WIND_SOUND_ID = "",
+	WIND_SOUND_MAX_VOLUME = 0.5,
+})
+]]></ProtectedString>
+					<string name="ScriptGuid">{688CE3D3-DF8E-4D93-8492-A7DA4E6E130D}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">WorldConfig</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX6C1103D9C7554B45A63D91DE847FA1FF">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	WorldMapConfig
+	Contenu de la carte du monde (touche M) : les continents, leur place et leur histoire.
+
+	>>> EMPLACEMENTS D'IMAGES. Tout est dessiné par code en attendant tes illustrations :
+	>>>   - PARCHMENT_IMAGE : texture de fond du parchemin ;
+	>>>   - `image` de chaque continent : sa silhouette sur la carte (remplace les taches de couleur) ;
+	>>>   - `illustration` de chaque continent : la vignette affichée dans le panneau de droite.
+	>>> Format : "rbxassetid://123456". Une chaîne vide = dessin par défaut.
+
+	Positions et tailles sont des fractions de la zone de carte : (0, 0) = coin haut gauche,
+	(1, 1) = coin bas droit.
+]]
+
+-- Une tache arrondie de la silhouette par défaut d'un continent, en fractions du cadre du continent.
+export type Blob = {
+	x: number, -- centre
+	y: number,
+	width: number,
+	height: number,
+	rotation: number, -- degrés
+}
+
+export type Continent = {
+	id: string,
+	name: string,
+	epithet: string,
+	lore: string,
+	color: Color3,
+	image: string,
+	illustration: string,
+	position: Vector2, -- centre du continent sur la carte
+	size: Vector2,
+	blobs: { Blob },
+}
+
+local function blob(x: number, y: number, width: number, height: number, rotation: number): Blob
+	return { x = x, y = y, width = width, height = height, rotation = rotation }
+end
+
+local CONTINENTS: { Continent } = {
+	{
+		id = "demon",
+		name = "Continent Démoniaque",
+		epithet = "Les Terres Brûlées du Nord",
+		lore = "Un désert de cendre sous un ciel sans étoiles. Les clans démons s'y disputent les ruines d'un empire que plus personne n'ose nommer. On dit que le temps lui-même y a été blessé.",
+		color = Color3.fromRGB(122, 38, 42),
+		image = "",
+		illustration = "",
+		position = Vector2.new(0.5, 0.19),
+		size = Vector2.new(0.4, 0.26),
+		blobs = {
+			blob(0.35, 0.55, 0.6, 0.7, -8),
+			blob(0.68, 0.45, 0.55, 0.6, 12),
+			blob(0.5, 0.3, 0.45, 0.45, 0),
+			blob(0.15, 0.4, 0.22, 0.3, 25),
+		},
+	},
+	{
+		id = "elf",
+		name = "Continent Elfique",
+		epithet = "La Forêt des Mille Murmures",
+		lore = "Des arbres plus vieux que les royaumes, et un peuple qui n'oublie rien. Les elfes ferment leurs frontières depuis trois siècles : ceux qui entrent sans y être invités ressortent rarement.",
+		color = Color3.fromRGB(58, 104, 72),
+		image = "",
+		illustration = "",
+		position = Vector2.new(0.2, 0.55),
+		size = Vector2.new(0.28, 0.4),
+		blobs = {
+			blob(0.5, 0.35, 0.7, 0.5, 10),
+			blob(0.45, 0.68, 0.6, 0.5, -14),
+			blob(0.72, 0.52, 0.4, 0.35, 0),
+		},
+	},
+	{
+		id = "dwarf",
+		name = "Continent des Nains",
+		epithet = "Les Monts de Fer-Profond",
+		lore = "Une chaîne de montagnes creusée de part en part. Les forges des nains ne s'éteignent jamais ; leurs dettes non plus. Tout ce qui tranche, sur ce monde, est passé un jour entre leurs mains.",
+		color = Color3.fromRGB(98, 102, 114),
+		image = "",
+		illustration = "",
+		position = Vector2.new(0.82, 0.4),
+		size = Vector2.new(0.26, 0.32),
+		blobs = {
+			blob(0.5, 0.4, 0.65, 0.6, -18),
+			blob(0.55, 0.7, 0.5, 0.42, 8),
+			blob(0.28, 0.6, 0.32, 0.3, 30),
+		},
+	},
+	{
+		id = "human",
+		name = "Continent des Humains",
+		epithet = "Les Royaumes du Centre",
+		lore = "Des plaines fertiles, des villages serrés autour de leurs clochers, et des rois qui se croient éternels. C'est ici que vous avez ouvert les yeux. C'est ici, aussi, que vous êtes mort la première fois.",
+		color = Color3.fromRGB(152, 114, 64),
+		image = "",
+		illustration = "",
+		position = Vector2.new(0.52, 0.6),
+		size = Vector2.new(0.3, 0.3),
+		blobs = {
+			blob(0.45, 0.5, 0.7, 0.62, 6),
+			blob(0.7, 0.38, 0.42, 0.42, -20),
+			blob(0.3, 0.72, 0.4, 0.34, 15),
+		},
+	},
+	{
+		id = "beast",
+		name = "Continent des Semi-humains",
+		epithet = "L'Archipel des Crocs",
+		lore = "Mille îles et autant de tribus : hommes-loups, enfants du renard, peuples-chats. Vendus comme esclaves pendant des siècles, ils n'accordent plus leur confiance à personne, et ils ont de bonnes raisons.",
+		color = Color3.fromRGB(160, 96, 50),
+		image = "",
+		illustration = "",
+		position = Vector2.new(0.74, 0.83),
+		size = Vector2.new(0.34, 0.22),
+		blobs = {
+			blob(0.25, 0.5, 0.36, 0.6, -10),
+			blob(0.56, 0.42, 0.3, 0.5, 20),
+			blob(0.82, 0.6, 0.26, 0.44, -6),
+			blob(0.42, 0.82, 0.16, 0.24, 0),
+		},
+	},
+}
+
+return table.freeze({
+	TOGGLE_KEY = Enum.KeyCode.M,
+	TITLE = "CARTE DU MONDE CONNU",
+	PARCHMENT_IMAGE = "",
+	-- Continent où se trouve le joueur : marqué "Vous êtes ici" et sélectionné à l'ouverture.
+	CURRENT_CONTINENT_ID = "human",
+	CONTINENTS = CONTINENTS,
+	-- Noms des mers, écrits en travers de la carte (position en fractions, rotation en degrés).
+	SEAS = {
+		{ name = "Mer des Soupirs", position = Vector2.new(0.33, 0.33), rotation = -12 },
+		{ name = "Détroit du Parjure", position = Vector2.new(0.68, 0.6), rotation = 62 },
+		{ name = "Océan Sans Rivage", position = Vector2.new(0.3, 0.9), rotation = 4 },
+	},
+})
+]]></ProtectedString>
+					<string name="ScriptGuid">{259BC6C4-C6CE-4C0A-A35F-EC12D11F9917}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">WorldMapConfig</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+		</Item>
+		<Item class="Folder" referent="RBX69111BA1D6A9413B97B0963B0C8FCCA0">
+			<Properties>
+				<Color3 name="IconTint">
+					<R>0</R>
+					<G>0</G>
+					<B>0</B>
+				</Color3>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">NPC</string>
+				<BinaryString name="SerializedOverrides"></BinaryString>
+				<int64 name="SourceAssetId">-1</int64>
+				<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+			</Properties>
+			<Item class="ModuleScript" referent="RBXF4261FC610824472A792A201ADE0EECC">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	DialogueConfig
+	Tout ce qui règle les villageois : comment on leur parle, ce qu'ils disent, comment ils vivent.
+
+	CRÉER UN VILLAGEOIS dans Studio :
+		1. poser un rig (Avatar > Rig Builder, de préférence R15) dans le Workspace ;
+		2. lui donner le tag "Villager" (Propriétés > Tags) ;
+		3. facultatif, dans Propriétés > Attributes :
+		     NpcName    (string)  le nom affiché. Par défaut : celui du dialogue, sinon le nom du Model.
+		     DialogueId (string)  une clé de DIALOGUES ci-dessous. Par défaut : un dialogue générique,
+		                          toujours le même pour un villageois donné.
+		     Wanders    (boolean) false pour qu'il reste sur place. Par défaut : il se promène.
+
+	ÉCRIRE UN DIALOGUE : ajouter une entrée à DIALOGUES. Chaque élément de `lines` est une réplique,
+	affichée lettre par lettre ; le joueur passe à la suivante d'un clic ou d'une touche.
+]]
+
+export type Dialogue = {
+	name: string?, -- nom du personnage qui parle (facultatif)
+	lines: { string },
+}
+
+local DIALOGUES: { [string]: Dialogue } = {
+	elder = {
+		name = "Ancienne du village",
+		lines = {
+			"Tiens, un visage que je ne connais pas. Ou que je connais trop bien... c'est étrange.",
+			"Ne restez pas dehors quand le ciel vire au rouge. Ceux qui restent ne reviennent pas les mêmes.",
+			"Et si vous sentez une odeur de fleurs fanées, courez. Ne demandez pas pourquoi.",
+		},
+	},
+	blacksmith = {
+		name = "Forgeron",
+		lines = {
+			"Jolie lame. Mal entretenue, mais jolie.",
+			"Le troisième coup, mettez-y le poids du corps. Une épée ne tue pas avec le poignet.",
+			"Revenez me voir quand vous aurez de quoi payer. Les nains ne font pas crédit, et moi non plus.",
+		},
+	},
+	child = {
+		name = "Enfant",
+		lines = {
+			"Vous êtes un chevalier ? Un vrai ?",
+			"Ma sœur dit qu'un monstre dort dans la plaine et qu'il se réveille quand on lui fait trop mal.",
+			"Moi je crois que vous allez le battre. Vous l'avez déjà fait, non ?",
+		},
+	},
+
+	-- Dialogues génériques : attribués aux villageois sans DialogueId.
+	villager_weather = {
+		lines = {
+			"Le vent tourne. Ça sent la brume pour ce soir.",
+			"Rentrez avant la nuit, voyageur. Les lucioles sont jolies, mais elles ne protègent de rien.",
+		},
+	},
+	villager_rumor = {
+		lines = {
+			"Vous avez entendu ? Un marchand jure avoir vécu deux fois la même journée.",
+			"On l'a pris pour un fou. Pourtant il savait à l'avance ce que j'allais lui répondre...",
+		},
+	},
+	villager_tired = {
+		lines = {
+			"J'ai l'impression de vous avoir déjà dit bonjour ce matin.",
+			"... Non ? Alors c'est que je dors mal. Tout le monde dort mal, ces temps-ci.",
+		},
+	},
+	villager_warning = {
+		lines = {
+			"N'allez pas vers la plaine. Le Gardien n'aime pas qu'on le dérange.",
+			"Et s'il se met à briller de rouge, c'est déjà trop tard pour fuir.",
+		},
+	},
+}
+
+return table.freeze({
+	TAG = "Villager",
+	NAME_ATTRIBUTE = "NpcName",
+	DIALOGUE_ATTRIBUTE = "DialogueId",
+	WANDER_ATTRIBUTE = "Wanders",
+
+	-- Interaction ----------------------------------------------------------------
+	-- F et non E : E est déjà la touche de l'ultime.
+	INTERACT_KEY = Enum.KeyCode.F,
+	INTERACT_DISTANCE = 10, -- studs
+	ACTION_TEXT = "Parler",
+
+	-- Machine à écrire -------------------------------------------------------------
+	LETTERS_PER_SECOND = 38,
+	SENTENCE_PAUSE = 0.28, -- secondes d'arrêt après . ! ?
+	COMMA_PAUSE = 0.12, -- après , ; :
+	-- Petit son joué toutes les BLIP_INTERVAL lettres, à une hauteur légèrement aléatoire.
+	-- Par défaut : un son livré avec le client Roblox (rien à importer, il se charge toujours).
+	-- >>> Pour le tien : "rbxassetid://123456".
+	BLIP_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav",
+	BLIP_VOLUME = 0.2,
+	BLIP_INTERVAL = 2,
+	BLIP_SPEED_MIN = 0.85,
+	BLIP_SPEED_MAX = 1.15,
+
+	-- Dialogues ------------------------------------------------------------------
+	DIALOGUES = DIALOGUES,
+	GENERIC_DIALOGUE_IDS = { "villager_weather", "villager_rumor", "villager_tired", "villager_warning" },
+
+	-- Vie du village (serveur) -------------------------------------------------------
+	WANDER_RADIUS = 14, -- studs autour de l'endroit où le villageois a été posé
+	WANDER_SPEED = 6,
+	WANDER_PAUSE_MIN = 4, -- secondes entre deux déplacements
+	WANDER_PAUSE_MAX = 10,
+	TALK_TIMEOUT = 45, -- secondes après lesquelles un villageois reprend sa promenade quoi qu'il arrive
+	WALK_ANIMATION_ID = "rbxassetid://507777826", -- "R15Walk" (Roblox)
+})
+]]></ProtectedString>
+					<string name="ScriptGuid">{13BF2015-1BC5-4EA1-9F64-CA1B27DD12A8}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">DialogueConfig</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBXF10D0084BE604110B54DBBA2EA7CC0B7">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	NPCRemotes
+	Point d'accès unique aux RemoteEvents des PNJ.
+	Le serveur les crée au premier require ; le client attend leur réplication.
+
+	Le dialogue lui-même est entièrement local au joueur. Ces événements servent seulement à ce que
+	le villageois, côté serveur, s'arrête et se tourne vers lui :
+		TalkStarted  client -> serveur  (villager: Model)
+		TalkEnded    client -> serveur  ()
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local FOLDER_NAME = "NPCRemotes"
+local IS_SERVER = RunService:IsServer()
+
+local function getFolder(): Instance
+	if IS_SERVER then
+		local folder = Instance.new("Folder")
+		folder.Name = FOLDER_NAME
+		folder.Parent = ReplicatedStorage
+		return folder
+	end
+	return ReplicatedStorage:WaitForChild(FOLDER_NAME)
+end
+
+local folder = getFolder()
+
+local function getRemote(name: string): RemoteEvent
+	if IS_SERVER then
+		local remote = Instance.new("RemoteEvent")
+		remote.Name = name
+		remote.Parent = folder
+		return remote
+	end
+	return folder:WaitForChild(name) :: RemoteEvent
+end
+
+return table.freeze({
+	TalkStarted = getRemote("TalkStarted"),
+	TalkEnded = getRemote("TalkEnded"),
+})
+]]></ProtectedString>
+					<string name="ScriptGuid">{082D9DB9-06A9-4002-93B2-9CABF6A078DF}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">NPCRemotes</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+		</Item>
+	</Item>
+	<SharedStrings>
+		<SharedString md5="yuZpQdnvvUBOTYh1jqZ2cA=="></SharedString>
+	</SharedStrings>
+</roblox>

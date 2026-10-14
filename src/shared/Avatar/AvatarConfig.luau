@@ -1,0 +1,246 @@
+--!strict
+--[[
+	AvatarConfig
+	Catalogue du Hub de création de personnage, partagé serveur + client.
+
+	Tout est piloté par les listes ci-dessous : ajouter une coiffure, un visage ou une marque,
+	c'est ajouter UNE ligne. Le Hub, la validation serveur et la sauvegarde suivent tout seuls.
+
+	Deux règles :
+		- le client n'envoie que des INDEX dans ces listes (jamais d'ID d'asset) : le serveur
+		  reste seul à décider quels assets peuvent être portés ;
+		- chaque option a un `id` : c'est lui qui est écrit dans la sauvegarde du joueur (pas l'index,
+		  qui change dès qu'on réordonne une liste). Ne jamais renommer un `id` une fois le jeu en
+		  ligne ; un `id` devenu introuvable retombe sur la première option de sa liste.
+
+	Les assets ci-dessous sont des PLACEHOLDERS du catalogue Roblox, à remplacer par ceux du jeu.
+]]
+
+-- Base du corps : les 5 parties (R15) d'un bundle.
+export type BaseOption = {
+	id: string,
+	name: string,
+	torsoId: number,
+	rightArmId: number,
+	leftArmId: number,
+	leftLegId: number,
+	rightLegId: number,
+}
+
+-- Visage : un Decal plaqué sur l'avant de la tête (il épouse sa courbure).
+-- `texture` est une adresse d'image complète (voir image() et decalThumbnail() plus bas).
+export type FaceLayerOption = {
+	id: string,
+	name: string,
+	texture: string,
+}
+
+-- Marque (cicatrice, tatouage, blessure) : une image posée DEVANT le visage, sur un petit panneau
+-- invisible (SurfaceGui). Contrairement à un Decal, on la place et on la dimensionne librement :
+--   offset   : décalage depuis le centre du visage, en fraction du panneau. Vu de face :
+--              X positif = vers la droite, Y positif = vers le bas. (0.1 = un dixième du visage.)
+--   scale    : taille de l'image. 1 = toute la largeur du visage.
+--   rotation : degrés, sens horaire.
+-- Pour régler une marque au millimètre : lancer le jeu, ouvrir dans l'Explorateur
+-- ton personnage > Head > FaceCanvas > MarkSurface > Mark, ajuster Position / Size / Rotation
+-- à la main, puis reporter ici (Position = 0.5 + offset, Size = scale).
+export type MarkOption = {
+	id: string,
+	name: string,
+	texture: string, -- "" = aucune marque
+	offset: Vector2,
+	scale: number,
+	rotation: number,
+}
+
+export type HairOption = {
+	id: string,
+	name: string,
+	assetId: number, -- accessoire de type Hair
+}
+
+export type OutfitOption = {
+	id: string,
+	name: string,
+	shirtId: number, -- vêtement classique (Shirt)
+	pantsId: number, -- vêtement classique (Pants)
+	backAccessoryId: number, -- accessoire de type Back (cape), 0 = aucun
+}
+
+export type ScaleRange = {
+	min: number,
+	max: number,
+	step: number,
+	default: number,
+}
+
+-- Choix du joueur dans le Hub, tel qu'il transite dans les RemoteEvents (index dans les listes).
+export type Selection = {
+	baseIndex: number,
+	faceIndex: number,
+	markIndex: number,
+	hairIndex: number,
+	outfitIndex: number,
+	heightScale: number,
+	widthScale: number,
+	magicIndex: number, -- index dans MagicConfig.MAGICS
+}
+
+-- Image que TU as importée (ou une image du catalogue) : on donne l'ID de l'IMAGE.
+local function image(imageId: number): string
+	return `rbxassetid://{imageId}`
+end
+
+-- Decal publié par quelqu'un d'autre : on ne connaît que l'ID du Decal, pas celui de son image.
+-- Roblox sait en fournir l'aperçu 420x420, fond transparent conservé : suffisant pour un visage.
+local function decalThumbnail(decalId: number): string
+	return `rbxthumb://type=Asset&id={decalId}&w=420&h=420`
+end
+
+local BASE_OPTIONS: { BaseOption } = {
+	{ -- bundle Roblox "Man"
+		id = "man",
+		name = "Homme",
+		torsoId = 86500008,
+		rightArmId = 86500036,
+		leftArmId = 86500054,
+		leftLegId = 86500064,
+		rightLegId = 86500078,
+	},
+	{ -- bundle Roblox "Woman"
+		id = "woman",
+		name = "Femme",
+		torsoId = 86499666,
+		rightArmId = 86499698,
+		leftArmId = 86499716,
+		leftLegId = 86499753,
+		rightLegId = 86499793,
+	},
+}
+
+local FACE_OPTIONS: { FaceLayerOption } = {
+	{ id = "stoic", name = "Impassible", texture = image(83017053) }, -- texture de "Man Face"
+	{ id = "serene", name = "Sereine", texture = image(83022608) }, -- texture de "Woman Face"
+	{ id = "defiant", name = "Défiant", texture = image(7074780) }, -- texture de "Check It"
+	{ id = "detached", name = "Détaché", texture = image(7074749) }, -- texture de "Chill"
+	{ id = "freckles", name = "Taches de son", texture = image(12145059) }, -- texture de "Freckles"
+}
+
+-- Raccourci pour déclarer une marque : mark(id, nom, image, décalageX, décalageY, taille, rotation).
+local function mark(
+	id: string,
+	name: string,
+	texture: string,
+	offsetX: number,
+	offsetY: number,
+	scale: number,
+	rotation: number
+): MarkOption
+	return {
+		id = id,
+		name = name,
+		texture = texture,
+		offset = Vector2.new(offsetX, offsetY),
+		scale = scale,
+		rotation = rotation,
+	}
+end
+
+-- Cicatrices, tatouages, blessures. Les images doivent être à fond transparent.
+-- Les quatre derniers nombres de chaque ligne placent la marque : voir le type MarkOption.
+-- Placeholders : decals gratuits de la bibliothèque Roblox (série "[FACE] Extras" de morscore).
+local MARK_OPTIONS: { MarkOption } = {
+	mark("none", "Aucune", "", 0, 0, 1, 0),
+	mark("scar_eye", "Cicatrice à l'œil", decalThumbnail(3524093836), 0, 0, 1, 0),
+	mark("scar_slash", "Balafre", decalThumbnail(3524095179), 0, 0, 1, 0),
+	mark("scar_cheek", "Entaille à la joue", decalThumbnail(3524096392), 0, 0, 1, 0),
+	mark("scar_cross", "Croix du parjure", decalThumbnail(3524097066), 0, 0, 1, 0),
+	mark("scar_claw", "Griffure", decalThumbnail(3524097803), 0, 0, 1, 0),
+	-- Tatouage facial dessiné par un fan (motif inspiré d'un manga) : à remplacer avant de publier.
+	mark("curse_seal", "Sceau maudit", decalThumbnail(16324571137), 0, 0, 1, 0),
+}
+
+-- La liste peut grandir sans limite : le Hub affiche "3 / 15" et boucle en fin de liste.
+local HAIR_OPTIONS: { HairOption } = {
+	{ id = "pal", name = "Mèches du pèlerin", assetId = 63690008 }, -- "Pal Hair"
+	{ id = "spiked", name = "Crinière de cendre", assetId = 376524487 }, -- "Blonde Spiked Hair"
+	{ id = "brown", name = "Coupe de l'écuyer", assetId = 62234425 }, -- "Brown Hair"
+	{ id = "bun", name = "Chignon de la servante", assetId = 62724852 }, -- "Chestnut Bun"
+	{ id = "ninja_updo", name = "Chignon de l'ombre", assetId = 2907260402 }, -- "Dark Age Ninja Updo Hair"
+	{ id = "princess", name = "Chevelure de la princesse", assetId = 13477162 }, -- "Star Princess Hair"
+	{ id = "azure", name = "Azur de l'héroïne", assetId = 164482409 }, -- "Blue Anime Girl Hair"
+	{ id = "long_pale", name = "Longue chevelure pâle", assetId = 727320877 }, -- "Long Pastel Hair"
+	{ id = "vagabond", name = "Mèche du vagabond", assetId = 65941324 }, -- "Black Indie Hair"
+	{ id = "duelist", name = "Pointes du duelliste", assetId = 30332157 }, -- "Pointy Boy Hair"
+	{ id = "bed_head", name = "Réveil difficile", assetId = 20372960 }, -- "Bed Hair"
+	{ id = "dragon_heir", name = "Héritier du dragon", assetId = 2804642677 }, -- "Half-Dragon Heir Hair"
+	{ id = "abyss", name = "Sirène des abysses", assetId = 4041570918 }, -- "Dark Mermaid Hair"
+	{ id = "specter", name = "Spectre au ruban noir", assetId = 1425141074 }, -- "Ghostly White Hair with Black Bow"
+	{ id = "crimson", name = "Tignasse écarlate", assetId = 259423003 }, -- "Crimson Bed Head Hair"
+	{ id = "cinnamon", name = "Mèches cannelle", assetId = 13745548 }, -- "Cinnamon Hair"
+	{ id = "ember", name = "Chevelure de braise", assetId = 77359955 }, -- "Lava Hair"
+	{ id = "eccentric", name = "Rose de l'excentrique", assetId = 61885694 }, -- "Extreme Pink Hair"
+	{ id = "azure_fringe", name = "Frange d'azur", assetId = 293316132 }, -- "Blue Scene Hair"
+	{ id = "hazel_fringe", name = "Frange noisette", assetId = 323476364 }, -- "Brown Scene Hair"
+	{ id = "librarian", name = "Bibliothécaire bicolore", assetId = 319642720 }, -- "Monochrome Library Hair"
+	{ id = "bat_queen", name = "Reine des chauves-souris", assetId = 1074737868 }, -- "Queen of Bats Hair"
+}
+
+local OUTFIT_OPTIONS: { OutfitOption } = {
+	{
+		id = "midnight_traveler",
+		name = "Voyageur de minuit",
+		shirtId = 3267725621,
+		pantsId = 3267727546,
+		backAccessoryId = 878915975, -- "Cape of Midnight's Wisdom"
+	},
+	{
+		id = "black_iron_knight",
+		name = "Chevalier de fer noir",
+		shirtId = 8991866831,
+		pantsId = 8991863926,
+		backAccessoryId = 2163546691, -- "Black Iron Cape"
+	},
+	{
+		id = "oathbreaker",
+		name = "Parjure",
+		shirtId = 560184638,
+		pantsId = 560182503,
+		backAccessoryId = 1772350677, -- "Sinister Cape"
+	},
+}
+
+local HEIGHT_SCALE: ScaleRange = { min = 0.9, max = 1.15, step = 0.05, default = 1 }
+local WIDTH_SCALE: ScaleRange = { min = 0.75, max = 1.1, step = 0.05, default = 1 }
+
+return table.freeze({
+	-- Attribut (boolean) posé par le serveur sur le Player tant qu'il est dans le Hub.
+	-- Les interfaces de jeu (jauge de Tension...) le lisent pour se masquer.
+	CUSTOMIZING_ATTRIBUTE = "IsCustomizing",
+
+	-- >>> MUSIQUE DU HUB : mets ici l'ID de ton son, au format "rbxassetid://123456" ("" = silence).
+	-- Placeholder : "Nursery Crime 60" (APM Music, sous licence Roblox, utilisable dans tous les jeux),
+	-- une comptine à la boîte à musique volontairement dérangeante.
+	-- Autres pistes du même catalogue : 1837786350 "Music Box Of Death 30", 1840004224 "Twinkle (a 30)".
+	HUB_MUSIC_ID = "rbxassetid://1839911004",
+	HUB_MUSIC_VOLUME = 0.4,
+
+	-- true = ignore la sauvegarde et rouvre le Hub à chaque connexion (pour le tester).
+	-- Rien n'est effacé : repasser à false retrouve le personnage sauvegardé, ou le remplace
+	-- par le nouveau si on a validé le Hub entre-temps.
+	DEBUG_ALWAYS_OPEN_CREATOR = false,
+
+	-- Panneau des marques : un carré invisible tenu devant le visage, sur lequel l'image est posée.
+	FACE_CANVAS_SIZE = 1.25, -- côté du carré (studs) : la largeur visible de la tête classique
+	-- Distance (studs) entre le centre de la tête et le panneau. Trop petit : la marque disparaît
+	-- dans la tête. Trop grand : elle flotte devant le visage.
+	FACE_CANVAS_DEPTH = 0.64,
+
+	BASE_OPTIONS = BASE_OPTIONS,
+	FACE_OPTIONS = FACE_OPTIONS,
+	MARK_OPTIONS = MARK_OPTIONS,
+	HAIR_OPTIONS = HAIR_OPTIONS,
+	OUTFIT_OPTIONS = OUTFIT_OPTIONS,
+	HEIGHT_SCALE = HEIGHT_SCALE, -- HumanoidDescription.HeightScale (BodyHeightScale)
+	WIDTH_SCALE = WIDTH_SCALE, -- HumanoidDescription.WidthScale (BodyWidthScale)
+})

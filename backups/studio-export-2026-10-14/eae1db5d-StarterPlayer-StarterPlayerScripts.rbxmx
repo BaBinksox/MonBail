@@ -1,0 +1,4961 @@
+<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">
+	<Meta name="ExplicitAutoJoints">true</Meta>
+	<External>null</External>
+	<External>nil</External>
+	<Item class="StarterPlayerScripts" referent="RBX825817C6386545E6937415D5A0BA0A04">
+		<Properties>
+			<BinaryString name="AttributesSerialize"></BinaryString>
+			<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+			<bool name="DefinesCapabilities">false</bool>
+			<string name="Name">StarterPlayerScripts</string>
+			<BinaryString name="SerializedOverrides"></BinaryString>
+			<int64 name="SourceAssetId">-1</int64>
+			<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+		</Properties>
+		<Item class="Folder" referent="RBXA3A94C373E93401589B71AEFBF7E298B">
+			<Properties>
+				<Color3 name="IconTint">
+					<R>0</R>
+					<G>0</G>
+					<B>0</B>
+				</Color3>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">Client</string>
+				<BinaryString name="SerializedOverrides"></BinaryString>
+				<int64 name="SourceAssetId">-1</int64>
+				<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+			</Properties>
+			<Item class="LocalScript" referent="RBX0E0BE86DE8E34E7EB2094F26AB409B70">
+				<Properties>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	TimeLoopController (LocalScript)
+	Côté client du Time-Loop :
+		- envoie la demande de rewind au serveur (touche REWIND_KEY) ;
+		- met en scène l'anomalie et le rembobinage en réaction aux RemoteEvents du serveur :
+		  l'image avec GlitchOverlay, le son avec TimeLoopAudio.
+
+	Le client ne déplace rien et ne décide de rien : c'est le serveur qui fige, rembobine ou tue.
+
+	Deux temps :
+		anomalie (AnomalyOpened -> AnomalyClosed) : l'écran vacille, un message presse le joueur ;
+		rewind   (RewindStarted -> RewindEnded)   : rupture de la réalité, chœur déformé,
+		                                            compteur de magnétoscope qui remonte le temps.
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+
+local sharedFolder = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("TimeLoop")
+local Config = require(sharedFolder:WaitForChild("TimeLoopConfig") :: ModuleScript)
+local Remotes = require(sharedFolder:WaitForChild("TimeLoopRemotes") :: ModuleScript)
+
+local modulesFolder = script.Parent:WaitForChild("TimeLoop")
+local GlitchOverlay = require(modulesFolder:WaitForChild("GlitchOverlay") :: ModuleScript)
+local TimeLoopAudio = require(modulesFolder:WaitForChild("TimeLoopAudio") :: ModuleScript)
+
+local ANOMALY_FADE = 0.3 -- retour à la normale si l'anomalie se termine sans rewind
+local REWIND_FADE = 0.5 -- retour à la normale après un rewind
+local CAPTION_REFRESH = 0.05 -- secondes entre deux mises à jour du compteur
+
+local isRewinding = false
+
+GlitchOverlay.init(Players.LocalPlayer:WaitForChild("PlayerGui"))
+
+--------------------------------------------------------------------------------
+-- Compteur de rembobinage
+--------------------------------------------------------------------------------
+
+-- Affiche "<< REW  -3.2 s" en haut de l'écran : le temps remonté jusqu'ici, de 0 à REWIND_WINDOW,
+-- pendant toute la durée du rewind. YIELD jusqu'à sa fin.
+local function runRewindCaption(playbackDuration: number)
+	local startClock = os.clock()
+	while isRewinding do
+		local progress = math.clamp((os.clock() - startClock) / playbackDuration, 0, 1)
+		local blink = if math.floor(os.clock() * 4) % 2 == 0 then "<<" else "  "
+		GlitchOverlay.setCaption(string.format("%s REW  -%.1f s", blink, progress * Config.REWIND_WINDOW))
+		task.wait(CAPTION_REFRESH)
+	end
+	GlitchOverlay.setCaption("")
+end
+
+--------------------------------------------------------------------------------
+-- Entrée joueur
+--------------------------------------------------------------------------------
+
+UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
+	if gameProcessed then
+		return
+	end
+	if input.KeyCode == Config.REWIND_KEY then
+		Remotes.RequestRewind:FireServer()
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- Réactions aux événements serveur
+--------------------------------------------------------------------------------
+
+-- Attaque fatale : le serveur nous a figés, l'écran vacille jusqu'à AnomalyClosed.
+Remotes.AnomalyOpened.OnClientEvent:Connect(function(_windowDuration: number)
+	GlitchOverlay.setMessage(Config.ANOMALY_MESSAGE)
+	GlitchOverlay.start("anomaly")
+end)
+
+-- Fin de l'anomalie, quelle que soit l'issue (rewind accepté, mort, respawn).
+Remotes.AnomalyClosed.OnClientEvent:Connect(function()
+	GlitchOverlay.setMessage("")
+	-- En cas de rewind, RewindStarted a pris le relais : on ne coupe pas son glitch.
+	if not isRewinding then
+		GlitchOverlay.stop(ANOMALY_FADE)
+	end
+end)
+
+Remotes.RewindStarted.OnClientEvent:Connect(function(playbackDuration: number)
+	isRewinding = true
+	GlitchOverlay.setMessage("")
+	GlitchOverlay.start("rewind")
+	TimeLoopAudio.playRewind(playbackDuration)
+	runRewindCaption(playbackDuration) -- yield jusqu'à RewindEnded
+end)
+
+Remotes.RewindEnded.OnClientEvent:Connect(function()
+	isRewinding = false
+	GlitchOverlay.stop(REWIND_FADE)
+	TimeLoopAudio.fadeOut()
+end)
+]]></ProtectedString>
+					<bool name="Disabled">false</bool>
+					<Content name="LinkedSource"><null></null></Content>
+					<token name="RunContext">0</token>
+					<string name="ScriptGuid">{524C5A47-8583-4917-A657-80F9DD11002A}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">TimeLoopController</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+			<Item class="Folder" referent="RBXA77E037B0ED24DF7AB7676296718DAF6">
+				<Properties>
+					<Color3 name="IconTint">
+						<R>0</R>
+						<G>0</G>
+						<B>0</B>
+					</Color3>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">AvatarCreator</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+				<Item class="LocalScript" referent="RBX185A902CEED547FD9F994869EB28BC76">
+					<Properties>
+						<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	AvatarCreatorController (LocalScript)
+	Chef d'orchestre du Hub de création, côté client :
+		- ouvre le Hub quand le serveur le demande (OpenCreator) : narration, caméra, ambiance, musique ;
+		- page ÉVEIL  : garde le choix d'apparence, met à jour l'interface et demande un aperçu
+		  au serveur à chaque clic ;
+		- page DESTIN : choix de la Magie Innée (aucun aperçu : elle ne change pas l'apparence) ;
+		- envoie le choix final (ApplyAvatar) et referme tout quand le serveur confirme (CreatorClosed).
+
+	Le client ne modifie jamais le personnage lui-même : il ne fait qu'envoyer des index et des échelles,
+	c'est le serveur qui applique l'apparence, enregistre la magie, sauvegarde et libère le joueur.
+	Un joueur dont le personnage est déjà sauvegardé ne reçoit jamais OpenCreator : il ne voit pas le Hub.
+]]
+
+local Lighting = game:GetService("Lighting")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SoundService = game:GetService("SoundService")
+local StarterGui = game:GetService("StarterGui")
+local TweenService = game:GetService("TweenService")
+
+local sharedFolder = ReplicatedStorage:WaitForChild("Shared")
+local avatarFolder = sharedFolder:WaitForChild("Avatar")
+local AvatarConfig = require(avatarFolder:WaitForChild("AvatarConfig") :: ModuleScript)
+local Remotes = require(avatarFolder:WaitForChild("AvatarRemotes") :: ModuleScript)
+local MagicConfig = require(sharedFolder:WaitForChild("Magic"):WaitForChild("MagicConfig") :: ModuleScript)
+
+local Camera = require(script.Parent:WaitForChild("AvatarCreatorCamera") :: ModuleScript)
+local View = require(script.Parent:WaitForChild("AvatarCreatorView") :: ModuleScript)
+
+-- Narration d'ouverture. Passer INTRO_ENABLED à false pour tester plus vite.
+local INTRO_ENABLED = true
+local INTRO_LINES = {
+	"Le froid. Puis le silence.",
+	"Vous êtes mort... et pourtant, vos yeux s'ouvrent.",
+	"Avant que le temps ne reprenne son cours, souvenez-vous de qui vous étiez.",
+}
+local INTRO_FADE_IN = 0.7
+local INTRO_HOLD = 1.3
+local INTRO_FADE_OUT = 0.5
+
+local REVEAL_DURATION = 3 -- le voile noir se lève pendant que la caméra avance
+local PANEL_FADE_DURATION = 1
+local PAGE_FADE_DURATION = 0.25 -- fondu du panneau entre les deux pages
+local CLOSE_FADE_OUT = 0.6
+local CLOSE_FADE_IN = 1.2
+
+local MUSIC_FADE_IN = 2.5
+local MUSIC_FADE_OUT = 1.5
+
+local CONFIRM_PENDING_TEXT = ". . ."
+
+-- Liseré d'un bouton de magie : discret au repos, plein quand la magie est sélectionnée.
+local MAGIC_STROKE_IDLE = 0.75
+local MAGIC_FILL_SELECTED = 0.8 -- transparence du fond coloré du bouton sélectionné
+
+--------------------------------------------------------------------------------
+-- Vue et musique
+--------------------------------------------------------------------------------
+
+local magicEntries = {}
+for index, magic in MagicConfig.MAGICS do
+	magicEntries[index] = { name = magic.name, color = magic.palette.main }
+end
+
+local view = View.create(Players.LocalPlayer:WaitForChild("PlayerGui"), magicEntries)
+
+-- Créé depuis un LocalScript : ce son n'existe et ne se joue que sur ce client.
+local music = Instance.new("Sound")
+music.Name = "HubMusic"
+music.SoundId = AvatarConfig.HUB_MUSIC_ID
+music.Looped = true
+music.Volume = 0
+music.Parent = SoundService
+
+--------------------------------------------------------------------------------
+-- État
+--------------------------------------------------------------------------------
+
+local selection = {
+	baseIndex = 1,
+	faceIndex = 1,
+	markIndex = 1,
+	hairIndex = 1,
+	outfitIndex = 1,
+	heightScale = AvatarConfig.HEIGHT_SCALE.default,
+	widthScale = AvatarConfig.WIDTH_SCALE.default,
+	magicIndex = 1,
+}
+local isOpen = false
+local isInteractive = false -- false pendant les transitions et l'attente du serveur
+local ambienceEffects: { Instance } = {}
+
+--------------------------------------------------------------------------------
+-- Helpers
+--------------------------------------------------------------------------------
+
+local function tween(instance: Instance, duration: number, goal: { [string]: any }): Tween
+	local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+	local newTween = TweenService:Create(instance, tweenInfo, goal)
+	newTween:Play()
+	return newTween
+end
+
+-- Liste circulaire : après le dernier choix on revient au premier.
+local function cycleIndex(current: number, optionCount: number, direction: number): number
+	return (current - 1 + direction) % optionCount + 1
+end
+
+-- Échelle bornée, arrondie au centième pour éviter les dérives de flottants (0.95000001...).
+local function stepScale(current: number, range: any, direction: number): number
+	local stepped = math.round((current + direction * range.step) * 100) / 100
+	return math.clamp(stepped, range.min, range.max)
+end
+
+-- Affiche l'option `index` de `options` dans un sélecteur de liste : son nom et "3 / 15".
+local function showListOption(stepper: any, options: { any }, index: number)
+	stepper.valueLabel.Text = options[index].name
+	stepper.counterLabel.Text = `{index} / {#options}`
+end
+
+local function refreshAppearancePage()
+	showListOption(view.baseStepper, AvatarConfig.BASE_OPTIONS, selection.baseIndex)
+	showListOption(view.faceStepper, AvatarConfig.FACE_OPTIONS, selection.faceIndex)
+	showListOption(view.markStepper, AvatarConfig.MARK_OPTIONS, selection.markIndex)
+	showListOption(view.hairStepper, AvatarConfig.HAIR_OPTIONS, selection.hairIndex)
+	showListOption(view.outfitStepper, AvatarConfig.OUTFIT_OPTIONS, selection.outfitIndex)
+	view.heightStepper.valueLabel.Text = `{math.round(selection.heightScale * 100)} %`
+	view.widthStepper.valueLabel.Text = `{math.round(selection.widthScale * 100)} %`
+end
+
+local function refreshDestinyPage()
+	local selectedMagic = MagicConfig.MAGICS[selection.magicIndex]
+
+	for index, magicButton in view.magicButtons do
+		local isSelected = index == selection.magicIndex
+		magicButton.stroke.Transparency = if isSelected then 0 else MAGIC_STROKE_IDLE
+		magicButton.button.BackgroundTransparency = if isSelected then MAGIC_FILL_SELECTED else 1
+	end
+
+	view.magicDescription.Text = `<b>{selectedMagic.ultimateName}</b>\n{selectedMagic.description}`
+	view.confirmButton.Text = `S'ÉVEILLER  -  {selectedMagic.name}`
+end
+
+local function sendPreview()
+	Remotes.PreviewAvatar:FireServer(selection)
+end
+
+--------------------------------------------------------------------------------
+-- Musique et ambiance (effets locaux : seul ce client les perçoit)
+--------------------------------------------------------------------------------
+
+local function startMusic()
+	if AvatarConfig.HUB_MUSIC_ID == "" then
+		return
+	end
+	music.Volume = 0
+	music:Play()
+	tween(music, MUSIC_FADE_IN, { Volume = AvatarConfig.HUB_MUSIC_VOLUME })
+end
+
+local function stopMusic()
+	tween(music, MUSIC_FADE_OUT, { Volume = 0 }).Completed:Once(function()
+		if not isOpen then
+			music:Stop()
+		end
+	end)
+end
+
+local function enableAmbience()
+	-- Monde froid et délavé.
+	local colorCorrection = Instance.new("ColorCorrectionEffect")
+	colorCorrection.Name = "AvatarCreatorColor"
+	colorCorrection.Saturation = -0.45
+	colorCorrection.Contrast = 0.15
+	colorCorrection.Brightness = -0.04
+	colorCorrection.TintColor = Color3.fromRGB(188, 200, 232)
+	colorCorrection.Parent = Lighting
+
+	-- Décor flou derrière le personnage. Pendant le travelling d'ouverture, le personnage
+	-- entre peu à peu dans la zone nette : c'est la vue qui "revient".
+	local depthOfField = Instance.new("DepthOfFieldEffect")
+	depthOfField.Name = "AvatarCreatorDepthOfField"
+	depthOfField.FocusDistance = 10
+	depthOfField.InFocusRadius = 5
+	depthOfField.FarIntensity = 0.8
+	depthOfField.NearIntensity = 0
+	depthOfField.Parent = Lighting
+
+	ambienceEffects = { colorCorrection, depthOfField }
+end
+
+local function disableAmbience()
+	for _, effect in ambienceEffects do
+		effect:Destroy()
+	end
+	ambienceEffects = {}
+end
+
+--------------------------------------------------------------------------------
+-- Pages
+--------------------------------------------------------------------------------
+
+local function showPageInstantly(isDestinyPage: boolean)
+	view.appearancePage.Visible = not isDestinyPage
+	view.destinyPage.Visible = isDestinyPage
+end
+
+-- Passe d'une page à l'autre par un bref fondu du panneau. YIELD.
+local function switchPage(isDestinyPage: boolean)
+	isInteractive = false
+	tween(view.panel, PAGE_FADE_DURATION, { GroupTransparency = 1 }).Completed:Wait()
+	showPageInstantly(isDestinyPage)
+	tween(view.panel, PAGE_FADE_DURATION, { GroupTransparency = 0 }).Completed:Wait()
+	isInteractive = true
+end
+
+--------------------------------------------------------------------------------
+-- Ouverture / fermeture
+--------------------------------------------------------------------------------
+
+local function playIntro()
+	for _, line in INTRO_LINES do
+		view.introLabel.Text = line
+		tween(view.introLabel, INTRO_FADE_IN, { TextTransparency = 0 }).Completed:Wait()
+		task.wait(INTRO_HOLD)
+		tween(view.introLabel, INTRO_FADE_OUT, { TextTransparency = 1 }).Completed:Wait()
+	end
+end
+
+local function open()
+	if isOpen then
+		-- Le serveur redemande l'ouverture après un respawn : le nouveau personnage
+		-- doit simplement recevoir le choix en cours, la caméra le suit déjà.
+		sendPreview()
+		return
+	end
+	isOpen = true
+
+	selection.baseIndex = 1
+	selection.faceIndex = 1
+	selection.markIndex = 1
+	selection.hairIndex = 1
+	selection.outfitIndex = 1
+	selection.heightScale = AvatarConfig.HEIGHT_SCALE.default
+	selection.widthScale = AvatarConfig.WIDTH_SCALE.default
+	selection.magicIndex = 1
+	refreshAppearancePage()
+	refreshDestinyPage()
+	showPageInstantly(false)
+
+	-- Tout se met en place derrière le voile noir.
+	view.fade.BackgroundTransparency = 0
+	view.panel.GroupTransparency = 1
+	view.gui.Enabled = true
+	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, false)
+	enableAmbience()
+	Camera.start()
+	startMusic()
+	sendPreview() -- le personnage porte déjà le premier choix quand le voile se lève
+
+	if INTRO_ENABLED then
+		playIntro()
+	end
+
+	-- Le réveil : le voile se lève pendant que la caméra avance vers le personnage.
+	Camera.dollyIn(REVEAL_DURATION)
+	tween(view.fade, REVEAL_DURATION, { BackgroundTransparency = 1 })
+	task.wait(REVEAL_DURATION * 0.6)
+	tween(view.panel, PANEL_FADE_DURATION, { GroupTransparency = 0 }).Completed:Wait()
+
+	isInteractive = true
+end
+
+local function close()
+	if not isOpen then
+		return
+	end
+	isInteractive = false
+	isOpen = false
+	stopMusic()
+
+	-- Fondu au noir, on rend la caméra et l'écran derrière le voile, puis on rouvre les yeux en jeu.
+	tween(view.fade, CLOSE_FADE_OUT, { BackgroundTransparency = 0 }).Completed:Wait()
+	Camera.stop()
+	disableAmbience()
+	view.panel.GroupTransparency = 1
+	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, true)
+	tween(view.fade, CLOSE_FADE_IN, { BackgroundTransparency = 1 }).Completed:Wait()
+
+	if not isOpen then -- le Hub n'a pas été rouvert pendant le fondu
+		view.gui.Enabled = false
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Boutons
+--------------------------------------------------------------------------------
+
+-- Relie les deux flèches d'un sélecteur à `onStep(direction)`, avec direction = -1 ou +1.
+local function bindStepper(stepper: any, onStep: (direction: number) -> ())
+	local function step(direction: number)
+		if not isInteractive then
+			return
+		end
+		onStep(direction)
+		refreshAppearancePage()
+		sendPreview()
+	end
+
+	stepper.previousButton.Activated:Connect(function()
+		step(-1)
+	end)
+	stepper.nextButton.Activated:Connect(function()
+		step(1)
+	end)
+end
+
+-- Léger fond doré au survol d'un grand bouton.
+local function bindHover(button: TextButton)
+	button.MouseEnter:Connect(function()
+		tween(button, 0.15, { BackgroundTransparency = 0.75 })
+	end)
+	button.MouseLeave:Connect(function()
+		tween(button, 0.15, { BackgroundTransparency = 1 })
+	end)
+end
+
+-- Page ÉVEIL --------------------------------------------------------------------
+
+bindStepper(view.baseStepper, function(direction: number)
+	selection.baseIndex = cycleIndex(selection.baseIndex, #AvatarConfig.BASE_OPTIONS, direction)
+end)
+
+bindStepper(view.faceStepper, function(direction: number)
+	selection.faceIndex = cycleIndex(selection.faceIndex, #AvatarConfig.FACE_OPTIONS, direction)
+end)
+
+bindStepper(view.markStepper, function(direction: number)
+	selection.markIndex = cycleIndex(selection.markIndex, #AvatarConfig.MARK_OPTIONS, direction)
+end)
+
+bindStepper(view.hairStepper, function(direction: number)
+	selection.hairIndex = cycleIndex(selection.hairIndex, #AvatarConfig.HAIR_OPTIONS, direction)
+end)
+
+bindStepper(view.outfitStepper, function(direction: number)
+	selection.outfitIndex = cycleIndex(selection.outfitIndex, #AvatarConfig.OUTFIT_OPTIONS, direction)
+end)
+
+bindStepper(view.heightStepper, function(direction: number)
+	selection.heightScale = stepScale(selection.heightScale, AvatarConfig.HEIGHT_SCALE, direction)
+end)
+
+bindStepper(view.widthStepper, function(direction: number)
+	selection.widthScale = stepScale(selection.widthScale, AvatarConfig.WIDTH_SCALE, direction)
+end)
+
+view.nextButton.Activated:Connect(function()
+	if isInteractive then
+		switchPage(true)
+	end
+end)
+bindHover(view.nextButton)
+
+-- Page DESTIN -------------------------------------------------------------------
+
+for index, magicButton in view.magicButtons do
+	magicButton.button.Activated:Connect(function()
+		if isInteractive then
+			selection.magicIndex = index
+			refreshDestinyPage()
+		end
+	end)
+end
+
+view.backButton.Activated:Connect(function()
+	if isInteractive then
+		switchPage(false)
+	end
+end)
+
+view.confirmButton.Activated:Connect(function()
+	if not isInteractive then
+		return
+	end
+	isInteractive = false
+	view.confirmButton.Text = CONFIRM_PENDING_TEXT
+	Remotes.ApplyAvatar:FireServer(selection)
+end)
+bindHover(view.confirmButton)
+
+--------------------------------------------------------------------------------
+-- Événements serveur
+--------------------------------------------------------------------------------
+
+Remotes.OpenCreator.OnClientEvent:Connect(open)
+Remotes.CreatorClosed.OnClientEvent:Connect(close)
+]]></ProtectedString>
+						<bool name="Disabled">false</bool>
+						<Content name="LinkedSource"><null></null></Content>
+						<token name="RunContext">0</token>
+						<string name="ScriptGuid">{DAF7D85A-A659-41C4-A3A8-A06395A26F93}</string>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<string name="Name">AvatarCreatorController</string>
+						<BinaryString name="SerializedOverrides"></BinaryString>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+					</Properties>
+				</Item>
+				<Item class="ModuleScript" referent="RBXEFBE466902604D27AAEA95A3306A9CDB">
+					<Properties>
+						<Content name="LinkedSource"><null></null></Content>
+						<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	AvatarCreatorCamera
+	Caméra scriptable de l'écran de création : placée face au personnage, légèrement décalée
+	pour le laisser dans la partie gauche de l'écran (le panneau d'options occupe la droite).
+
+	Recalculée à chaque frame à partir du HumanoidRootPart : elle suit donc toute seule les
+	changements de taille et un éventuel nouveau personnage.
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+
+local RENDER_STEP_NAME = "AvatarCreatorCamera"
+
+local FIELD_OF_VIEW = 40
+local START_DISTANCE = 17 -- distance avant le travelling d'ouverture (studs)
+local END_DISTANCE = 9.5 -- distance finale
+local CAMERA_HEIGHT = 1 -- hauteur de la caméra au-dessus du point visé
+local FOCUS_HEIGHT = 0.2 -- point visé, par rapport au centre du RootPart
+local SIDE_OFFSET = 2.2 -- décalage latéral : pousse le personnage vers la gauche de l'écran
+local SWAY_AMPLITUDE = 0.1 -- "respiration" verticale de la caméra
+local SWAY_SPEED = 0.6
+
+local localPlayer = Players.LocalPlayer
+
+local AvatarCreatorCamera = {}
+
+local isRunning = false
+local savedFieldOfView = 70
+local dollyStartClock: number? = nil
+local dollyDuration = 1
+
+local function getDistance(): number
+	if dollyStartClock == nil then
+		return START_DISTANCE
+	end
+	local progress = math.clamp((os.clock() - dollyStartClock) / dollyDuration, 0, 1)
+	local eased = TweenService:GetValue(progress, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+	return START_DISTANCE + (END_DISTANCE - START_DISTANCE) * eased
+end
+
+local function update()
+	local camera = workspace.CurrentCamera
+	local character = localPlayer.Character
+	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+	if camera == nil or rootPart == nil or not rootPart:IsA("BasePart") then
+		return
+	end
+
+	-- Les scripts caméra par défaut peuvent reprendre la main (au respawn par exemple).
+	if camera.CameraType ~= Enum.CameraType.Scriptable then
+		camera.CameraType = Enum.CameraType.Scriptable
+	end
+	camera.FieldOfView = FIELD_OF_VIEW
+
+	local rootCFrame = rootPart.CFrame
+	local screenRight = -rootCFrame.RightVector -- la droite de l'écran est la gauche du personnage
+	local sway = math.sin(os.clock() * SWAY_SPEED) * SWAY_AMPLITUDE
+
+	local focus = rootCFrame.Position + Vector3.new(0, FOCUS_HEIGHT, 0) + screenRight * SIDE_OFFSET
+	local position = focus + rootCFrame.LookVector * getDistance() + Vector3.new(0, CAMERA_HEIGHT + sway, 0)
+
+	camera.CFrame = CFrame.lookAt(position, focus)
+end
+
+-- Verrouille la caméra face au personnage, à START_DISTANCE.
+function AvatarCreatorCamera.start()
+	if isRunning then
+		return
+	end
+	isRunning = true
+	dollyStartClock = nil
+
+	local camera = workspace.CurrentCamera
+	if camera then
+		savedFieldOfView = camera.FieldOfView
+	end
+	RunService:BindToRenderStep(RENDER_STEP_NAME, Enum.RenderPriority.Camera.Value + 1, update)
+end
+
+-- Lance le travelling avant jusqu'à END_DISTANCE.
+function AvatarCreatorCamera.dollyIn(duration: number)
+	dollyStartClock = os.clock()
+	dollyDuration = math.max(duration, 0.01)
+end
+
+-- Rend la caméra au joueur.
+function AvatarCreatorCamera.stop()
+	if not isRunning then
+		return
+	end
+	isRunning = false
+	RunService:UnbindFromRenderStep(RENDER_STEP_NAME)
+
+	local camera = workspace.CurrentCamera
+	if camera then
+		camera.FieldOfView = savedFieldOfView
+		camera.CameraType = Enum.CameraType.Custom
+	end
+end
+
+return AvatarCreatorCamera
+]]></ProtectedString>
+						<string name="ScriptGuid">{8401AB3F-76DB-4586-AAB4-84773B7348B7}</string>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<string name="Name">AvatarCreatorCamera</string>
+						<BinaryString name="SerializedOverrides"></BinaryString>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+					</Properties>
+				</Item>
+				<Item class="ModuleScript" referent="RBX06E2F7009AC7455B802C8BEDD1367911">
+					<Properties>
+						<Content name="LinkedSource"><null></null></Content>
+						<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	AvatarCreatorView
+	Construit le ScreenGui du Hub de création, entièrement par code (rien à poser dans StarterGui,
+	et l'interface est versionnée avec le reste). Ce module ne contient AUCUNE logique : il crée les
+	instances et les expose, c'est AvatarCreatorController qui les anime et écoute les boutons.
+
+	Le panneau a deux pages, affichées l'une après l'autre :
+		1. ÉVEIL  : l'apparence (7 sélecteurs "< valeur >") et le bouton pour continuer ;
+		2. DESTIN : le choix de la Magie Innée (un bouton par magie), sa description, la validation.
+
+	Arborescence produite :
+		AvatarCreatorGui (ScreenGui)
+		├── Panel (CanvasGroup)          panneau, à droite
+		│   ├── Shade                    dégradé noir qui fond vers la scène
+		│   └── Content
+		│       ├── AppearancePage
+		│       └── DestinyPage
+		└── Fade (Frame)                 voile noir plein écran (intro et transitions)
+		    └── IntroLabel               texte de narration
+]]
+
+local COLOR_BACKGROUND = Color3.fromRGB(6, 6, 9)
+local COLOR_TEXT = Color3.fromRGB(226, 220, 208)
+local COLOR_MUTED = Color3.fromRGB(128, 122, 114)
+local COLOR_ACCENT = Color3.fromRGB(176, 146, 96) -- or terni
+
+local FONT_TITLE = Enum.Font.Garamond
+local FONT_CAPTION = Enum.Font.GothamMedium
+
+local PANEL_WIDTH_SCALE = 0.34
+local LIST_PADDING = 10
+local STEPPER_HEIGHT = 52
+local STEPPER_BUTTON_SIZE = 34
+local MAGIC_BUTTON_HEIGHT = 44
+local MAGIC_DESCRIPTION_HEIGHT = 92
+-- Hauteur d'écran (pixels) pour laquelle le contenu est dessiné. En dessous, il rétrécit en bloc.
+local REFERENCE_SCREEN_HEIGHT = 640
+
+-- Sélecteur "< valeur >" : sert aux listes (coiffures, visages...) comme aux échelles.
+export type Stepper = {
+	valueLabel: TextLabel,
+	counterLabel: TextLabel, -- position dans la liste, ex. "3 / 15" (vide pour une échelle)
+	previousButton: TextButton,
+	nextButton: TextButton,
+}
+
+-- Bouton d'une Magie Innée dans la page DESTIN.
+export type MagicButton = {
+	button: TextButton,
+	stroke: UIStroke, -- liseré, mis en avant quand la magie est sélectionnée
+}
+
+-- Ce que la vue a besoin de savoir d'une magie pour dessiner son bouton.
+export type MagicEntry = {
+	name: string,
+	color: Color3,
+}
+
+export type View = {
+	gui: ScreenGui,
+	panel: CanvasGroup,
+	fade: Frame,
+	introLabel: TextLabel,
+
+	appearancePage: Frame,
+	baseStepper: Stepper,
+	faceStepper: Stepper,
+	markStepper: Stepper,
+	hairStepper: Stepper,
+	outfitStepper: Stepper,
+	heightStepper: Stepper,
+	widthStepper: Stepper,
+	nextButton: TextButton,
+
+	destinyPage: Frame,
+	magicButtons: { MagicButton },
+	magicDescription: TextLabel,
+	confirmButton: TextButton,
+	backButton: TextButton,
+}
+
+local AvatarCreatorView = {}
+
+--------------------------------------------------------------------------------
+-- Briques de base
+--------------------------------------------------------------------------------
+
+local function newLabel(text: string, font: Enum.Font, textSize: number, color: Color3): TextLabel
+	local label = Instance.new("TextLabel")
+	label.BackgroundTransparency = 1
+	label.Font = font
+	label.Text = text
+	label.TextSize = textSize
+	label.TextColor3 = color
+	return label
+end
+
+local function newArrowButton(text: string): TextButton
+	local button = Instance.new("TextButton")
+	button.AutoButtonColor = false
+	button.BackgroundTransparency = 1
+	button.Size = UDim2.fromOffset(STEPPER_BUTTON_SIZE, STEPPER_BUTTON_SIZE)
+	button.Font = FONT_TITLE
+	button.Text = text
+	button.TextSize = 28
+	button.TextColor3 = COLOR_ACCENT
+	return button
+end
+
+local function newSeparator(layoutOrder: number, parent: Instance)
+	local separator = Instance.new("Frame")
+	separator.Name = "Separator"
+	separator.BorderSizePixel = 0
+	separator.BackgroundColor3 = COLOR_ACCENT
+	separator.BackgroundTransparency = 0.5
+	separator.Size = UDim2.new(0.5, 0, 0, 1)
+	separator.LayoutOrder = layoutOrder
+	separator.Parent = parent
+end
+
+-- Titre + sous-titre + séparateur en tête d'une page (LayoutOrder 1 à 3).
+local function newPageHeader(title: string, subtitle: string, parent: Instance)
+	local titleLabel = newLabel(title, FONT_TITLE, 40, COLOR_TEXT)
+	titleLabel.Name = "Title"
+	titleLabel.Size = UDim2.new(1, 0, 0, 44)
+	titleLabel.LayoutOrder = 1
+	titleLabel.Parent = parent
+
+	local subtitleLabel = newLabel(subtitle, FONT_TITLE, 18, COLOR_MUTED)
+	subtitleLabel.Name = "Subtitle"
+	subtitleLabel.Size = UDim2.new(1, 0, 0, 20)
+	subtitleLabel.LayoutOrder = 2
+	subtitleLabel.Parent = parent
+
+	newSeparator(3, parent)
+end
+
+-- Grand bouton à liseré doré (continuer, valider).
+local function newWideButton(name: string, text: string, layoutOrder: number, parent: Instance): TextButton
+	local button = Instance.new("TextButton")
+	button.Name = name
+	button.AutoButtonColor = false
+	button.BackgroundColor3 = COLOR_ACCENT
+	button.BackgroundTransparency = 1
+	button.Size = UDim2.new(1, 0, 0, 44)
+	button.Font = FONT_TITLE
+	button.Text = text
+	button.TextSize = 22
+	button.TextColor3 = COLOR_TEXT
+	button.LayoutOrder = layoutOrder
+	button.Parent = parent
+
+	local stroke = Instance.new("UIStroke")
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Color = COLOR_ACCENT
+	stroke.Thickness = 1
+	stroke.Parent = button
+
+	return button
+end
+
+-- Une page du panneau : un cadre plein, dont les enfants s'empilent verticalement, centrés.
+local function newPage(name: string, parent: Instance): Frame
+	local page = Instance.new("Frame")
+	page.Name = name
+	page.BackgroundTransparency = 1
+	page.Size = UDim2.fromScale(1, 1)
+	page.Parent = parent
+
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Vertical
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, LIST_PADDING)
+	layout.Parent = page
+
+	return page
+end
+
+local function newStepper(name: string, caption: string, layoutOrder: number, parent: Instance): Stepper
+	local frame = Instance.new("Frame")
+	frame.Name = name
+	frame.BackgroundTransparency = 1
+	frame.Size = UDim2.new(1, 0, 0, STEPPER_HEIGHT)
+	frame.LayoutOrder = layoutOrder
+	frame.Parent = parent
+
+	local captionLabel = newLabel(caption, FONT_CAPTION, 12, COLOR_MUTED)
+	captionLabel.Name = "Caption"
+	captionLabel.Size = UDim2.new(1, 0, 0, 16)
+	captionLabel.Parent = frame
+
+	local counterLabel = newLabel("", FONT_CAPTION, 11, COLOR_MUTED)
+	counterLabel.Name = "Counter"
+	counterLabel.Size = UDim2.new(1, 0, 0, 16)
+	counterLabel.TextXAlignment = Enum.TextXAlignment.Right
+	counterLabel.Parent = frame
+
+	local previousButton = newArrowButton("<")
+	previousButton.Name = "Previous"
+	previousButton.AnchorPoint = Vector2.new(0, 1)
+	previousButton.Position = UDim2.fromScale(0, 1)
+	previousButton.Parent = frame
+
+	local nextButton = newArrowButton(">")
+	nextButton.Name = "Next"
+	nextButton.AnchorPoint = Vector2.new(1, 1)
+	nextButton.Position = UDim2.fromScale(1, 1)
+	nextButton.Parent = frame
+
+	local valueLabel = newLabel("", FONT_TITLE, 24, COLOR_TEXT)
+	valueLabel.Name = "Value"
+	valueLabel.AnchorPoint = Vector2.new(0.5, 1)
+	valueLabel.Position = UDim2.fromScale(0.5, 1)
+	valueLabel.Size = UDim2.new(1, -2 * STEPPER_BUTTON_SIZE, 0, STEPPER_BUTTON_SIZE)
+	valueLabel.TextScaled = true -- les noms longs rétrécissent au lieu de déborder
+	valueLabel.Parent = frame
+
+	local valueSizeLimit = Instance.new("UITextSizeConstraint")
+	valueSizeLimit.MinTextSize = 12
+	valueSizeLimit.MaxTextSize = 23
+	valueSizeLimit.Parent = valueLabel
+
+	return {
+		valueLabel = valueLabel,
+		counterLabel = counterLabel,
+		previousButton = previousButton,
+		nextButton = nextButton,
+	}
+end
+
+-- Bouton d'une magie : son nom, précédé d'une barre à sa couleur.
+local function newMagicButton(entry: MagicEntry, layoutOrder: number, parent: Instance): MagicButton
+	local button = Instance.new("TextButton")
+	button.Name = "Magic" .. layoutOrder
+	button.AutoButtonColor = false
+	button.BackgroundColor3 = entry.color
+	button.BackgroundTransparency = 1
+	button.Size = UDim2.new(1, 0, 0, MAGIC_BUTTON_HEIGHT)
+	button.Font = FONT_TITLE
+	button.Text = entry.name
+	button.TextSize = 24
+	button.TextColor3 = COLOR_TEXT
+	button.LayoutOrder = layoutOrder
+	button.Parent = parent
+
+	local stroke = Instance.new("UIStroke")
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Color = entry.color
+	stroke.Thickness = 1
+	stroke.Transparency = 0.75
+	stroke.Parent = button
+
+	local swatch = Instance.new("Frame")
+	swatch.Name = "Swatch"
+	swatch.BorderSizePixel = 0
+	swatch.BackgroundColor3 = entry.color
+	swatch.Size = UDim2.new(0, 4, 1, 0)
+	swatch.Parent = button
+
+	return {
+		button = button,
+		stroke = stroke,
+	}
+end
+
+--------------------------------------------------------------------------------
+-- Construction
+--------------------------------------------------------------------------------
+
+-- `magicEntries` : une entrée par Magie Innée, dans l'ordre de MagicConfig.MAGICS.
+function AvatarCreatorView.create(parent: Instance, magicEntries: { MagicEntry }): View
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "AvatarCreatorGui"
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.DisplayOrder = 50
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	gui.Enabled = false
+
+	-- Panneau ---------------------------------------------------------------
+	local panel = Instance.new("CanvasGroup") -- CanvasGroup : permet de fondre tout le panneau d'un coup
+	panel.Name = "Panel"
+	panel.BackgroundTransparency = 1
+	panel.AnchorPoint = Vector2.new(1, 0)
+	panel.Position = UDim2.fromScale(1, 0)
+	panel.Size = UDim2.fromScale(PANEL_WIDTH_SCALE, 1)
+	panel.Parent = gui
+
+	local shade = Instance.new("Frame")
+	shade.Name = "Shade"
+	shade.BorderSizePixel = 0
+	shade.BackgroundColor3 = COLOR_BACKGROUND
+	shade.Size = UDim2.fromScale(1, 1)
+	shade.Parent = panel
+
+	local shadeGradient = Instance.new("UIGradient")
+	shadeGradient.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(0.45, 0.25),
+		NumberSequenceKeypoint.new(1, 0.1),
+	})
+	shadeGradient.Parent = shade
+
+	local content = Instance.new("Frame")
+	content.Name = "Content"
+	content.BackgroundTransparency = 1
+	content.AnchorPoint = Vector2.new(1, 0.5)
+	content.Position = UDim2.fromScale(1, 0.5)
+	content.Size = UDim2.fromScale(0.8, 1)
+	content.Parent = panel
+
+	local padding = Instance.new("UIPadding")
+	padding.PaddingLeft = UDim.new(0, 16)
+	padding.PaddingRight = UDim.new(0, 32)
+	padding.Parent = content
+
+	-- Sur un petit écran (ou une petite fenêtre Studio), tout le contenu rétrécit pour rester visible.
+	local contentScale = Instance.new("UIScale")
+	contentScale.Parent = content
+
+	local function updateContentScale()
+		contentScale.Scale = math.min(1, gui.AbsoluteSize.Y / REFERENCE_SCREEN_HEIGHT)
+	end
+	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateContentScale)
+
+	-- Page 1 : apparence ------------------------------------------------------
+	local appearancePage = newPage("AppearancePage", content)
+	newPageHeader("É V E I L", "Souvenez-vous de qui vous étiez.", appearancePage)
+
+	local baseStepper = newStepper("Base", "CORPS", 4, appearancePage)
+	local faceStepper = newStepper("Face", "VISAGE", 5, appearancePage)
+	local markStepper = newStepper("Mark", "CICATRICES ET TATOUAGES", 6, appearancePage)
+	local hairStepper = newStepper("Hair", "CHEVELURE", 7, appearancePage)
+	local outfitStepper = newStepper("Outfit", "TENUE", 8, appearancePage)
+	local heightStepper = newStepper("Height", "TAILLE", 9, appearancePage)
+	local widthStepper = newStepper("Width", "CARRURE", 10, appearancePage)
+
+	newSeparator(11, appearancePage)
+	local nextButton = newWideButton("Next", "CONTINUER", 12, appearancePage)
+
+	-- Page 2 : Magie Innée ----------------------------------------------------
+	local destinyPage = newPage("DestinyPage", content)
+	destinyPage.Visible = false
+	newPageHeader("D E S T I N", "Une seule magie coule dans vos veines.", destinyPage)
+
+	local magicButtons: { MagicButton } = {}
+	for index, entry in magicEntries do
+		magicButtons[index] = newMagicButton(entry, 3 + index, destinyPage)
+	end
+	local afterMagics = 3 + #magicEntries
+
+	local magicDescription = newLabel("", FONT_TITLE, 17, COLOR_MUTED)
+	magicDescription.Name = "MagicDescription"
+	magicDescription.Size = UDim2.new(1, 0, 0, MAGIC_DESCRIPTION_HEIGHT)
+	magicDescription.TextWrapped = true
+	magicDescription.TextYAlignment = Enum.TextYAlignment.Top
+	magicDescription.RichText = true
+	magicDescription.LayoutOrder = afterMagics + 1
+	magicDescription.Parent = destinyPage
+
+	newSeparator(afterMagics + 2, destinyPage)
+	local confirmButton = newWideButton("Confirm", "", afterMagics + 3, destinyPage)
+
+	local backButton = Instance.new("TextButton")
+	backButton.Name = "Back"
+	backButton.AutoButtonColor = false
+	backButton.BackgroundTransparency = 1
+	backButton.Size = UDim2.new(1, 0, 0, 24)
+	backButton.Font = FONT_TITLE
+	backButton.Text = "Revenir à l'apparence"
+	backButton.TextSize = 17
+	backButton.TextColor3 = COLOR_MUTED
+	backButton.LayoutOrder = afterMagics + 4
+	backButton.Parent = destinyPage
+
+	-- Voile noir + narration (au-dessus de tout) -----------------------------
+	local fade = Instance.new("Frame")
+	fade.Name = "Fade"
+	fade.BorderSizePixel = 0
+	fade.BackgroundColor3 = Color3.new(0, 0, 0)
+	fade.Size = UDim2.fromScale(1, 1)
+	fade.ZIndex = 10
+	fade.Parent = gui
+
+	local introLabel = newLabel("", FONT_TITLE, 30, COLOR_TEXT)
+	introLabel.Name = "IntroLabel"
+	introLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+	introLabel.Position = UDim2.fromScale(0.5, 0.5)
+	introLabel.Size = UDim2.fromScale(0.8, 0.2)
+	introLabel.TextWrapped = true
+	introLabel.TextTransparency = 1
+	introLabel.ZIndex = 11
+	introLabel.Parent = fade
+
+	gui.Parent = parent
+	updateContentScale()
+
+	return {
+		gui = gui,
+		panel = panel,
+		fade = fade,
+		introLabel = introLabel,
+
+		appearancePage = appearancePage,
+		baseStepper = baseStepper,
+		faceStepper = faceStepper,
+		markStepper = markStepper,
+		hairStepper = hairStepper,
+		outfitStepper = outfitStepper,
+		heightStepper = heightStepper,
+		widthStepper = widthStepper,
+		nextButton = nextButton,
+
+		destinyPage = destinyPage,
+		magicButtons = magicButtons,
+		magicDescription = magicDescription,
+		confirmButton = confirmButton,
+		backButton = backButton,
+	}
+end
+
+return AvatarCreatorView
+]]></ProtectedString>
+						<string name="ScriptGuid">{21577DCC-EB58-4754-9D53-3F4197AFCDD5}</string>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<string name="Name">AvatarCreatorView</string>
+						<BinaryString name="SerializedOverrides"></BinaryString>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+					</Properties>
+				</Item>
+			</Item>
+			<Item class="Folder" referent="RBXEBF2A80DE9C9433C8F3281EB4D4B4FA6">
+				<Properties>
+					<Color3 name="IconTint">
+						<R>0</R>
+						<G>0</G>
+						<B>0</B>
+					</Color3>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">Combat</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+				<Item class="LocalScript" referent="RBXF7B5433C3EDF4F44A47881832E1D20EA">
+					<Properties>
+						<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	CombatController (LocalScript)
+	Chef d'orchestre du combat côté client :
+		- clic gauche : combo à l'épée (enchaînement, mémoire d'un clic, remise à zéro) ;
+		  le coup part tout de suite en local (soft-lock, animation, traînée, zone de frappe) ;
+		- soft-lock : au départ de chaque coup, le personnage se tourne vers l'ennemi le plus proche ;
+		- zone de frappe : pendant la fenêtre de frappe, et seulement là, tout ennemi présent dans
+		  la boîte devant le joueur est signalé au serveur (SpatialHitbox) ;
+		- jauge de Tension : suit l'attribut du Player écrit par le serveur ;
+		- touche E : demande l'ultime de sa Magie Innée quand la jauge est pleine ;
+		- déclenche les VFX (CombatEffects) en réaction aux événements du serveur.
+
+	Règle de base : rien ici ne tourne en continu. Tout part d'une entrée du joueur
+	(onAttackInput, onUltimateInput) ou d'un événement du serveur.
+
+	Le client ne retire jamais de points de vie et ne touche jamais à la Tension :
+	il demande (RequestAttack, ReportHit, RequestUltimate), CombatService vérifie et décide.
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+local sharedFolder = ReplicatedStorage:WaitForChild("Shared")
+local combatFolder = sharedFolder:WaitForChild("Combat")
+local AvatarConfig = require(sharedFolder:WaitForChild("Avatar"):WaitForChild("AvatarConfig") :: ModuleScript)
+local MagicConfig = require(sharedFolder:WaitForChild("Magic"):WaitForChild("MagicConfig") :: ModuleScript)
+local Config = require(combatFolder:WaitForChild("CombatConfig") :: ModuleScript)
+local Remotes = require(combatFolder:WaitForChild("CombatRemotes") :: ModuleScript)
+local SpatialHitbox = require(combatFolder:WaitForChild("SpatialHitbox") :: ModuleScript)
+
+local CombatEffects = require(script.Parent:WaitForChild("CombatEffects") :: ModuleScript)
+local SoftLock = require(script.Parent:WaitForChild("SoftLock") :: ModuleScript)
+local SwingAnimator = require(script.Parent:WaitForChild("SwingAnimator") :: ModuleScript)
+local TensionView = require(script.Parent:WaitForChild("TensionView") :: ModuleScript)
+
+local GAUGE_FILL_DURATION = 0.25 -- la barre glisse vers sa nouvelle valeur
+local GAUGE_PULSE_DURATION = 0.6 -- demi-période du clignotement quand la jauge est pleine
+local GAUGE_STROKE_TRANSPARENCY = 0.4 -- liseré de la barre au repos (même valeur que dans TensionView)
+
+local localPlayer = Players.LocalPlayer
+local tensionView = TensionView.create(localPlayer:WaitForChild("PlayerGui"))
+
+--------------------------------------------------------------------------------
+-- État
+--------------------------------------------------------------------------------
+
+local isAttacking = false -- un coup (ou un enchaînement) est en cours
+local hasBufferedInput = false -- un clic est arrivé pendant le coup : il déclenchera le suivant
+local lastComboIndex = 0 -- dernier coup terminé (0 = aucun)
+local lastAttackEndClock = 0 -- os.clock() de fin du dernier coup
+
+local hitbox: any = nil -- SpatialHitbox du personnage actuel
+local hitboxRootPart: BasePart? = nil
+
+local gaugePulseTweens: { Tween } = {} -- clignotement de la jauge pleine (vide = pas de clignotement)
+
+--------------------------------------------------------------------------------
+-- Helpers
+--------------------------------------------------------------------------------
+
+-- Retourne le personnage local, son Humanoid, son RootPart et son épée s'il est en état d'agir.
+local function getReadyCharacter(): (Model?, Humanoid?, BasePart?, Instance?)
+	local character = localPlayer.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local rootPart = humanoid and humanoid.RootPart
+	local sword = character and character:FindFirstChild(Config.SWORD_NAME)
+	if character == nil or humanoid == nil or rootPart == nil or sword == nil then
+		return nil, nil, nil, nil
+	end
+	-- Un RootPart ancré = joueur figé par le serveur (Hub, anomalie, rewind).
+	if humanoid.Health <= 0 or rootPart.Anchored then
+		return nil, nil, nil, nil
+	end
+	return character, humanoid, rootPart, sword
+end
+
+-- La zone de frappe est liée à un RootPart précis : on la reconstruit quand il change (respawn).
+local function getHitbox(character: Model, rootPart: BasePart): any
+	if hitboxRootPart ~= rootPart then
+		hitbox = SpatialHitbox.new(rootPart, { character })
+		hitboxRootPart = rootPart
+	end
+	return hitbox
+end
+
+-- Taille de la zone de frappe du coup `step` : la boîte de base, étirée vers l'avant par son allonge.
+local function getHitboxSize(step: any): Vector3
+	return Config.HITBOX_SIZE + Vector3.new(0, 0, step.reachBonus)
+end
+
+local function getTension(): number
+	local tension = localPlayer:GetAttribute(Config.TENSION_ATTRIBUTE)
+	return if type(tension) == "number" then tension else 0
+end
+
+-- Magie Innée du joueur local (la première de la liste tant qu'il n'a pas choisi).
+local function getMagic(): any
+	return MagicConfig.getById(localPlayer:GetAttribute(MagicConfig.ATTRIBUTE))
+end
+
+local function onHitboxHit(target: Model, position: Vector3)
+	-- Retour immédiat pour l'attaquant (impact, hit-stop, secousse), sans attendre le serveur.
+	CombatEffects.playSwordHit(localPlayer.Character, target, position, true)
+	Remotes.ReportHit:FireServer(target)
+end
+
+--------------------------------------------------------------------------------
+-- Combo à l'épée
+--------------------------------------------------------------------------------
+
+-- Le combo continue si le coup précédent n'était pas le dernier et vient juste de finir.
+local function getNextComboIndex(): number
+	local isComboAlive = lastComboIndex > 0
+		and lastComboIndex < #Config.COMBO
+		and os.clock() - lastAttackEndClock <= Config.COMBO_RESET_DELAY
+	return if isComboAlive then lastComboIndex + 1 else 1
+end
+
+-- Soft-lock : tourne le personnage vers l'ennemi le plus proche et verrouille cette orientation.
+-- Retourne la fonction qui rend la rotation automatique au Humanoid (à appeler en fin de frappe).
+local function lockOntoNearestEnemy(character: Model, humanoid: Humanoid, rootPart: BasePart): () -> ()
+	local target = if Config.SOFT_LOCK_RADIUS > 0
+		then SoftLock.findTarget(character, rootPart, Config.SOFT_LOCK_RADIUS)
+		else nil
+	if target == nil then
+		return function() end
+	end
+
+	SoftLock.face(rootPart, target)
+
+	-- Sans cela, un joueur qui se déplace serait aussitôt retourné vers sa direction de marche
+	-- et la zone de frappe partirait à côté.
+	local previousAutoRotate = humanoid.AutoRotate
+	humanoid.AutoRotate = false
+	return function()
+		humanoid.AutoRotate = previousAutoRotate
+	end
+end
+
+-- Exécute UN coup du début à la fin. YIELD pendant toute sa durée.
+local function performAttack(character: Model, humanoid: Humanoid, rootPart: BasePart, sword: Instance, comboIndex: number)
+	local step = Config.COMBO[comboIndex]
+	local hitWindow = step.hitEnd - step.hitStart
+
+	local releaseLock = lockOntoNearestEnemy(character, humanoid, rootPart)
+	Remotes.RequestAttack:FireServer(comboIndex)
+	SwingAnimator.play(character, step)
+
+	-- Fenêtre de frappe : traînée et zone de frappe ne vivent qu'entre hitStart et hitEnd.
+	-- La zone s'éteint d'elle-même au bout de la durée donnée (voir SpatialHitbox.start).
+	task.wait(step.hitStart)
+	if localPlayer.Character == character then
+		CombatEffects.playBladeTrail(sword, hitWindow)
+		getHitbox(character, rootPart):start(hitWindow, getHitboxSize(step), onHitboxHit)
+	end
+
+	task.wait(hitWindow)
+	releaseLock()
+
+	task.wait(step.duration - step.hitEnd)
+end
+
+-- Seul point d'entrée d'une attaque à l'épée : appelé une fois par clic gauche.
+local function onAttackInput()
+	-- Clic pendant un coup : on le retient, il lancera le coup suivant dès la fin de celui-ci.
+	if isAttacking then
+		hasBufferedInput = true
+		return
+	end
+
+	isAttacking = true
+	repeat
+		hasBufferedInput = false -- le clic qui nous amène ici est consommé
+
+		local character, humanoid, rootPart, sword = getReadyCharacter()
+		if character == nil or humanoid == nil or rootPart == nil or sword == nil then
+			break
+		end
+
+		-- pcall : une erreur pendant un coup ne doit pas laisser isAttacking bloqué à true.
+		local comboIndex = getNextComboIndex()
+		local isCompleted, errorMessage = pcall(performAttack, character, humanoid, rootPart, sword, comboIndex)
+		if not isCompleted then
+			humanoid.AutoRotate = true -- le soft-lock n'a peut-être pas pu rendre la rotation
+			warn(`[Combat] Coup interrompu : {errorMessage}`)
+			break
+		end
+		lastComboIndex = comboIndex
+		lastAttackEndClock = os.clock()
+	until not hasBufferedInput -- pas de nouveau clic pendant le coup : on s'arrête
+	isAttacking = false
+end
+
+-- Mort ou respawn : on oublie le combo et on coupe la zone de frappe du coup en cours.
+local function resetCombat()
+	hasBufferedInput = false
+	lastComboIndex = 0
+	if hitbox then
+		hitbox:stop()
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Pouvoir ultime
+--------------------------------------------------------------------------------
+
+-- Seul point d'entrée de l'ultime : appelé une fois par appui sur ULTIMATE_INPUT.
+-- Ce test local évite juste d'envoyer une demande inutile ; c'est le serveur qui vérifie la jauge.
+local function onUltimateInput()
+	if getTension() < Config.TENSION_MAX or getReadyCharacter() == nil then
+		return
+	end
+	Remotes.RequestUltimate:FireServer()
+end
+
+--------------------------------------------------------------------------------
+-- Jauge de Tension
+--------------------------------------------------------------------------------
+
+local function stopGaugePulse()
+	for _, pulseTween in gaugePulseTweens do
+		pulseTween:Cancel()
+	end
+	gaugePulseTweens = {}
+	tensionView.barStroke.Transparency = GAUGE_STROKE_TRANSPARENCY
+	tensionView.prompt.TextTransparency = 0
+end
+
+-- Jauge pleine : le liseré et l'invite clignotent jusqu'à ce que la Tension soit dépensée.
+-- (Deux tweens en boucle, arrêtés par stopGaugePulse : aucun script ne tourne pendant ce temps.)
+local function startGaugePulse()
+	if #gaugePulseTweens > 0 then
+		return
+	end
+	local pulseInfo = TweenInfo.new(GAUGE_PULSE_DURATION, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
+
+	tensionView.barStroke.Transparency = 0
+	gaugePulseTweens = {
+		TweenService:Create(tensionView.barStroke, pulseInfo, { Transparency = 0.7 }),
+		TweenService:Create(tensionView.prompt, pulseInfo, { TextTransparency = 0.6 }),
+	}
+	for _, pulseTween in gaugePulseTweens do
+		pulseTween:Play()
+	end
+end
+
+-- Recopie la Tension du serveur dans l'interface. Appelé à chaque changement de l'attribut.
+local function refreshGauge()
+	local ratio = math.clamp(getTension() / Config.TENSION_MAX, 0, 1)
+	local isFull = ratio >= 1
+
+	local fillInfo = TweenInfo.new(GAUGE_FILL_DURATION, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	TweenService:Create(tensionView.fill, fillInfo, { Size = UDim2.fromScale(ratio, 1) }):Play()
+
+	tensionView.prompt.Visible = isFull
+	if isFull then
+		startGaugePulse()
+	else
+		stopGaugePulse()
+	end
+end
+
+-- L'invite porte le nom de l'ultime du joueur, à la couleur de sa magie.
+local function refreshUltimatePrompt()
+	local magic = getMagic()
+	tensionView.prompt.Text = `[{Config.ULTIMATE_INPUT.Name}]  {magic.ultimateName}`
+	tensionView.prompt.TextColor3 = magic.palette.glow
+end
+
+-- La jauge est masquée tant que le joueur est dans le Hub de création.
+local function refreshGaugeVisibility()
+	tensionView.gui.Enabled = localPlayer:GetAttribute(AvatarConfig.CUSTOMIZING_ATTRIBUTE) ~= true
+end
+
+localPlayer:GetAttributeChangedSignal(Config.TENSION_ATTRIBUTE):Connect(refreshGauge)
+localPlayer:GetAttributeChangedSignal(MagicConfig.ATTRIBUTE):Connect(refreshUltimatePrompt)
+localPlayer:GetAttributeChangedSignal(AvatarConfig.CUSTOMIZING_ATTRIBUTE):Connect(refreshGaugeVisibility)
+refreshGauge()
+refreshUltimatePrompt()
+refreshGaugeVisibility()
+
+--------------------------------------------------------------------------------
+-- Entrée joueur
+--------------------------------------------------------------------------------
+
+UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
+	if gameProcessed then
+		return -- clic sur l'interface, saisie dans le chat...
+	end
+
+	if input.UserInputType == Config.ATTACK_INPUT then
+		onAttackInput()
+	elseif input.KeyCode == Config.ULTIMATE_INPUT then
+		onUltimateInput()
+	end
+end)
+
+localPlayer.CharacterAdded:Connect(resetCombat)
+
+--------------------------------------------------------------------------------
+-- Événements serveur
+--------------------------------------------------------------------------------
+
+-- Un AUTRE joueur attaque : son animation est déjà répliquée par Roblox, il ne manque que
+-- la traînée de sa lame, à allumer chez nous pendant sa fenêtre de frappe.
+Remotes.AttackStarted.OnClientEvent:Connect(function(attacker: Model?, comboIndex: number)
+	local step = Config.COMBO[comboIndex]
+	local sword = attacker and attacker:FindFirstChild(Config.SWORD_NAME)
+	if step == nil or sword == nil then
+		return
+	end
+
+	task.wait(step.hitStart)
+	CombatEffects.playBladeTrail(sword, step.hitEnd - step.hitStart)
+end)
+
+-- Impact validé par le serveur (coup d'un autre joueur ou du boss). Pour nos propres coups,
+-- l'effet a déjà été joué à la détection. La caméra ne tremble que si c'est nous qui encaissons.
+Remotes.HitConfirmed.OnClientEvent:Connect(function(attacker: Model?, target: Model?, _damage: number)
+	local localCharacter = localPlayer.Character
+	if target and attacker ~= localCharacter then
+		CombatEffects.playSwordHit(attacker, target, nil, target == localCharacter)
+	end
+end)
+
+-- Ultime validé par le serveur (le nôtre ou celui d'un autre joueur) : place au spectacle,
+-- aux couleurs de la magie du lanceur.
+Remotes.UltimateFired.OnClientEvent:Connect(function(caster: Model?, origin: Vector3, targets: { Model }, magicId: string)
+	if typeof(origin) == "Vector3" and type(targets) == "table" then
+		CombatEffects.playUltimate(caster, origin, targets, MagicConfig.getById(magicId))
+	end
+end)
+]]></ProtectedString>
+						<bool name="Disabled">false</bool>
+						<Content name="LinkedSource"><null></null></Content>
+						<token name="RunContext">0</token>
+						<string name="ScriptGuid">{B7450D90-A76D-4095-B0FF-D29E98244DEF}</string>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<string name="Name">CombatController</string>
+						<BinaryString name="SerializedOverrides"></BinaryString>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+					</Properties>
+				</Item>
+				<Item class="ModuleScript" referent="RBXD73909D148324427ADB80013D7FB8E6D">
+					<Properties>
+						<Content name="LinkedSource"><null></null></Content>
+						<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	SwingAnimator
+	Joue l'animation d'un coup d'épée avec le système officiel de Roblox :
+	une instance Animation, chargée sur l'Animator du Humanoid, puis Play().
+
+	À n'appeler que pour le personnage du joueur local : une animation jouée sur son propre
+	Animator est répliquée automatiquement au serveur et aux autres clients.
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local sharedFolder = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Combat")
+local Config = require(sharedFolder:WaitForChild("CombatConfig") :: ModuleScript)
+
+local SwingAnimator = {}
+
+-- Pistes déjà chargées, par Animator : une animation ne se charge qu'une fois par personnage.
+local loadedTracks: { [Animator]: { [string]: AnimationTrack } } = {}
+
+local function getTracks(animator: Animator): { [string]: AnimationTrack }
+	local existingTracks = loadedTracks[animator]
+	if existingTracks then
+		return existingTracks
+	end
+
+	local tracks = {}
+	loadedTracks[animator] = tracks
+	animator.Destroying:Connect(function()
+		loadedTracks[animator] = nil
+	end)
+	return tracks
+end
+
+local function getTrack(animator: Animator, animationId: string): AnimationTrack
+	local tracks = getTracks(animator)
+	local existingTrack = tracks[animationId]
+	if existingTrack then
+		return existingTrack
+	end
+
+	local animation = Instance.new("Animation")
+	animation.AnimationId = animationId
+
+	local track = animator:LoadAnimation(animation)
+	track.Priority = Enum.AnimationPriority.Action -- passe au-dessus de l'idle et de la marche
+	track.Looped = false
+	tracks[animationId] = track
+	return track
+end
+
+-- Joue l'animation du coup `step` (une entrée de CombatConfig.COMBO) sur `character`.
+-- Rejouer une piste déjà en cours la relance du début : deux coups identiques s'enchaînent bien.
+function SwingAnimator.play(character: Model, step: any)
+	if step.animationId == "" then
+		return
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
+	if animator == nil then
+		return
+	end
+
+	-- Play(fondu, poids, vitesse) : la vitesse vient de la config pour rendre chaque coup plus ou moins sec.
+	getTrack(animator, step.animationId):Play(Config.ANIMATION_FADE_TIME, 1, step.animationSpeed)
+end
+
+return SwingAnimator
+]]></ProtectedString>
+						<string name="ScriptGuid">{B9CE7F00-6D43-45D2-9244-8CDF65C79871}</string>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<string name="Name">SwingAnimator</string>
+						<BinaryString name="SerializedOverrides"></BinaryString>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+					</Properties>
+				</Item>
+				<Item class="ModuleScript" referent="RBX1F83E65B2E8E4109B8DD338456C903D9">
+					<Properties>
+						<Content name="LinkedSource"><null></null></Content>
+						<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	TensionView
+	Construit la jauge de Tension, entièrement par code (rien à poser dans StarterGui).
+	Comme AvatarCreatorView, ce module ne contient AUCUNE logique : il crée les instances
+	et les expose, c'est CombatController qui remplit la barre et affiche l'invite.
+
+	Arborescence produite :
+		TensionGui (ScreenGui)
+		└── Container (Frame)        bas de l'écran, centré
+		    ├── Prompt               invite de l'ultime, visible seulement jauge pleine
+		    ├── Caption              "TENSION"
+		    └── Bar (Frame)          fond sombre + liseré
+		        └── Fill             partie remplie (largeur = ratio de Tension)
+]]
+
+local COLOR_BACKGROUND = Color3.fromRGB(6, 6, 9)
+local COLOR_MUTED = Color3.fromRGB(128, 122, 114)
+local COLOR_ACCENT = Color3.fromRGB(176, 146, 96) -- or terni, comme le menu de création
+local COLOR_FILL_START = Color3.fromRGB(70, 30, 140)
+local COLOR_FILL_END = Color3.fromRGB(190, 120, 255)
+
+local FONT_TITLE = Enum.Font.Garamond
+local FONT_CAPTION = Enum.Font.GothamMedium
+
+local CONTAINER_SIZE = UDim2.fromOffset(340, 52)
+local BOTTOM_MARGIN = 36 -- pixels entre la jauge et le bas de l'écran
+local BAR_HEIGHT = 10
+
+export type View = {
+	gui: ScreenGui,
+	bar: Frame,
+	barStroke: UIStroke,
+	fill: Frame,
+	prompt: TextLabel,
+}
+
+local TensionView = {}
+
+function TensionView.create(parent: Instance): View
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "TensionGui"
+	gui.ResetOnSpawn = false
+	gui.DisplayOrder = 10 -- sous le menu de création (50) et le glitch d'anomalie (100)
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+	local container = Instance.new("Frame")
+	container.Name = "Container"
+	container.BackgroundTransparency = 1
+	container.AnchorPoint = Vector2.new(0.5, 1)
+	container.Position = UDim2.new(0.5, 0, 1, -BOTTOM_MARGIN)
+	container.Size = CONTAINER_SIZE
+	container.Parent = gui
+
+	local prompt = Instance.new("TextLabel")
+	prompt.Name = "Prompt"
+	prompt.BackgroundTransparency = 1
+	prompt.Size = UDim2.new(1, 0, 0, 22)
+	prompt.Font = FONT_TITLE
+	prompt.TextSize = 20
+	prompt.TextColor3 = COLOR_FILL_END
+	prompt.TextStrokeColor3 = COLOR_BACKGROUND
+	prompt.TextStrokeTransparency = 0.3
+	prompt.Text = ""
+	prompt.Visible = false
+	prompt.Parent = container
+
+	local caption = Instance.new("TextLabel")
+	caption.Name = "Caption"
+	caption.BackgroundTransparency = 1
+	caption.Position = UDim2.fromOffset(0, 26)
+	caption.Size = UDim2.new(1, 0, 0, 14)
+	caption.Font = FONT_CAPTION
+	caption.TextSize = 11
+	caption.TextColor3 = COLOR_MUTED
+	caption.TextXAlignment = Enum.TextXAlignment.Left
+	caption.Text = "TENSION"
+	caption.Parent = container
+
+	local bar = Instance.new("Frame")
+	bar.Name = "Bar"
+	bar.BorderSizePixel = 0
+	bar.BackgroundColor3 = COLOR_BACKGROUND
+	bar.BackgroundTransparency = 0.25
+	bar.AnchorPoint = Vector2.new(0, 1)
+	bar.Position = UDim2.fromScale(0, 1)
+	bar.Size = UDim2.new(1, 0, 0, BAR_HEIGHT)
+	bar.Parent = container
+
+	local barStroke = Instance.new("UIStroke")
+	barStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	barStroke.Color = COLOR_ACCENT
+	barStroke.Transparency = 0.4
+	barStroke.Thickness = 1
+	barStroke.Parent = bar
+
+	local fill = Instance.new("Frame")
+	fill.Name = "Fill"
+	fill.BorderSizePixel = 0
+	fill.BackgroundColor3 = Color3.new(1, 1, 1) -- la couleur vient du dégradé
+	fill.Size = UDim2.fromScale(0, 1)
+	fill.Parent = bar
+
+	local fillGradient = Instance.new("UIGradient")
+	fillGradient.Color = ColorSequence.new(COLOR_FILL_START, COLOR_FILL_END)
+	fillGradient.Parent = fill
+
+	gui.Parent = parent
+
+	return {
+		gui = gui,
+		bar = bar,
+		barStroke = barStroke,
+		fill = fill,
+		prompt = prompt,
+	}
+end
+
+return TensionView
+]]></ProtectedString>
+						<string name="ScriptGuid">{1696E801-1C05-47CD-9C81-C16DB19079D3}</string>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<string name="Name">TensionView</string>
+						<BinaryString name="SerializedOverrides"></BinaryString>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+					</Properties>
+				</Item>
+				<Item class="ModuleScript" referent="RBX45D92EF950424390BC76A04BBAC1A774">
+					<Properties>
+						<Content name="LinkedSource"><null></null></Content>
+						<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	CombatEffects
+	Tous les effets visuels du combat, joués localement par chaque client :
+		- playBladeTrail : allume la traînée de la lame pendant la fenêtre de frappe ;
+		- playHitImpact  : flash de la cible + gerbe d'étincelles ;
+		- playSwordHit   : coup d'épée qui porte = impact + hit-stop + légère secousse de caméra ;
+		- playUltimate   : le pouvoir ultime, aux couleurs de la Magie Innée du lanceur
+		                   (arrêt sur image, onde de choc, flash, secousse).
+
+	Rien ici n'a d'effet sur le jeu : pas de dégâts, pas de collision. Toutes les pièces créées
+	sont locales (invisibles pour le serveur et les autres joueurs), ancrées, intangibles,
+	et se détruisent toutes seules. Particules et lumières sont générées par script, sans asset.
+]]
+
+local Debris = game:GetService("Debris")
+local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+
+local sharedFolder = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Combat")
+local Config = require(sharedFolder:WaitForChild("CombatConfig") :: ModuleScript)
+
+-- Palette ----------------------------------------------------------------------
+-- (Les couleurs d'un ultime ne sont pas ici : elles viennent de la palette de la magie du lanceur.)
+local COLOR_WHITE = Color3.new(1, 1, 1)
+
+-- Textures de particules livrées avec le client Roblox (aucun asset à importer).
+local SPARK_TEXTURE = "rbxasset://textures/particles/sparkles_main.dds"
+local SMOKE_TEXTURE = "rbxasset://textures/particles/smoke_main.dds"
+
+-- Impact d'épée ----------------------------------------------------------------
+local HIT_FLASH_DURATION = 0.2
+local HIT_SPARK_COUNT = 14
+local HIT_SHAKE_DURATION = 0.15 -- secousse très courte...
+local HIT_SHAKE_AMPLITUDE = 0.22 -- ...et légère (l'ultime monte à SHAKE_AMPLITUDE)
+
+-- Ultime -----------------------------------------------------------------------
+local CORE_SIZE = 11 -- diamètre de la sphère de vide à la fin de l'arrêt sur image
+local CORE_COLLAPSE_DURATION = 0.1
+local SHOCKWAVE_DURATION = 0.55
+local GROUND_RING_DURATION = 0.7
+local PILLAR_HEIGHT = 90
+local PILLAR_DURATION = 0.5
+local LIGHT_DURATION = 0.8
+local FLASH_FADE_DURATION = 0.9
+local SHAKE_DURATION = 0.9
+local SHAKE_AMPLITUDE = 1.6 -- studs de décalage de caméra au plus fort
+local SHAKE_ROLL = 4 -- degrés de roulis au plus fort
+local FOV_PUNCH = 22 -- degrés ajoutés au champ de vision au moment de l'explosion
+local FOV_RECOVER_DURATION = 0.6
+-- Un spectateur ressent l'ultime à pleine force dans son rayon, puis de moins en moins jusqu'à 3 rayons.
+local FALLOFF_RADIUS_FACTOR = 3
+
+type ScreenLook = { Brightness: number, Contrast: number, Saturation: number, TintColor: Color3 }
+
+local NEUTRAL_LOOK: ScreenLook = { Brightness = 0, Contrast = 0, Saturation = 0, TintColor = COLOR_WHITE }
+-- Arrêt sur image : noir et blanc brutal, façon "impact frame" d'anime.
+local IMPACT_FRAME_LOOK: ScreenLook = { Brightness = -0.12, Contrast = 1, Saturation = -1, TintColor = COLOR_WHITE }
+-- Explosion : écran brûlé de blanc violet.
+local FLASH_LOOK: ScreenLook = { Brightness = 0.9, Contrast = 0.5, Saturation = 0.4, TintColor = COLOR_WHITE }
+
+local random = Random.new()
+
+local CombatEffects = {}
+
+--------------------------------------------------------------------------------
+-- Briques de base
+--------------------------------------------------------------------------------
+
+local effectsFolder: Folder? = nil
+
+local function getEffectsFolder(): Folder
+	if effectsFolder and effectsFolder.Parent then
+		return effectsFolder
+	end
+	local folder = Instance.new("Folder")
+	folder.Name = "CombatEffects"
+	folder.Parent = workspace
+	effectsFolder = folder
+	return folder
+end
+
+local function tween(instance: Instance, duration: number, goal: { [string]: any }, style: Enum.EasingStyle?): Tween
+	local tweenInfo = TweenInfo.new(duration, style or Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	local newTween = TweenService:Create(instance, tweenInfo, goal)
+	newTween:Play()
+	return newTween
+end
+
+-- Pièce purement décorative : ancrée, intangible, détruite au bout de `lifetime` secondes.
+local function newEffectPart(name: string, shape: Enum.PartType, size: Vector3, color: Color3, lifetime: number): Part
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Shape = shape
+	part.Size = size
+	part.Color = color
+	part.Material = Enum.Material.Neon
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false
+	Debris:AddItem(part, lifetime)
+	return part
+end
+
+-- Point invisible dans le monde, support des particules et des lumières.
+local function newAnchorPoint(position: Vector3, lifetime: number): Part
+	local anchor = newEffectPart("EffectAnchor", Enum.PartType.Block, Vector3.one * 0.2, COLOR_WHITE, lifetime)
+	anchor.Transparency = 1
+	anchor.CFrame = CFrame.new(position)
+	anchor.Parent = getEffectsFolder()
+	return anchor
+end
+
+-- Projette `count` particules d'un coup depuis `position`. `configure` règle l'émetteur.
+local function emitBurst(position: Vector3, count: number, maxLifetime: number, configure: (ParticleEmitter) -> ())
+	local anchor = newAnchorPoint(position, maxLifetime + 0.5)
+
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Enabled = false -- pas d'émission continue : uniquement la gerbe ci-dessous
+	emitter.LightEmission = 1
+	emitter.LightInfluence = 0
+	emitter.SpreadAngle = Vector2.new(180, 180)
+	emitter.Lifetime = NumberRange.new(maxLifetime * 0.5, maxLifetime)
+	configure(emitter)
+	emitter.Parent = anchor
+
+	-- Un émetteur tout juste créé n'émet rien dans la même frame : on attend la suivante.
+	task.delay(0.03, function()
+		emitter:Emit(count)
+	end)
+end
+
+-- Sol sous `origin` (pour poser l'anneau de l'onde de choc), ou une estimation s'il n'y en a pas.
+local function findGroundPosition(origin: Vector3, ignore: { Instance }): Vector3
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+	raycastParams.FilterDescendantsInstances = ignore
+
+	local result = workspace:Raycast(origin, Vector3.new(0, -20, 0), raycastParams)
+	return if result then result.Position else origin - Vector3.new(0, 3, 0)
+end
+
+--------------------------------------------------------------------------------
+-- Écran (ColorCorrection locale)
+--------------------------------------------------------------------------------
+
+local screenCorrection: ColorCorrectionEffect? = nil
+local screenTween: Tween? = nil
+
+local function getScreenCorrection(): ColorCorrectionEffect
+	if screenCorrection and screenCorrection.Parent then
+		return screenCorrection
+	end
+	local correction = Instance.new("ColorCorrectionEffect")
+	correction.Name = "CombatColorCorrection"
+	correction.Parent = Lighting
+	screenCorrection = correction
+	return correction
+end
+
+-- Rendu intermédiaire entre l'image normale (intensity = 0) et `look` (intensity = 1).
+local function blendLook(look: ScreenLook, intensity: number): ScreenLook
+	return {
+		Brightness = look.Brightness * intensity,
+		Contrast = look.Contrast * intensity,
+		Saturation = look.Saturation * intensity,
+		TintColor = COLOR_WHITE:Lerp(look.TintColor, intensity),
+	}
+end
+
+-- Applique `look` à l'écran : instantanément si duration = 0, sinon en fondu.
+local function setScreenLook(look: ScreenLook, duration: number)
+	local correction = getScreenCorrection()
+	if screenTween then
+		screenTween:Cancel()
+		screenTween = nil
+	end
+
+	if duration <= 0 then
+		correction.Brightness = look.Brightness
+		correction.Contrast = look.Contrast
+		correction.Saturation = look.Saturation
+		correction.TintColor = look.TintColor
+	else
+		screenTween = tween(correction, duration, look :: any, Enum.EasingStyle.Sine)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Caméra
+--------------------------------------------------------------------------------
+
+local SHAKE_RENDER_STEP = "CombatCameraShake"
+
+local shakeStartClock = 0
+local shakeDuration = 0
+local shakeAmplitude = 0
+local isShakeBound = false
+
+-- S'exécute juste après la caméra par défaut, qui recalcule sa position à chaque frame :
+-- le décalage ajouté ici ne s'accumule donc pas d'une frame à l'autre.
+local function updateShake()
+	local elapsed = os.clock() - shakeStartClock
+	local camera = workspace.CurrentCamera
+	if elapsed >= shakeDuration or camera == nil then
+		RunService:UnbindFromRenderStep(SHAKE_RENDER_STEP)
+		isShakeBound = false
+		return
+	end
+
+	local strength = (1 - elapsed / shakeDuration) ^ 2 -- violent au début, s'éteint vite
+	local offset = Vector3.new(random:NextNumber(-1, 1), random:NextNumber(-1, 1), 0) * shakeAmplitude * strength
+	local roll = math.rad(random:NextNumber(-1, 1) * SHAKE_ROLL * strength * (shakeAmplitude / SHAKE_AMPLITUDE))
+	camera.CFrame *= CFrame.new(offset) * CFrame.Angles(0, 0, roll)
+end
+
+local function shakeCamera(duration: number, amplitude: number)
+	if amplitude <= 0 then
+		return
+	end
+
+	-- Une secousse plus forte est peut-être encore en cours (ultime) : un petit coup ne l'écrase pas.
+	if isShakeBound then
+		local remaining = math.max(1 - (os.clock() - shakeStartClock) / shakeDuration, 0)
+		if amplitude < shakeAmplitude * remaining ^ 2 then
+			return
+		end
+	end
+
+	shakeStartClock = os.clock()
+	shakeDuration = duration
+	shakeAmplitude = amplitude
+
+	if not isShakeBound then
+		isShakeBound = true
+		RunService:BindToRenderStep(SHAKE_RENDER_STEP, Enum.RenderPriority.Camera.Value + 1, updateShake)
+	end
+end
+
+local fovTween: Tween? = nil
+local restingFieldOfView = 70
+
+-- Élargit d'un coup le champ de vision, puis le laisse revenir : l'image "recule" sous le souffle.
+local function punchFieldOfView(extraDegrees: number)
+	local camera = workspace.CurrentCamera
+	if camera == nil or extraDegrees <= 0 then
+		return
+	end
+
+	if fovTween then
+		fovTween:Cancel() -- un coup précédent n'était pas fini : on repart de la même valeur de repos
+	else
+		restingFieldOfView = camera.FieldOfView
+	end
+
+	camera.FieldOfView = restingFieldOfView + extraDegrees
+	local recoverTween = tween(camera, FOV_RECOVER_DURATION, { FieldOfView = restingFieldOfView })
+	fovTween = recoverTween
+	recoverTween.Completed:Once(function()
+		if fovTween == recoverTween then
+			fovTween = nil
+		end
+	end)
+end
+
+-- Force (0..1) avec laquelle ce client ressent un effet centré sur `origin` et de rayon `radius`.
+local function getIntensity(origin: Vector3, radius: number): number
+	local camera = workspace.CurrentCamera
+	if camera == nil then
+		return 0
+	end
+	local distance = (camera.CFrame.Position - origin).Magnitude
+	local falloffEnd = radius * FALLOFF_RADIUS_FACTOR
+	return math.clamp((falloffEnd - distance) / (falloffEnd - radius), 0, 1)
+end
+
+--------------------------------------------------------------------------------
+-- Arrêt sur image
+--------------------------------------------------------------------------------
+
+-- Fige les animations en cours de `characters`. Retourne la fonction qui les relance.
+local function freezeAnimations(characters: { Model }): () -> ()
+	local frozenTracks: { { track: AnimationTrack, speed: number } } = {}
+
+	for _, character in characters do
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
+		if animator then
+			for _, track in animator:GetPlayingAnimationTracks() do
+				-- Une piste déjà à l'arrêt est figée par un autre effet : on la lui laisse,
+				-- sinon on la "relancerait" à vitesse 0 et elle resterait bloquée.
+				if track.Speed ~= 0 then
+					table.insert(frozenTracks, { track = track, speed = track.Speed })
+					track:AdjustSpeed(0)
+				end
+			end
+		end
+	end
+
+	return function()
+		for _, frozen in frozenTracks do
+			if frozen.track.IsPlaying then
+				frozen.track:AdjustSpeed(frozen.speed)
+			end
+		end
+	end
+end
+
+--------------------------------------------------------------------------------
+-- API publique : épée
+--------------------------------------------------------------------------------
+
+-- Allume la traînée de lame de `sword` pendant `duration` secondes (la fenêtre de frappe).
+function CombatEffects.playBladeTrail(sword: Instance, duration: number)
+	local trail = sword:FindFirstChild(Config.BLADE_TRAIL_NAME, true)
+	if trail == nil or not trail:IsA("Trail") then
+		return
+	end
+
+	trail.Enabled = true
+	task.delay(duration, function()
+		trail.Enabled = false -- le sillage déjà tracé finit de s'estomper tout seul
+	end)
+end
+
+-- Impact sur `target` : flash du personnage et gerbe d'étincelles.
+-- `position` : point d'impact précis s'il est connu, sinon le centre de la cible.
+function CombatEffects.playHitImpact(target: Model, position: Vector3?, color: Color3?)
+	local flashColor = color or COLOR_WHITE
+
+	local highlight = Instance.new("Highlight")
+	highlight.DepthMode = Enum.HighlightDepthMode.Occluded
+	highlight.FillColor = flashColor
+	highlight.FillTransparency = 0.2
+	highlight.OutlineTransparency = 1
+	highlight.Parent = target
+	tween(highlight, HIT_FLASH_DURATION, { FillTransparency = 1 })
+	Debris:AddItem(highlight, HIT_FLASH_DURATION)
+
+	emitBurst(position or target:GetPivot().Position, HIT_SPARK_COUNT, 0.35, function(emitter: ParticleEmitter)
+		emitter.Texture = SPARK_TEXTURE
+		emitter.Color = ColorSequence.new(COLOR_WHITE, flashColor)
+		emitter.Speed = NumberRange.new(12, 28)
+		emitter.Drag = 4
+		emitter.Size = NumberSequence.new(0.5, 0)
+		emitter.Transparency = NumberSequence.new(0, 1)
+	end)
+end
+
+--[[
+	Coup d'épée qui porte : impact, hit-stop et, si demandé, légère secousse de caméra.
+	Le hit-stop fige les animations de l'attaquant et de la cible pendant HIT_STOP_DURATION :
+	la lame "accroche" un instant dans la cible avant de finir sa course.
+	`shouldShake` : true pour le client qui donne le coup ou qui le reçoit.
+]]
+function CombatEffects.playSwordHit(attacker: Model?, target: Model, position: Vector3?, shouldShake: boolean)
+	CombatEffects.playHitImpact(target, position)
+
+	local resumeAnimations = freezeAnimations(if attacker then { attacker, target } else { target })
+	task.delay(Config.HIT_STOP_DURATION, resumeAnimations)
+
+	if shouldShake then
+		shakeCamera(HIT_SHAKE_DURATION, HIT_SHAKE_AMPLITUDE)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- API publique : pouvoir ultime
+--------------------------------------------------------------------------------
+-- Les couleurs, le rayon et le nom viennent de la Magie Innée du lanceur (MagicConfig) :
+-- `magic` est une entrée de MagicConfig.MAGICS, `magic.palette` ses trois couleurs.
+
+-- Phase 2 de l'ultime : tout ce qui part de `origin` au moment de l'explosion.
+local function spawnEruption(origin: Vector3, groundPosition: Vector3, radius: number, palette: any)
+	local folder = getEffectsFolder()
+	local diameter = radius * 2
+
+	-- Onde de choc : une sphère qui enfle jusqu'au rayon réel de l'attaque en se dissipant.
+	local shockwave = newEffectPart("Shockwave", Enum.PartType.Ball, Vector3.one * CORE_SIZE, palette.glow, SHOCKWAVE_DURATION)
+	shockwave.Material = Enum.Material.ForceField
+	shockwave.CFrame = CFrame.new(origin)
+	shockwave.Parent = folder
+	tween(shockwave, SHOCKWAVE_DURATION, { Size = Vector3.one * diameter, Transparency = 1 }, Enum.EasingStyle.Quart)
+
+	-- Anneau au sol : un disque plat qui court jusqu'au bord de la zone.
+	-- (L'axe d'un cylindre Roblox est X : on le redresse pour le coucher au sol.)
+	local ring = newEffectPart("GroundRing", Enum.PartType.Cylinder, Vector3.new(0.3, 4, 4), palette.main, GROUND_RING_DURATION)
+	ring.Transparency = 0.15
+	ring.CFrame = CFrame.new(groundPosition + Vector3.new(0, 0.2, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	ring.Parent = folder
+	tween(ring, GROUND_RING_DURATION, { Size = Vector3.new(0.3, diameter, diameter), Transparency = 1 }, Enum.EasingStyle.Quart)
+
+	-- Colonne de lumière : un trait vertical qui s'élargit et s'efface.
+	local pillar = newEffectPart("Pillar", Enum.PartType.Cylinder, Vector3.new(PILLAR_HEIGHT, 3, 3), palette.glow, PILLAR_DURATION)
+	pillar.Transparency = 0.1
+	pillar.CFrame = CFrame.new(groundPosition + Vector3.new(0, PILLAR_HEIGHT / 2, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	pillar.Parent = folder
+	tween(pillar, PILLAR_DURATION, { Size = Vector3.new(PILLAR_HEIGHT, 14, 14), Transparency = 1 })
+
+	-- Éclats lumineux projetés dans toutes les directions.
+	emitBurst(origin, 160, 0.7, function(emitter: ParticleEmitter)
+		emitter.Texture = SPARK_TEXTURE
+		emitter.Color = ColorSequence.new(COLOR_WHITE, palette.main)
+		emitter.Speed = NumberRange.new(radius * 1.5, radius * 3.5)
+		emitter.Drag = 3
+		emitter.Size = NumberSequence.new(2.2, 0)
+		emitter.Transparency = NumberSequence.new(0, 1)
+	end)
+
+	-- Volutes de matière sombre, plus lentes, qui restent un instant après l'éclair.
+	emitBurst(origin, 45, 1.4, function(emitter: ParticleEmitter)
+		emitter.Texture = SMOKE_TEXTURE
+		emitter.LightEmission = 0
+		emitter.Color = ColorSequence.new(palette.main, palette.void)
+		emitter.Speed = NumberRange.new(radius * 0.4, radius * 1.1)
+		emitter.Drag = 2
+		emitter.Rotation = NumberRange.new(0, 360)
+		emitter.RotSpeed = NumberRange.new(-60, 60)
+		emitter.Size = NumberSequence.new(4, 12)
+		emitter.Transparency = NumberSequence.new(0.35, 1)
+	end)
+
+	-- Éclair : une lumière qui éclaire réellement le décor et les personnages.
+	local lightAnchor = newAnchorPoint(origin, LIGHT_DURATION)
+	local light = Instance.new("PointLight")
+	light.Color = palette.main
+	light.Range = 60
+	light.Brightness = 12
+	light.Parent = lightAnchor
+	tween(light, LIGHT_DURATION, { Brightness = 0 })
+end
+
+--[[
+	Chorégraphie commune à toutes les magies, teintée par leur palette. YIELD pendant l'arrêt sur image.
+		Phase 1 (ULTIMATE_HIT_STOP) : le temps se fige. Image en noir et blanc, animations gelées,
+		                              une sphère sombre enfle autour du lanceur.
+		Phase 2                     : la sphère s'effondre et tout explose (voir spawnEruption),
+		                              flash d'écran, secousse et recul de caméra.
+	`caster` peut manquer (personnage non répliqué chez ce client) : `origin` suffit à tout placer.
+]]
+local function playEruption(caster: Model?, origin: Vector3, targets: { Model }, magic: any)
+	local palette = magic.palette
+	local radius = magic.radius
+	local intensity = getIntensity(origin, radius)
+
+	local involvedCharacters = table.clone(targets)
+	if caster then
+		table.insert(involvedCharacters, caster)
+	end
+
+	-- Phase 1 : arrêt sur image ------------------------------------------------
+	local resumeAnimations = freezeAnimations(involvedCharacters)
+	if intensity > 0 then
+		setScreenLook(blendLook(IMPACT_FRAME_LOOK, intensity), 0)
+	end
+
+	local core = newEffectPart("VoidCore", Enum.PartType.Ball, Vector3.one, palette.void, Config.ULTIMATE_HIT_STOP + 1)
+	core.CFrame = CFrame.new(origin)
+	core.Parent = getEffectsFolder()
+	tween(core, Config.ULTIMATE_HIT_STOP, { Size = Vector3.one * CORE_SIZE })
+
+	task.wait(Config.ULTIMATE_HIT_STOP)
+
+	-- Phase 2 : éruption ---------------------------------------------------------
+	resumeAnimations()
+	tween(core, CORE_COLLAPSE_DURATION, { Size = Vector3.one * 0.1, Transparency = 1 })
+
+	spawnEruption(origin, findGroundPosition(origin, involvedCharacters), radius, palette)
+
+	if intensity > 0 then
+		-- L'écran est brûlé par la couleur claire de la magie, puis revient à la normale.
+		local flashLook = table.clone(FLASH_LOOK)
+		flashLook.TintColor = palette.glow
+		setScreenLook(blendLook(flashLook, intensity), 0)
+		setScreenLook(NEUTRAL_LOOK, FLASH_FADE_DURATION)
+		shakeCamera(SHAKE_DURATION, SHAKE_AMPLITUDE * intensity)
+		punchFieldOfView(FOV_PUNCH * intensity)
+	end
+
+	for _, target in targets do
+		CombatEffects.playHitImpact(target, nil, palette.main)
+	end
+end
+
+type UltimatePlayer = (caster: Model?, origin: Vector3, targets: { Model }, magic: any) -> ()
+
+--[[
+	>>> POINT D'EXTENSION DES 5 ULTIMES.
+	Chorégraphies dédiées, rangées par `id` de magie. Une magie absente de cette table joue la
+	chorégraphie commune (playEruption) avec ses propres couleurs : les cinq sont donc déjà
+	distinctes à l'écran. Pour donner un spectacle unique à l'une d'elles, écrire une fonction
+	de même signature que playEruption et l'enregistrer ici, par exemple :
+		pyromancy = playInferno,
+		lightning = playThunderJudgement,
+]]
+local ULTIMATE_PLAYERS: { [string]: UltimatePlayer } = {}
+
+-- Joue l'ultime de `magic` (une entrée de MagicConfig.MAGICS). YIELD pendant l'arrêt sur image.
+function CombatEffects.playUltimate(caster: Model?, origin: Vector3, targets: { Model }, magic: any)
+	local play = ULTIMATE_PLAYERS[magic.id] or playEruption
+	play(caster, origin, targets, magic)
+end
+
+return CombatEffects
+]]></ProtectedString>
+						<string name="ScriptGuid">{2627B02F-7FE7-4B2A-9E5C-520662D016A5}</string>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<string name="Name">CombatEffects</string>
+						<BinaryString name="SerializedOverrides"></BinaryString>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+					</Properties>
+				</Item>
+				<Item class="ModuleScript" referent="RBXEBA13A0C8A9C42EC86C899541A21A084">
+					<Properties>
+						<Content name="LinkedSource"><null></null></Content>
+						<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	SoftLock
+	Visée assistée : trouve l'ennemi le plus proche du joueur et tourne le personnage vers lui.
+	Appelé par CombatController au départ de chaque coup, pour ne plus frapper dans le vide.
+
+	C'est le client qui tourne son propre personnage (il en simule la physique) ; la rotation
+	est ensuite répliquée aux autres comme n'importe quel déplacement.
+]]
+
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local sharedFolder = ReplicatedStorage:WaitForChild("Shared")
+local CombatConfig = require(sharedFolder:WaitForChild("Combat"):WaitForChild("CombatConfig") :: ModuleScript)
+local TimeLoopConfig = require(sharedFolder:WaitForChild("TimeLoop"):WaitForChild("TimeLoopConfig") :: ModuleScript)
+
+local SoftLock = {}
+
+-- Position d'un personnage s'il est vivant et dans le monde, sinon nil.
+local function getLivingPosition(character: Instance): Vector3?
+	if not character:IsA("Model") or not character:IsDescendantOf(workspace) then
+		return nil
+	end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local rootPart = humanoid and humanoid.RootPart
+	if humanoid == nil or rootPart == nil or humanoid.Health <= 0 then
+		return nil
+	end
+	return rootPart.Position
+end
+
+-- Tout ce que le joueur a le droit de frapper : les PNJ taggés, et les autres joueurs si le PvP est actif.
+local function getEnemies(ownCharacter: Model): { Instance }
+	local enemies = CollectionService:GetTagged(TimeLoopConfig.ENTITY_TAG)
+
+	if CombatConfig.PVP_ENABLED then
+		for _, player in Players:GetPlayers() do
+			local character = player.Character
+			if character and character ~= ownCharacter then
+				table.insert(enemies, character)
+			end
+		end
+	end
+
+	return enemies
+end
+
+-- L'ennemi vivant le plus proche de `rootPart`, à moins de `radius` studs. nil s'il n'y en a pas.
+function SoftLock.findTarget(ownCharacter: Model, rootPart: BasePart, radius: number): Model?
+	local nearestEnemy: Model? = nil
+	local nearestDistance = radius
+
+	for _, enemy in getEnemies(ownCharacter) do
+		local position = getLivingPosition(enemy)
+		if position then
+			local distance = (position - rootPart.Position).Magnitude
+			if distance <= nearestDistance then
+				nearestEnemy, nearestDistance = enemy :: Model, distance
+			end
+		end
+	end
+
+	return nearestEnemy
+end
+
+-- Tourne `rootPart` vers `target`, à plat (le personnage ne penche pas si la cible est en hauteur).
+function SoftLock.face(rootPart: BasePart, target: Model)
+	local origin = rootPart.Position
+	local targetPosition = target:GetPivot().Position
+	local flatTarget = Vector3.new(targetPosition.X, origin.Y, targetPosition.Z)
+	if (flatTarget - origin).Magnitude > 0.1 then
+		rootPart.CFrame = CFrame.lookAt(origin, flatTarget)
+	end
+end
+
+return SoftLock
+]]></ProtectedString>
+						<string name="ScriptGuid">{770E0C2A-A500-4A7C-AB68-87EEA53B0409}</string>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<string name="Name">SoftLock</string>
+						<BinaryString name="SerializedOverrides"></BinaryString>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+					</Properties>
+				</Item>
+			</Item>
+			<Item class="Folder" referent="RBXB9C936CE809C48978A5E408AECD0867B">
+				<Properties>
+					<Color3 name="IconTint">
+						<R>0</R>
+						<G>0</G>
+						<B>0</B>
+					</Color3>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">Movement</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+				<Item class="LocalScript" referent="RBXBEA6071273704E97A2FBCB138E47FC30">
+					<Properties>
+						<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	DashController (LocalScript)
+	L'esquive du joueur :
+		- touche DASH_INPUT : propulse le personnage dans la direction où il marche
+		  (ou droit devant lui s'il est immobile), avec un cooldown ;
+		- la propulsion est une LinearVelocity temporaire sur le HumanoidRootPart, posée ici car
+		  c'est le client qui simule la physique de son propre personnage ;
+		- annonce le dash au serveur (cooldown vérifié, invulnérabilité accordée) ;
+		- joue la traînée du dash, pour soi et pour les dashs des autres joueurs.
+
+	Rien ne tourne en continu : tout part de l'appui sur la touche, dans onDashInput().
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+
+local sharedFolder = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Movement")
+local Config = require(sharedFolder:WaitForChild("MovementConfig") :: ModuleScript)
+local Remotes = require(sharedFolder:WaitForChild("MovementRemotes") :: ModuleScript)
+
+-- Assez de force pour atteindre DASH_SPEED en une frame, quel que soit le poids du personnage.
+local DASH_MAX_FORCE = 1e6
+
+-- Traînée : un large ruban vertical derrière le personnage, de la tête aux genoux.
+local TRAIL_NAME = "DashTrail"
+local TRAIL_TOP_OFFSET = 1.6 -- studs au-dessus du centre du RootPart
+local TRAIL_BOTTOM_OFFSET = -1.8
+local TRAIL_LIFETIME = 0.3
+local TRAIL_COLOR_HEAD = Color3.fromRGB(215, 200, 255)
+local TRAIL_COLOR_TAIL = Color3.fromRGB(70, 30, 140)
+
+local localPlayer = Players.LocalPlayer
+local lastDashClock = -math.huge
+
+--------------------------------------------------------------------------------
+-- Effet visuel (local à ce client)
+--------------------------------------------------------------------------------
+
+local function newTrailAttachment(name: string, offsetY: number, rootPart: BasePart): Attachment
+	local attachment = Instance.new("Attachment")
+	attachment.Name = name
+	attachment.Position = Vector3.new(0, offsetY, 0)
+	attachment.Parent = rootPart
+	return attachment
+end
+
+-- La traînée est créée au premier dash de chaque personnage, puis réutilisée.
+local function getDashTrail(rootPart: BasePart): Trail
+	local existingTrail = rootPart:FindFirstChild(TRAIL_NAME)
+	if existingTrail and existingTrail:IsA("Trail") then
+		return existingTrail
+	end
+
+	local trail = Instance.new("Trail")
+	trail.Name = TRAIL_NAME
+	trail.Enabled = false
+	trail.Attachment0 = newTrailAttachment("DashTrailTop", TRAIL_TOP_OFFSET, rootPart)
+	trail.Attachment1 = newTrailAttachment("DashTrailBottom", TRAIL_BOTTOM_OFFSET, rootPart)
+	trail.Lifetime = TRAIL_LIFETIME
+	trail.MinLength = 0.05
+	trail.FaceCamera = false
+	trail.LightEmission = 0.8
+	trail.LightInfluence = 0
+	trail.Color = ColorSequence.new(TRAIL_COLOR_HEAD, TRAIL_COLOR_TAIL)
+	trail.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.35),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	trail.Parent = rootPart
+	return trail
+end
+
+local function playDashTrail(character: Model)
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if rootPart == nil or not rootPart:IsA("BasePart") then
+		return
+	end
+
+	local trail = getDashTrail(rootPart)
+	trail.Enabled = true
+	task.delay(Config.DASH_DURATION, function()
+		trail.Enabled = false -- le sillage déjà tracé finit de s'estomper tout seul
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- Dash
+--------------------------------------------------------------------------------
+
+-- Direction horizontale du dash : celle de la marche, ou le regard du personnage s'il est à l'arrêt.
+local function getDashDirection(humanoid: Humanoid, rootPart: BasePart): Vector3
+	local direction = humanoid.MoveDirection * Vector3.new(1, 0, 1)
+	if direction.Magnitude < 0.1 then
+		direction = rootPart.CFrame.LookVector * Vector3.new(1, 0, 1)
+	end
+	return direction.Unit
+end
+
+-- Propulse `rootPart` à vitesse constante pendant DASH_DURATION, puis rend la main au Humanoid.
+local function propel(rootPart: BasePart, direction: Vector3)
+	local attachment = Instance.new("Attachment")
+	attachment.Name = "DashAttachment"
+	attachment.Parent = rootPart
+
+	-- Mode Plane : seule la vitesse horizontale est imposée, la gravité continue d'agir.
+	local velocity = Instance.new("LinearVelocity")
+	velocity.Name = "DashVelocity"
+	velocity.Attachment0 = attachment
+	velocity.RelativeTo = Enum.ActuatorRelativeTo.World
+	velocity.VelocityConstraintMode = Enum.VelocityConstraintMode.Plane
+	velocity.PrimaryTangentAxis = Vector3.xAxis
+	velocity.SecondaryTangentAxis = Vector3.zAxis
+	velocity.PlaneVelocity = Vector2.new(direction.X, direction.Z) * Config.DASH_SPEED
+	velocity.MaxForce = DASH_MAX_FORCE
+	velocity.Parent = rootPart
+
+	task.delay(Config.DASH_DURATION, function()
+		velocity:Destroy()
+		attachment:Destroy()
+	end)
+end
+
+-- Seul point d'entrée du dash : appelé une fois par appui sur DASH_INPUT.
+local function onDashInput()
+	local now = os.clock()
+	if now - lastDashClock < Config.DASH_COOLDOWN then
+		return
+	end
+
+	local character = localPlayer.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local rootPart = humanoid and humanoid.RootPart
+	if character == nil or humanoid == nil or rootPart == nil then
+		return
+	end
+	-- Un RootPart ancré = joueur figé par le serveur (création d'avatar, anomalie, rewind).
+	if humanoid.Health <= 0 or rootPart.Anchored then
+		return
+	end
+
+	lastDashClock = now
+	Remotes.RequestDash:FireServer()
+	propel(rootPart, getDashDirection(humanoid, rootPart))
+	playDashTrail(character)
+end
+
+--------------------------------------------------------------------------------
+-- Entrées et événements
+--------------------------------------------------------------------------------
+
+UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
+	if not gameProcessed and input.KeyCode == Config.DASH_INPUT then
+		onDashInput()
+	end
+end)
+
+-- Un AUTRE joueur dashe : son déplacement est déjà répliqué, il ne manque que sa traînée.
+Remotes.DashStarted.OnClientEvent:Connect(function(character: Model?)
+	if character then
+		playDashTrail(character)
+	end
+end)
+]]></ProtectedString>
+						<bool name="Disabled">false</bool>
+						<Content name="LinkedSource"><null></null></Content>
+						<token name="RunContext">0</token>
+						<string name="ScriptGuid">{AD00FDFA-C0C3-4838-A8DA-126A392B1EFF}</string>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<string name="Name">DashController</string>
+						<BinaryString name="SerializedOverrides"></BinaryString>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+					</Properties>
+				</Item>
+			</Item>
+			<Item class="Folder" referent="RBX3C21152ED8964F18927ABAB1564BFE28">
+				<Properties>
+					<Color3 name="IconTint">
+						<R>0</R>
+						<G>0</G>
+						<B>0</B>
+					</Color3>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">Boss</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+				<Item class="LocalScript" referent="RBXCE4E713037D34BDA846C957F5A236E07">
+					<Properties>
+						<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	BossEffectsController (LocalScript)
+	Effets visuels des boss, joués localement par chaque client.
+
+	Le serveur ne fait que publier l'état de chaque boss dans un attribut de son Model
+	(BossConfig.STATE_ATTRIBUTE). Ce script l'écoute et habille deux états :
+		- Charging  : particules rouges et noires aspirées vers le boss, cœur sombre qui grossit,
+		              lueur rouge et silhouette surlignée. C'est l'annonce de l'attaque fatale ;
+		- Staggered : silhouette pâle, pour signaler la faille après un rewind.
+	Tout autre état retire l'effet en cours.
+
+	Rien ne tourne en continu ici : les effets sont des émetteurs et des tweens que le moteur anime.
+]]
+
+local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local sharedFolder = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Boss")
+local Config = require(sharedFolder:WaitForChild("BossConfig") :: ModuleScript)
+
+local COLOR_RED = Color3.fromRGB(255, 40, 45)
+local COLOR_DARK_RED = Color3.fromRGB(90, 0, 10)
+local COLOR_BLACK = Color3.fromRGB(8, 2, 4)
+local COLOR_STAGGER = Color3.fromRGB(190, 215, 255)
+
+-- Textures de particules livrées avec le client Roblox (aucun asset à importer).
+local SPARK_TEXTURE = "rbxasset://textures/particles/sparkles_main.dds"
+local SMOKE_TEXTURE = "rbxasset://textures/particles/smoke_main.dds"
+
+local CHARGE_SPHERE_DIAMETER = 18 -- les particules naissent sur cette sphère et convergent vers le boss
+local CHARGE_CORE_SIZE = 5 -- diamètre final du cœur sombre
+
+-- Fonction qui retire l'effet en cours d'un boss.
+type Cleanup = () -> ()
+
+local activeEffects: { [Model]: Cleanup } = {}
+
+--------------------------------------------------------------------------------
+-- Briques de base
+--------------------------------------------------------------------------------
+
+-- Pièce purement décorative : locale, ancrée, intangible.
+local function newEffectPart(name: string, size: Vector3, position: Vector3): Part
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Shape = Enum.PartType.Ball
+	part.Size = size
+	part.CFrame = CFrame.new(position)
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false
+	return part
+end
+
+local function newHighlight(boss: Model, fillColor: Color3, fillTransparency: number): Highlight
+	local highlight = Instance.new("Highlight")
+	highlight.DepthMode = Enum.HighlightDepthMode.Occluded
+	highlight.FillColor = fillColor
+	highlight.FillTransparency = fillTransparency
+	highlight.OutlineColor = fillColor
+	highlight.OutlineTransparency = 0
+	highlight.Parent = boss
+	return highlight
+end
+
+--------------------------------------------------------------------------------
+-- Effets par état
+--------------------------------------------------------------------------------
+
+-- Charge de l'attaque fatale. Le boss est ancré par le serveur pendant cet état :
+-- l'effet peut donc rester posé là où il a commencé.
+local function playCharge(boss: Model): Cleanup
+	local center = boss:GetPivot().Position
+	local pulseInfo = TweenInfo.new(0.35, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
+
+	-- Sphère invisible : sa surface sert de point de départ aux particules.
+	local sphere = newEffectPart("BossChargeSphere", Vector3.one * CHARGE_SPHERE_DIAMETER, center)
+	sphere.Transparency = 1
+	sphere.Parent = workspace
+
+	-- Éclats rouges aspirés vers le centre.
+	local sparks = Instance.new("ParticleEmitter")
+	sparks.Texture = SPARK_TEXTURE
+	sparks.Shape = Enum.ParticleEmitterShape.Sphere
+	sparks.ShapeStyle = Enum.ParticleEmitterShapeStyle.Surface
+	sparks.ShapeInOut = Enum.ParticleEmitterShapeInOut.Inward
+	sparks.Rate = 90
+	sparks.Lifetime = NumberRange.new(0.45, 0.6)
+	sparks.Speed = NumberRange.new(13, 17)
+	sparks.Color = ColorSequence.new(COLOR_RED, COLOR_BLACK)
+	sparks.Size = NumberSequence.new(1.4, 0.2)
+	sparks.Transparency = NumberSequence.new(0, 0.6)
+	sparks.LightEmission = 1
+	sparks.LightInfluence = 0
+	sparks.Parent = sphere
+
+	-- Volutes noires, plus lentes, qui épaississent l'air autour du boss.
+	local smoke = Instance.new("ParticleEmitter")
+	smoke.Texture = SMOKE_TEXTURE
+	smoke.Shape = Enum.ParticleEmitterShape.Sphere
+	smoke.ShapeStyle = Enum.ParticleEmitterShapeStyle.Surface
+	smoke.ShapeInOut = Enum.ParticleEmitterShapeInOut.Inward
+	smoke.Rate = 30
+	smoke.Lifetime = NumberRange.new(0.8, 1.1)
+	smoke.Speed = NumberRange.new(6, 9)
+	smoke.Rotation = NumberRange.new(0, 360)
+	smoke.RotSpeed = NumberRange.new(-80, 80)
+	smoke.Color = ColorSequence.new(COLOR_DARK_RED, COLOR_BLACK)
+	smoke.Size = NumberSequence.new(5, 1.5)
+	smoke.Transparency = NumberSequence.new(0.5, 1)
+	smoke.LightEmission = 0
+	smoke.Parent = sphere
+
+	-- Cœur sombre qui enfle pendant toute la charge.
+	local core = newEffectPart("BossChargeCore", Vector3.one * 0.5, center)
+	core.Material = Enum.Material.Neon
+	core.Color = COLOR_BLACK
+	core.Parent = workspace
+	local coreInfo = TweenInfo.new(Config.CHARGE_DURATION, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+	TweenService:Create(core, coreInfo, { Size = Vector3.one * CHARGE_CORE_SIZE }):Play()
+
+	-- Lueur rouge qui bat sur le décor.
+	local light = Instance.new("PointLight")
+	light.Color = COLOR_RED
+	light.Range = 40
+	light.Brightness = 2
+	light.Parent = sphere
+	TweenService:Create(light, pulseInfo, { Brightness = 9 }):Play()
+
+	-- Silhouette du boss surlignée de rouge, qui bat au même rythme.
+	local highlight = newHighlight(boss, COLOR_RED, 0.75)
+	TweenService:Create(highlight, pulseInfo, { FillTransparency = 0.35 }):Play()
+
+	return function()
+		sphere:Destroy() -- emporte les particules et la lumière
+		core:Destroy()
+		highlight:Destroy()
+	end
+end
+
+-- Boss sonné : une simple silhouette pâle, le temps que dure la faille.
+local function playStagger(boss: Model): Cleanup
+	local highlight = newHighlight(boss, COLOR_STAGGER, 0.8)
+	return function()
+		highlight:Destroy()
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Suivi de l'état des boss
+--------------------------------------------------------------------------------
+
+local function clearEffect(boss: Model)
+	local cleanup = activeEffects[boss]
+	if cleanup then
+		activeEffects[boss] = nil
+		cleanup()
+	end
+end
+
+local function onStateChanged(boss: Model)
+	clearEffect(boss)
+
+	local state = boss:GetAttribute(Config.STATE_ATTRIBUTE)
+	if state == Config.STATES.Charging then
+		activeEffects[boss] = playCharge(boss)
+	elseif state == Config.STATES.Staggered then
+		activeEffects[boss] = playStagger(boss)
+	end
+end
+
+local function trackBoss(instance: Instance)
+	if not instance:IsA("Model") then
+		return
+	end
+	instance:GetAttributeChangedSignal(Config.STATE_ATTRIBUTE):Connect(function()
+		onStateChanged(instance)
+	end)
+	onStateChanged(instance)
+end
+
+local function untrackBoss(instance: Instance)
+	if instance:IsA("Model") then
+		clearEffect(instance)
+	end
+end
+
+CollectionService:GetInstanceAddedSignal(Config.TAG):Connect(trackBoss)
+CollectionService:GetInstanceRemovedSignal(Config.TAG):Connect(untrackBoss)
+for _, instance in CollectionService:GetTagged(Config.TAG) do
+	trackBoss(instance)
+end
+]]></ProtectedString>
+						<bool name="Disabled">false</bool>
+						<Content name="LinkedSource"><null></null></Content>
+						<token name="RunContext">0</token>
+						<string name="ScriptGuid">{79847563-A8D2-4111-9142-318C8C17954F}</string>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<string name="Name">BossEffectsController   </string>
+						<BinaryString name="SerializedOverrides"></BinaryString>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+					</Properties>
+				</Item>
+			</Item>
+			<Item class="Folder" referent="RBX6EBE6431E62B406FB2FD4A6CD72D9EA6">
+				<Properties>
+					<Color3 name="IconTint">
+						<R>0</R>
+						<G>0</G>
+						<B>0</B>
+					</Color3>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">TimeLoop</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+				<Item class="ModuleScript" referent="RBXD03D665D22144404846965BCEE9F2364">
+					<Properties>
+						<Content name="LinkedSource"><null></null></Content>
+						<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	GlitchOverlay
+	La "rupture de la réalité" à l'écran, pour l'anomalie et pour le rembobinage. Local à ce client.
+
+	Quatre couches, toutes re-tirées au hasard plusieurs fois par seconde :
+		1. images de neige (ImageLabel, voir TimeLoopConfig.GLITCH_IMAGES) qui sautent et clignotent ;
+		2. tranches : des bandes horizontales qui déchirent l'image ;
+		3. flashs : l'écran entier claque d'une couleur ;
+		4. post-traitement : ColorCorrection et BlurEffect poussés à l'extrême, champ de vision qui tressaute.
+
+	Deux profils règlent la violence de l'ensemble : "anomaly" (malaise) et "rewind" (rupture totale).
+	Une seule boucle RenderStepped, et seulement entre start() et stop().
+]]
+
+local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+
+local sharedFolder = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("TimeLoop")
+local Config = require(sharedFolder:WaitForChild("TimeLoopConfig") :: ModuleScript)
+
+type Range = { min: number, max: number }
+
+type Profile = {
+	interval: Range, -- secondes entre deux tirages
+	sliceChance: number, -- probabilité qu'une tranche soit visible à un tirage
+	sliceMaxHeight: number, -- hauteur maximale d'une tranche (fraction de l'écran)
+	noiseTransparency: Range, -- transparence des images de neige (1 = invisibles)
+	flashChance: number,
+	blur: Range,
+	contrast: Range,
+	saturation: Range,
+	brightness: Range,
+	tints: { Color3 },
+	fieldOfViewJitter: number, -- degrés
+	messageJitter: number, -- pixels
+}
+
+local PROFILES: { [string]: Profile } = {
+	-- Fenêtre critique : le monde vacille, mais on lit encore l'écran.
+	anomaly = {
+		interval = { min = 0.03, max = 0.12 },
+		sliceChance = 0.3,
+		sliceMaxHeight = 0.03,
+		noiseTransparency = { min = 0.8, max = 0.95 },
+		flashChance = 0.04,
+		blur = { min = 8, max = 24 },
+		contrast = { min = 0.3, max = 0.9 },
+		saturation = { min = -1, max = -0.3 },
+		brightness = { min = -0.05, max = 0.05 },
+		tints = {
+			Color3.fromRGB(255, 60, 60),
+			Color3.fromRGB(80, 255, 255),
+			Color3.fromRGB(210, 70, 255),
+			Color3.fromRGB(255, 255, 255),
+		},
+		fieldOfViewJitter = 2,
+		messageJitter = 10,
+	},
+	-- Rembobinage : la réalité se déchire.
+	rewind = {
+		interval = { min = 0.02, max = 0.07 },
+		sliceChance = 0.75,
+		sliceMaxHeight = 0.1,
+		noiseTransparency = { min = 0.4, max = 0.8 },
+		flashChance = 0.2,
+		blur = { min = 10, max = 46 },
+		contrast = { min = 0.6, max = 1 },
+		saturation = { min = -1, max = 1 },
+		brightness = { min = -0.25, max = 0.3 },
+		tints = {
+			Color3.fromRGB(70, 255, 255),
+			Color3.fromRGB(255, 60, 220),
+			Color3.fromRGB(60, 80, 255),
+			Color3.fromRGB(150, 255, 120),
+			Color3.fromRGB(255, 255, 255),
+		},
+		fieldOfViewJitter = 9,
+		messageJitter = 26,
+	},
+}
+
+local SLICE_COUNT = 14
+local SLICE_COLORS = {
+	Color3.new(1, 1, 1),
+	Color3.new(0, 0, 0),
+	Color3.fromRGB(0, 255, 255),
+	Color3.fromRGB(255, 0, 200),
+}
+local NOISE_TILE_SIZE = 420 -- pixels : taille d'une image de neige, répétée sur tout l'écran
+local MESSAGE_POSITION = UDim2.fromScale(0.5, 0.3)
+local NEUTRAL_COLOR = { Brightness = 0, Contrast = 0, Saturation = 0, TintColor = Color3.new(1, 1, 1) }
+
+local random = Random.new()
+
+local GlitchOverlay = {}
+
+-- Instances, créées une seule fois par init().
+local gui: ScreenGui? = nil
+local messageLabel: TextLabel
+local captionLabel: TextLabel
+local flashFrame: Frame
+local slices: { Frame } = {}
+local noiseLabels: { ImageLabel } = {}
+local colorCorrection: ColorCorrectionEffect
+local blur: BlurEffect
+
+-- État de la boucle.
+local connection: RBXScriptConnection? = nil
+local colorTween: Tween? = nil
+local baseFieldOfView: number? = nil
+
+local function pick(range: Range): number
+	return random:NextNumber(range.min, range.max)
+end
+
+local function new(className: string, properties: { [string]: any }, parent: Instance?): any
+	local instance = Instance.new(className) :: any
+	for property, value in properties do
+		instance[property] = value
+	end
+	instance.Parent = parent
+	return instance
+end
+
+--------------------------------------------------------------------------------
+-- Construction
+--------------------------------------------------------------------------------
+
+-- Crée les effets et l'interface. À appeler une fois, avant tout start().
+function GlitchOverlay.init(playerGui: Instance)
+	if gui then
+		return
+	end
+
+	-- Créés depuis un LocalScript : ces effets n'existent que sur ce client.
+	colorCorrection = new("ColorCorrectionEffect", { Name = "TimeLoopColorCorrection" }, Lighting)
+	blur = new("BlurEffect", { Name = "TimeLoopBlur", Size = 0 }, Lighting)
+
+	local screenGui = new("ScreenGui", {
+		Name = "TimeLoopGlitchGui",
+		ResetOnSpawn = false,
+		IgnoreGuiInset = true,
+		DisplayOrder = 100,
+		Enabled = false,
+	}, nil)
+
+	-- 1. Neige : chaque image est répétée en mosaïque sur un cadre plus grand que l'écran,
+	--    qu'on décale au hasard à chaque tirage pour qu'elle "grésille".
+	for index, image in Config.GLITCH_IMAGES do
+		noiseLabels[index] = new("ImageLabel", {
+			Name = "Noise" .. index,
+			BackgroundTransparency = 1,
+			Image = image,
+			ImageTransparency = 1,
+			ScaleType = Enum.ScaleType.Tile,
+			TileSize = UDim2.fromOffset(NOISE_TILE_SIZE, NOISE_TILE_SIZE),
+			Size = UDim2.new(1, NOISE_TILE_SIZE, 1, NOISE_TILE_SIZE),
+			ZIndex = 1,
+		}, screenGui)
+	end
+
+	-- 2. Tranches.
+	for index = 1, SLICE_COUNT do
+		slices[index] = new("Frame", {
+			Name = "Slice" .. index,
+			BorderSizePixel = 0,
+			Visible = false,
+			ZIndex = 2,
+		}, screenGui)
+	end
+
+	-- 3. Flash plein écran.
+	flashFrame = new("Frame", {
+		Name = "Flash",
+		BorderSizePixel = 0,
+		BackgroundTransparency = 1,
+		Size = UDim2.fromScale(1, 1),
+		ZIndex = 3,
+	}, screenGui)
+
+	-- Texte central (message de l'anomalie) et légende en coin (compteur du rembobinage).
+	messageLabel = new("TextLabel", {
+		Name = "Message",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = MESSAGE_POSITION,
+		Size = UDim2.fromScale(0.8, 0.1),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBlack,
+		Text = "",
+		TextColor3 = Color3.fromRGB(255, 70, 70),
+		TextScaled = true,
+		TextStrokeTransparency = 0,
+		ZIndex = 4,
+	}, screenGui)
+
+	captionLabel = new("TextLabel", {
+		Name = "Caption",
+		Position = UDim2.fromOffset(36, 28),
+		Size = UDim2.fromOffset(520, 44),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.Code,
+		Text = "",
+		TextColor3 = Color3.new(1, 1, 1),
+		TextSize = 34,
+		TextStrokeTransparency = 0.2,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = 4,
+	}, screenGui)
+
+	screenGui.Parent = playerGui
+	gui = screenGui
+end
+
+--------------------------------------------------------------------------------
+-- Boucle
+--------------------------------------------------------------------------------
+
+-- Un tirage : toutes les couches prennent de nouvelles valeurs au hasard.
+local function applyFrame(profile: Profile)
+	local tint = profile.tints[random:NextInteger(1, #profile.tints)]
+
+	colorCorrection.TintColor = tint
+	colorCorrection.Contrast = pick(profile.contrast)
+	colorCorrection.Saturation = pick(profile.saturation)
+	colorCorrection.Brightness = pick(profile.brightness)
+	blur.Size = pick(profile.blur)
+
+	for _, noise in noiseLabels do
+		noise.ImageTransparency = pick(profile.noiseTransparency)
+		noise.Position = UDim2.fromOffset(-random:NextInteger(0, NOISE_TILE_SIZE), -random:NextInteger(0, NOISE_TILE_SIZE))
+	end
+
+	for _, slice in slices do
+		local isVisible = random:NextNumber() < profile.sliceChance
+		slice.Visible = isVisible
+		if isVisible then
+			slice.Position = UDim2.fromScale(random:NextNumber(-0.1, 0.4), random:NextNumber())
+			slice.Size = UDim2.fromScale(random:NextNumber(0.3, 1.1), random:NextNumber(0.003, profile.sliceMaxHeight))
+			slice.BackgroundColor3 = SLICE_COLORS[random:NextInteger(1, #SLICE_COLORS)]
+			slice.BackgroundTransparency = random:NextNumber(0.15, 0.7)
+		end
+	end
+
+	local isFlashing = random:NextNumber() < profile.flashChance
+	flashFrame.BackgroundColor3 = tint
+	flashFrame.BackgroundTransparency = if isFlashing then random:NextNumber(0.55, 0.85) else 1
+
+	local jitter = profile.messageJitter
+	messageLabel.Position = MESSAGE_POSITION
+		+ UDim2.fromOffset(random:NextInteger(-jitter, jitter), random:NextInteger(-jitter, jitter))
+
+	local camera = workspace.CurrentCamera
+	if camera and baseFieldOfView then
+		camera.FieldOfView = baseFieldOfView + random:NextNumber(-profile.fieldOfViewJitter, profile.fieldOfViewJitter)
+	end
+end
+
+local function disconnect()
+	if connection then
+		connection:Disconnect()
+		connection = nil
+	end
+end
+
+--------------------------------------------------------------------------------
+-- API publique
+--------------------------------------------------------------------------------
+
+-- Lance (ou change) le glitch. `profileName` : "anomaly" ou "rewind".
+function GlitchOverlay.start(profileName: string)
+	local profile = PROFILES[profileName]
+	local screenGui = gui
+	if profile == nil or screenGui == nil then
+		return
+	end
+
+	disconnect()
+	if colorTween then
+		colorTween:Cancel() -- un retour à la normale en cours écraserait les valeurs du glitch
+		colorTween = nil
+	end
+
+	local camera = workspace.CurrentCamera
+	if baseFieldOfView == nil and camera then
+		baseFieldOfView = camera.FieldOfView
+	end
+
+	screenGui.Enabled = true
+	local nextFrameClock = 0
+	connection = RunService.RenderStepped:Connect(function()
+		local now = os.clock()
+		if now >= nextFrameClock then
+			nextFrameClock = now + pick(profile.interval)
+			applyFrame(profile)
+		end
+	end)
+end
+
+-- Arrête le glitch : l'interface disparaît d'un coup, l'image revient à la normale en `fadeDuration` secondes.
+function GlitchOverlay.stop(fadeDuration: number)
+	disconnect()
+	if gui then
+		gui.Enabled = false
+	end
+	if blur then
+		blur.Size = 0
+	end
+
+	local camera = workspace.CurrentCamera
+	if camera and baseFieldOfView then
+		camera.FieldOfView = baseFieldOfView
+	end
+	baseFieldOfView = nil
+
+	if colorCorrection then
+		local tweenInfo = TweenInfo.new(fadeDuration, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+		local tween = TweenService:Create(colorCorrection, tweenInfo, NEUTRAL_COLOR)
+		colorTween = tween
+		tween:Play()
+	end
+end
+
+-- Texte au centre de l'écran ("" pour l'effacer).
+function GlitchOverlay.setMessage(text: string)
+	if gui then
+		messageLabel.Text = text
+	end
+end
+
+-- Texte en haut à gauche, façon affichage de magnétoscope ("" pour l'effacer).
+function GlitchOverlay.setCaption(text: string)
+	if gui then
+		captionLabel.Text = text
+	end
+end
+
+return GlitchOverlay
+]]></ProtectedString>
+						<string name="ScriptGuid">{47EFAA15-24A6-48CF-96C5-0D1293FCDACE}</string>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<string name="Name">GlitchOverlay</string>
+						<BinaryString name="SerializedOverrides"></BinaryString>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+					</Properties>
+				</Item>
+				<Item class="ModuleScript" referent="RBX666B30E3849C49838E04A2E744ED4276">
+					<Properties>
+						<Content name="LinkedSource"><null></null></Content>
+						<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	TimeLoopAudio
+	Le son du rembobinage : un chœur qui se déforme. Local à ce client.
+
+	Trois traitements, pour que l'effet reste angoissant sans devenir pénible à force d'être entendu :
+		- déformation : un PitchShiftSoundEffect fait glisser la hauteur du son vers le grave
+		  pendant toute la durée du rewind ;
+		- variation   : chaque écoute part d'un autre endroit du morceau, à une hauteur et une
+		  vitesse légèrement différentes ;
+		- lassitude   : des rewinds rapprochés sont joués de moins en moins fort, et chaque écoute
+		  se termine par un fondu de sortie (fadeOut).
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SoundService = game:GetService("SoundService")
+local TweenService = game:GetService("TweenService")
+
+local sharedFolder = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("TimeLoop")
+local Config = require(sharedFolder:WaitForChild("TimeLoopConfig") :: ModuleScript)
+
+local FADE_IN = 0.15 -- secondes : le chœur surgit presque d'un coup
+local START_OCTAVE_MIN = 0.95 -- hauteur de départ, tirée au hasard dans cette plage
+local START_OCTAVE_MAX = 1.12
+local SPEED_MIN = 0.92 -- vitesse de lecture, tirée au hasard dans cette plage
+local SPEED_MAX = 1.06
+local MAX_START_RATIO = 0.5 -- le son démarre quelque part dans cette première partie du morceau
+
+local random = Random.new()
+
+local TimeLoopAudio = {}
+
+-- Créés depuis un LocalScript : ce son ne se joue que sur ce client.
+local sound = Instance.new("Sound")
+sound.Name = "TimeLoopRewindSound"
+sound.SoundId = Config.REWIND_SOUND_ID
+sound.Volume = 0
+sound.Parent = SoundService
+
+local pitchShift = Instance.new("PitchShiftSoundEffect")
+pitchShift.Octave = 1
+pitchShift.Parent = sound
+
+local volumeTween: Tween? = nil
+local pitchTween: Tween? = nil
+local lastPlayClock = -math.huge
+local fatigueRatio = 1 -- 1 = volume plein ; baisse à chaque rewind rapproché
+
+local function tween(instance: Instance, duration: number, style: Enum.EasingStyle, goal: { [string]: any }): Tween
+	local newTween = TweenService:Create(instance, TweenInfo.new(duration, style, Enum.EasingDirection.Out), goal)
+	newTween:Play()
+	return newTween
+end
+
+local function cancelTweens()
+	if volumeTween then
+		volumeTween:Cancel()
+	end
+	if pitchTween then
+		pitchTween:Cancel()
+	end
+end
+
+-- Volume de cette écoute : plein après un long silence, réduit si le joueur enchaîne les rewinds.
+local function nextVolume(): number
+	local now = os.clock()
+	if now - lastPlayClock <= Config.REWIND_SOUND_FATIGUE_WINDOW then
+		fatigueRatio = math.max(fatigueRatio * Config.REWIND_SOUND_FATIGUE_FACTOR, Config.REWIND_SOUND_MIN_VOLUME_RATIO)
+	else
+		fatigueRatio = 1
+	end
+	lastPlayClock = now
+	return Config.REWIND_SOUND_VOLUME * fatigueRatio
+end
+
+-- Lance le chœur pour un rewind de `duration` secondes.
+function TimeLoopAudio.playRewind(duration: number)
+	if Config.REWIND_SOUND_ID == "" then
+		return
+	end
+	cancelTweens()
+
+	sound.PlaybackSpeed = random:NextNumber(SPEED_MIN, SPEED_MAX)
+	sound.TimePosition = if sound.IsLoaded then random:NextNumber(0, sound.TimeLength * MAX_START_RATIO) else 0
+	sound.Volume = 0
+	pitchShift.Octave = random:NextNumber(START_OCTAVE_MIN, START_OCTAVE_MAX)
+	sound:Play()
+
+	volumeTween = tween(sound, FADE_IN, Enum.EasingStyle.Sine, { Volume = nextVolume() })
+	-- La hauteur s'effondre pendant que le temps recule : c'est le son qui "se déforme".
+	pitchTween = tween(pitchShift, duration, Enum.EasingStyle.Quad, { Octave = Config.REWIND_SOUND_END_OCTAVE })
+end
+
+-- Fondu de sortie, à la fin du rembobinage. Le son s'arrête une fois devenu inaudible.
+function TimeLoopAudio.fadeOut()
+	if not sound.IsPlaying then
+		return
+	end
+	if volumeTween then
+		volumeTween:Cancel()
+	end
+
+	local fadeTween = tween(sound, Config.REWIND_SOUND_FADE_OUT, Enum.EasingStyle.Sine, { Volume = 0 })
+	volumeTween = fadeTween
+	fadeTween.Completed:Once(function(state: Enum.PlaybackState)
+		if state == Enum.PlaybackState.Completed and volumeTween == fadeTween then
+			sound:Stop()
+		end
+	end)
+end
+
+return TimeLoopAudio
+]]></ProtectedString>
+						<string name="ScriptGuid">{6526308A-6087-4C3E-9D34-E1DF79112F34}</string>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<string name="Name">TimeLoopAudio</string>
+						<BinaryString name="SerializedOverrides"></BinaryString>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+					</Properties>
+				</Item>
+			</Item>
+			<Item class="Folder" referent="RBX46685937FDDC4FA4A7DC575CB33032EE">
+				<Properties>
+					<Color3 name="IconTint">
+						<R>0</R>
+						<G>0</G>
+						<B>0</B>
+					</Color3>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">World</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+				<Item class="LocalScript" referent="RBX2EF05815BAEB4C97905BA1A3577D9B9B">
+					<Properties>
+						<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	WorldAtmosphere (LocalScript)
+	Met en image l'état du monde décidé par le serveur. Tout est local à ce client, mais comme tous
+	les clients lisent les mêmes données, tout le monde voit le même ciel au même moment.
+
+	Ce que ce script règle, en continu :
+		- la lumière : cycle jour / nuit interpolé (LightingPresets), teinté par la météo en cours ;
+		- l'anomalie : quand un boss charge son attaque fatale, tout bascule en moins d'une demi-seconde
+		  vers un ciel de minuit rouge sang, puis revient lentement une fois le danger passé ;
+		- le vent (Workspace.GlobalWind), qui agite herbe, nuages et particules ;
+		- les particules d'ambiance autour du joueur (AmbientParticles) ;
+		- le son : bourdon de l'anomalie, vent ;
+		- les présages : une phrase murmurée à l'écran quand le serveur en envoie une.
+
+	Il crée lui-même tout ce dont il a besoin (Atmosphere, nuages, effets) : rien à préparer dans Studio,
+	à une exception près, que seul toi peux faire : Lighting > Technology = Future, pour les ombres
+	et lumières les plus fines (cette propriété ne peut pas être changée par un script).
+]]
+
+local Lighting = game:GetService("Lighting")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local SoundService = game:GetService("SoundService")
+local TweenService = game:GetService("TweenService")
+
+local sharedFolder = ReplicatedStorage:WaitForChild("Shared")
+local worldFolder = sharedFolder:WaitForChild("World")
+local AvatarConfig = require(sharedFolder:WaitForChild("Avatar"):WaitForChild("AvatarConfig") :: ModuleScript)
+local Config = require(worldFolder:WaitForChild("WorldConfig") :: ModuleScript)
+local Remotes = require(worldFolder:WaitForChild("WorldRemotes") :: ModuleScript)
+
+local AmbientParticles = require(script.Parent:WaitForChild("AmbientParticles") :: ModuleScript)
+local LightingPresets = require(script.Parent:WaitForChild("LightingPresets") :: ModuleScript)
+
+local APPLY_INTERVAL = 0.5 -- secondes entre deux mises à jour de la lumière en temps normal
+local ANOMALY_FADE_IN = 0.35 -- secondes pour basculer dans l'anomalie : brutal
+local ANOMALY_FADE_OUT = 4 -- secondes pour en revenir : lent
+local WEATHER_SMOOTHING_TIME = 12 -- secondes (ordre de grandeur) pour passer d'une météo à l'autre
+local MAX_FOG_DENSITY = 0.9
+local FULL_WIND_SPEED = 30 -- studs/s : vent auquel le son du vent est à plein volume
+
+local localPlayer = Players.LocalPlayer
+
+--------------------------------------------------------------------------------
+-- Instances de rendu
+--------------------------------------------------------------------------------
+
+local function getOrCreate(parent: Instance, className: string): Instance
+	local existing = parent:FindFirstChildOfClass(className)
+	if existing then
+		return existing
+	end
+	local instance = Instance.new(className)
+	instance.Parent = parent
+	return instance
+end
+
+local function newEffect(className: string, name: string): Instance
+	local effect = Instance.new(className)
+	effect.Name = name
+	effect.Parent = Lighting
+	return effect
+end
+
+local function newLoopingSound(name: string, soundId: string): Sound
+	local sound = Instance.new("Sound")
+	sound.Name = name
+	sound.SoundId = soundId
+	sound.Looped = true
+	sound.Volume = 0
+	sound.Parent = SoundService
+	return sound
+end
+
+-- Un objet par groupe de LightingPresets : c'est sur eux que les préréglages sont appliqués.
+local renderTargets: { [string]: Instance } = {
+	Lighting = Lighting,
+	Atmosphere = getOrCreate(Lighting, "Atmosphere"),
+	ColorCorrection = newEffect("ColorCorrectionEffect", "WorldColorCorrection"),
+	Bloom = newEffect("BloomEffect", "WorldBloom"),
+	SunRays = newEffect("SunRaysEffect", "WorldSunRays"),
+	Clouds = getOrCreate(workspace:FindFirstChildOfClass("Terrain") :: Instance, "Clouds"),
+}
+
+-- Réglages fixes : ombres douces, reflets et lumière d'environnement au maximum.
+Lighting.GlobalShadows = true
+Lighting.ShadowSoftness = 0.25
+Lighting.GeographicLatitude = 38
+Lighting.EnvironmentDiffuseScale = 1
+Lighting.EnvironmentSpecularScale = 1
+
+local anomalyDrone = newLoopingSound("WorldAnomalyDrone", Config.ANOMALY_DRONE_ID)
+local windSound = newLoopingSound("WorldWind", Config.WIND_SOUND_ID)
+
+AmbientParticles.init()
+
+--------------------------------------------------------------------------------
+-- État
+--------------------------------------------------------------------------------
+
+local function getTargetWeather(): any
+	return Config.WEATHERS[workspace:GetAttribute(Config.WEATHER_ATTRIBUTE)] or Config.WEATHERS[Config.DEFAULT_WEATHER]
+end
+
+local function isAnomalyActive(): boolean
+	return workspace:GetAttribute(Config.MOOD_ATTRIBUTE) == Config.MOODS.Anomaly
+end
+
+-- Météo affichée : elle glisse vers la météo du serveur au lieu de changer d'un coup.
+local initialWeather = getTargetWeather()
+local weather = {
+	fog = initialWeather.fog,
+	haze = initialWeather.haze,
+	cloudCover = initialWeather.cloudCover,
+	windSpeed = initialWeather.windSpeed,
+}
+
+local moodAlpha = if isAnomalyActive() then 1 else 0 -- 0 = monde normal, 1 = anomalie
+local timeSinceApply = math.huge -- force une première mise à jour immédiate
+
+--------------------------------------------------------------------------------
+-- Mise à jour du rendu
+--------------------------------------------------------------------------------
+
+local function isNight(clockTime: number): boolean
+	return clockTime >= Config.NIGHT_START or clockTime <= Config.NIGHT_END
+end
+
+-- Sons d'ambiance : leur volume suit l'état du monde ; ils ne tournent que lorsqu'on les entend.
+local function updateSound(sound: Sound, volume: number)
+	sound.Volume = volume
+	if volume > 0 and not sound.IsPlaying and sound.SoundId ~= "" then
+		sound:Play()
+	elseif volume <= 0 and sound.IsPlaying then
+		sound:Stop()
+	end
+end
+
+-- Recalcule tout le rendu. `elapsed` : secondes écoulées depuis la mise à jour précédente.
+local function apply(elapsed: number)
+	-- 1. La météo affichée se rapproche de la météo du serveur.
+	local targetWeather = getTargetWeather()
+	local rate = 1 - math.exp(-math.min(elapsed, 5) / WEATHER_SMOOTHING_TIME)
+	for key, value in weather do
+		weather[key] = value + (targetWeather[key] - value) * rate
+	end
+
+	-- 2. Lumière de l'heure qu'il est, alourdie par la météo.
+	local clockTime = Config.getClockTime()
+	local preset = LightingPresets.atClockTime(clockTime)
+	preset.Atmosphere.Density = math.min(preset.Atmosphere.Density + weather.fog, MAX_FOG_DENSITY)
+	preset.Atmosphere.Haze += weather.haze
+	preset.Clouds.Cover = weather.cloudCover
+
+	-- 3. L'anomalie écrase le tout, à proportion de moodAlpha.
+	if moodAlpha > 0 then
+		preset = LightingPresets.blend(preset, LightingPresets.ANOMALY, moodAlpha)
+	end
+
+	for groupName, properties in preset do
+		local target = renderTargets[groupName] :: any
+		for property, value in properties do
+			target[property] = value
+		end
+	end
+
+	-- Le ciel saute à minuit au milieu de la bascule : le soleil disparaît d'un coup.
+	Lighting.ClockTime = if moodAlpha > 0.5 then LightingPresets.ANOMALY_CLOCK_TIME else clockTime
+	workspace.GlobalWind = Config.WIND_DIRECTION * weather.windSpeed
+
+	-- 4. Particules et sons.
+	if moodAlpha > 0.5 then
+		AmbientParticles.setActive("embers")
+	elseif isNight(clockTime) then
+		AmbientParticles.setActive("fireflies")
+	else
+		AmbientParticles.setActive("dust")
+	end
+
+	updateSound(anomalyDrone, Config.ANOMALY_DRONE_VOLUME * moodAlpha)
+	updateSound(windSound, Config.WIND_SOUND_MAX_VOLUME * math.clamp(weather.windSpeed / FULL_WIND_SPEED, 0, 1))
+end
+
+-- Une seule boucle : elle suit la caméra avec les particules à chaque frame, mais ne recalcule
+-- la lumière que toutes les APPLY_INTERVAL secondes, ou à chaque frame pendant une bascule.
+RunService.Heartbeat:Connect(function(deltaTime: number)
+	local camera = workspace.CurrentCamera
+	if camera then
+		AmbientParticles.follow(camera.CFrame.Position)
+	end
+
+	local targetAlpha = if isAnomalyActive() then 1 else 0
+	local isTransitioning = moodAlpha ~= targetAlpha
+	if isTransitioning then
+		local fadeDuration = if targetAlpha > moodAlpha then ANOMALY_FADE_IN else ANOMALY_FADE_OUT
+		local step = deltaTime / fadeDuration
+		moodAlpha = if targetAlpha > moodAlpha
+			then math.min(moodAlpha + step, targetAlpha)
+			else math.max(moodAlpha - step, targetAlpha)
+	end
+
+	timeSinceApply += deltaTime
+	if isTransitioning or timeSinceApply >= APPLY_INTERVAL then
+		apply(timeSinceApply)
+		timeSinceApply = 0
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- Présages
+--------------------------------------------------------------------------------
+
+local omenGui = Instance.new("ScreenGui")
+omenGui.Name = "OmenGui"
+omenGui.ResetOnSpawn = false
+omenGui.IgnoreGuiInset = true
+omenGui.DisplayOrder = 30
+
+local omenLabel = Instance.new("TextLabel")
+omenLabel.Name = "Omen"
+omenLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+omenLabel.Position = UDim2.fromScale(0.5, 0.24)
+omenLabel.Size = UDim2.fromScale(0.8, 0.08)
+omenLabel.BackgroundTransparency = 1
+omenLabel.Font = Enum.Font.Garamond
+omenLabel.Text = ""
+omenLabel.TextSize = 32
+omenLabel.TextColor3 = Color3.fromRGB(226, 214, 226)
+omenLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+omenLabel.TextStrokeTransparency = 1
+omenLabel.TextTransparency = 1
+omenLabel.Parent = omenGui
+omenGui.Parent = localPlayer:WaitForChild("PlayerGui")
+
+-- Voile propre aux présages : le monde pâlit un instant pendant que la phrase est à l'écran.
+local omenVeil = newEffect("ColorCorrectionEffect", "WorldOmenVeil") :: ColorCorrectionEffect
+
+local function tween(instance: Instance, duration: number, goal: { [string]: any })
+	TweenService:Create(instance, TweenInfo.new(duration, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), goal):Play()
+end
+
+-- Une phrase apparaît, reste, puis s'efface. YIELD pendant toute sa durée.
+Remotes.Omen.OnClientEvent:Connect(function(text: string)
+	-- Pas de murmure dans le Hub de création, ni si un autre est encore à l'écran.
+	if localPlayer:GetAttribute(AvatarConfig.CUSTOMIZING_ATTRIBUTE) == true or omenLabel.TextTransparency < 1 then
+		return
+	end
+
+	local fadeDuration = Config.OMEN_DURATION * 0.3
+	omenLabel.Text = text
+	tween(omenLabel, fadeDuration, { TextTransparency = 0.1, TextStrokeTransparency = 0.6 })
+	tween(omenVeil, fadeDuration, { Saturation = -0.7, Brightness = -0.1, Contrast = 0.15 })
+
+	task.wait(Config.OMEN_DURATION - fadeDuration)
+
+	tween(omenLabel, fadeDuration, { TextTransparency = 1, TextStrokeTransparency = 1 })
+	tween(omenVeil, fadeDuration, { Saturation = 0, Brightness = 0, Contrast = 0 })
+end)
+]]></ProtectedString>
+						<bool name="Disabled">false</bool>
+						<Content name="LinkedSource"><null></null></Content>
+						<token name="RunContext">0</token>
+						<string name="ScriptGuid">{114CC4D6-D848-4655-B43F-290EF1DE7E34}</string>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<string name="Name">WorldAtmosphere</string>
+						<BinaryString name="SerializedOverrides"></BinaryString>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+					</Properties>
+				</Item>
+				<Item class="LocalScript" referent="RBX54B6FF2B847E4B51BD76A3A7E50FCD18">
+					<Properties>
+						<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	WorldMapController (LocalScript)
+	Fait vivre la carte du monde construite par WorldMapView :
+		- touche TOGGLE_KEY (M) : déroule ou range le parchemin ;
+		- clic sur un continent : son nom, son surnom, sa vignette et son histoire s'affichent à droite ;
+		- le pied de carte donne l'heure et le temps qu'il fait, lus dans l'état du monde.
+
+	Purement local : la carte ne demande rien au serveur.
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+local sharedFolder = ReplicatedStorage:WaitForChild("Shared")
+local worldFolder = sharedFolder:WaitForChild("World")
+local AvatarConfig = require(sharedFolder:WaitForChild("Avatar"):WaitForChild("AvatarConfig") :: ModuleScript)
+local Config = require(worldFolder:WaitForChild("WorldMapConfig") :: ModuleScript)
+local WorldConfig = require(worldFolder:WaitForChild("WorldConfig") :: ModuleScript)
+
+local WorldMapView = require(script.Parent:WaitForChild("WorldMapView") :: ModuleScript)
+
+local OPEN_DURATION = 0.35
+local CLOSE_DURATION = 0.2
+local BACKDROP_TRANSPARENCY = 0.45 -- voile sombre derrière le parchemin, carte ouverte
+local CLOSED_SCALE = 0.94 -- le parchemin grandit légèrement en s'ouvrant
+
+local localPlayer = Players.LocalPlayer
+local view = WorldMapView.create(localPlayer:WaitForChild("PlayerGui"))
+
+local isOpen = false
+local selectedId = Config.CURRENT_CONTINENT_ID
+
+--------------------------------------------------------------------------------
+-- Contenu
+--------------------------------------------------------------------------------
+
+local function tween(instance: Instance, duration: number, goal: { [string]: any }): Tween
+	local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	local newTween = TweenService:Create(instance, tweenInfo, goal)
+	newTween:Play()
+	return newTween
+end
+
+local function findContinent(id: string): any
+	for _, continent in Config.CONTINENTS do
+		if continent.id == id then
+			return continent
+		end
+	end
+	return Config.CONTINENTS[1]
+end
+
+-- Remplit le panneau de droite avec le continent `id` et encadre celui-ci sur la carte.
+local function selectContinent(id: string)
+	local continent = findContinent(id)
+	selectedId = continent.id
+
+	view.infoName.Text = continent.name
+	view.infoEpithet.Text = continent.epithet
+	view.infoLore.Text = continent.lore
+	view.infoIllustration.Image = continent.illustration
+	view.infoIllustrationHint.Visible = continent.illustration == ""
+	view.infoHereTag.Visible = continent.id == Config.CURRENT_CONTINENT_ID
+
+	for continentId, node in view.continents do
+		node.outline.Transparency = if continentId == selectedId then 0.1 else 1
+	end
+end
+
+-- "14 h  -  Brume  -  [M] ranger la carte" : l'heure et la météo du monde au moment où on ouvre la carte.
+local function refreshFooter()
+	local hour = math.floor(WorldConfig.getClockTime())
+	local weather = WorldConfig.WEATHERS[workspace:GetAttribute(WorldConfig.WEATHER_ATTRIBUTE)]
+	local weatherName = if weather then weather.name else ""
+	view.footer.Text = `{hour} h  -  {weatherName}  -  [{Config.TOGGLE_KEY.Name}] ranger la carte`
+end
+
+--------------------------------------------------------------------------------
+-- Ouverture / fermeture
+--------------------------------------------------------------------------------
+
+local function open()
+	if isOpen then
+		return
+	end
+	isOpen = true
+
+	selectContinent(selectedId)
+	refreshFooter()
+
+	view.gui.Enabled = true
+	tween(view.backdrop, OPEN_DURATION, { BackgroundTransparency = BACKDROP_TRANSPARENCY })
+	tween(view.sheet, OPEN_DURATION, { GroupTransparency = 0 })
+	tween(view.sheetScale, OPEN_DURATION, { Scale = 1 })
+end
+
+local function close()
+	if not isOpen then
+		return
+	end
+	isOpen = false
+
+	tween(view.backdrop, CLOSE_DURATION, { BackgroundTransparency = 1 })
+	tween(view.sheetScale, CLOSE_DURATION, { Scale = CLOSED_SCALE })
+	tween(view.sheet, CLOSE_DURATION, { GroupTransparency = 1 }).Completed:Once(function()
+		if not isOpen then -- pas rouverte pendant le fondu
+			view.gui.Enabled = false
+		end
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- Entrées
+--------------------------------------------------------------------------------
+
+for id, node in view.continents do
+	node.button.Activated:Connect(function()
+		selectContinent(id)
+	end)
+	-- Survol : le nom du continent s'éclaire.
+	node.button.MouseEnter:Connect(function()
+		node.nameLabel.TextStrokeTransparency = 0
+	end)
+	node.button.MouseLeave:Connect(function()
+		node.nameLabel.TextStrokeTransparency = 0.25
+	end)
+end
+
+view.closeButton.Activated:Connect(close)
+
+UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
+	if input.KeyCode ~= Config.TOGGLE_KEY then
+		return
+	end
+
+	if isOpen then
+		close() -- même si un bouton de la carte a le focus
+	elseif not gameProcessed and localPlayer:GetAttribute(AvatarConfig.CUSTOMIZING_ATTRIBUTE) ~= true then
+		open() -- jamais pendant le Hub de création, ni en tapant dans le chat
+	end
+end)
+]]></ProtectedString>
+						<bool name="Disabled">false</bool>
+						<Content name="LinkedSource"><null></null></Content>
+						<token name="RunContext">0</token>
+						<string name="ScriptGuid">{33C454BA-CCCF-4579-B4AB-3827F38C8D9F}</string>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<string name="Name">WorldMapController</string>
+						<BinaryString name="SerializedOverrides"></BinaryString>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+					</Properties>
+				</Item>
+				<Item class="ModuleScript" referent="RBX8D9139061E434211B4F02868F326B370">
+					<Properties>
+						<Content name="LinkedSource"><null></null></Content>
+						<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	LightingPresets
+	Les "tableaux" de lumière du monde, et de quoi passer de l'un à l'autre. Données + fonctions pures.
+
+	Un préréglage (Preset) décrit TOUT le rendu à un instant : pour chaque objet (Lighting, Atmosphere,
+	ColorCorrection, Bloom, SunRays, Clouds), la valeur de chacune de ses propriétés animées.
+	Tous les préréglages ont exactement les mêmes clés : on peut donc toujours en mélanger deux.
+
+	La journée est une suite d'étapes (KEYFRAMES) entre lesquelles on interpole selon l'heure.
+	ANOMALY est à part : il écrase tout quand un boss charge son attaque fatale.
+
+	Pour changer l'ambiance du jeu, c'est ici : retoucher DAY, DUSK, NIGHT, DAWN ou ANOMALY.
+]]
+
+export type Preset = { [string]: { [string]: any } }
+
+local function rgb(red: number, green: number, blue: number): Color3
+	return Color3.fromRGB(red, green, blue)
+end
+
+-- Plein jour : lumière claire mais froide, couleurs un peu éteintes, lointain noyé de brume.
+local DAY: Preset = {
+	Lighting = {
+		Ambient = rgb(70, 72, 80),
+		OutdoorAmbient = rgb(128, 130, 138),
+		Brightness = 2.6,
+		ColorShift_Top = rgb(255, 240, 214),
+		ExposureCompensation = 0.1,
+	},
+	Atmosphere = { Density = 0.32, Offset = 0.25, Color = rgb(199, 205, 214), Decay = rgb(106, 112, 125), Glare = 0.15, Haze = 1.6 },
+	ColorCorrection = { TintColor = rgb(255, 248, 238), Saturation = -0.08, Contrast = 0.12, Brightness = 0 },
+	Bloom = { Intensity = 0.6, Threshold = 1.6, Size = 28 },
+	SunRays = { Intensity = 0.12, Spread = 0.6 },
+	Clouds = { Cover = 0.55, Density = 0.6, Color = rgb(235, 235, 240) },
+}
+
+-- Aube : rose et or, soleil rasant, rayons marqués.
+local DAWN: Preset = {
+	Lighting = {
+		Ambient = rgb(86, 70, 78),
+		OutdoorAmbient = rgb(150, 120, 110),
+		Brightness = 1.8,
+		ColorShift_Top = rgb(255, 196, 150),
+		ExposureCompensation = 0,
+	},
+	Atmosphere = { Density = 0.42, Offset = 0.2, Color = rgb(232, 190, 170), Decay = rgb(140, 100, 110), Glare = 0.4, Haze = 2.2 },
+	ColorCorrection = { TintColor = rgb(255, 236, 224), Saturation = 0.02, Contrast = 0.1, Brightness = 0 },
+	Bloom = { Intensity = 0.9, Threshold = 1.3, Size = 36 },
+	SunRays = { Intensity = 0.3, Spread = 0.9 },
+	Clouds = { Cover = 0.55, Density = 0.6, Color = rgb(255, 214, 196) },
+}
+
+-- Crépuscule : orange qui vire au violet, ombres longues.
+local DUSK: Preset = {
+	Lighting = {
+		Ambient = rgb(80, 60, 84),
+		OutdoorAmbient = rgb(140, 104, 110),
+		Brightness = 1.6,
+		ColorShift_Top = rgb(255, 160, 110),
+		ExposureCompensation = 0,
+	},
+	Atmosphere = { Density = 0.44, Offset = 0.2, Color = rgb(214, 150, 130), Decay = rgb(110, 70, 100), Glare = 0.5, Haze = 2.4 },
+	ColorCorrection = { TintColor = rgb(255, 226, 214), Saturation = 0, Contrast = 0.14, Brightness = 0 },
+	Bloom = { Intensity = 1, Threshold = 1.2, Size = 40 },
+	SunRays = { Intensity = 0.35, Spread = 1 },
+	Clouds = { Cover = 0.55, Density = 0.6, Color = rgb(240, 180, 170) },
+}
+
+-- Nuit : bleu froid, peu de couleur, juste assez de lumière pour jouer.
+local NIGHT: Preset = {
+	Lighting = {
+		Ambient = rgb(26, 30, 48),
+		OutdoorAmbient = rgb(40, 48, 78),
+		Brightness = 0.9,
+		ColorShift_Top = rgb(120, 140, 200),
+		ExposureCompensation = -0.15,
+	},
+	Atmosphere = { Density = 0.38, Offset = 0.1, Color = rgb(40, 50, 80), Decay = rgb(20, 24, 44), Glare = 0, Haze = 1.2 },
+	ColorCorrection = { TintColor = rgb(214, 224, 255), Saturation = -0.18, Contrast = 0.16, Brightness = -0.02 },
+	Bloom = { Intensity = 0.5, Threshold = 1.4, Size = 24 },
+	SunRays = { Intensity = 0.04, Spread = 0.3 },
+	Clouds = { Cover = 0.5, Density = 0.6, Color = rgb(70, 80, 110) },
+}
+
+-- Anomalie : ciel bouché, lumière rouge sang, brouillard si lourd qu'on ne voit plus l'horizon.
+local ANOMALY: Preset = {
+	Lighting = {
+		Ambient = rgb(60, 0, 6),
+		OutdoorAmbient = rgb(90, 6, 10),
+		Brightness = 0.35,
+		ColorShift_Top = rgb(255, 30, 30),
+		ExposureCompensation = -0.35,
+	},
+	Atmosphere = { Density = 0.62, Offset = 0, Color = rgb(120, 8, 12), Decay = rgb(30, 0, 2), Glare = 0.9, Haze = 6 },
+	ColorCorrection = { TintColor = rgb(255, 140, 140), Saturation = -0.25, Contrast = 0.45, Brightness = -0.08 },
+	Bloom = { Intensity = 1.4, Threshold = 0.9, Size = 48 },
+	SunRays = { Intensity = 0, Spread = 0 },
+	Clouds = { Cover = 1, Density = 0.95, Color = rgb(60, 4, 8) },
+}
+
+-- La journée : (heure, préréglage), par heures croissantes, de 0 à 24.
+local KEYFRAMES: { { hour: number, preset: Preset } } = {
+	{ hour = 0, preset = NIGHT },
+	{ hour = 5.2, preset = NIGHT },
+	{ hour = 6.5, preset = DAWN },
+	{ hour = 9, preset = DAY },
+	{ hour = 16.5, preset = DAY },
+	{ hour = 18.3, preset = DUSK },
+	{ hour = 20, preset = NIGHT },
+	{ hour = 24, preset = NIGHT },
+}
+
+local LightingPresets = {}
+
+LightingPresets.ANOMALY = ANOMALY
+-- Heure affichée par le ciel pendant l'anomalie : minuit, pour que le soleil disparaisse d'un coup.
+LightingPresets.ANOMALY_CLOCK_TIME = 0
+
+local function lerpValue(from: any, to: any, alpha: number): any
+	if typeof(from) == "Color3" then
+		return from:Lerp(to, alpha)
+	end
+	return from + (to - from) * alpha
+end
+
+-- Mélange deux préréglages : alpha = 0 donne `from`, alpha = 1 donne `to`. Retourne une nouvelle table.
+function LightingPresets.blend(from: Preset, to: Preset, alpha: number): Preset
+	local result: Preset = {}
+	for groupName, properties in from do
+		local group = {}
+		for property, value in properties do
+			group[property] = lerpValue(value, to[groupName][property], alpha)
+		end
+		result[groupName] = group
+	end
+	return result
+end
+
+-- Préréglage de la journée à l'heure `clockTime` (0 à 24). Retourne une nouvelle table, modifiable.
+function LightingPresets.atClockTime(clockTime: number): Preset
+	for index = 1, #KEYFRAMES - 1 do
+		local current, following = KEYFRAMES[index], KEYFRAMES[index + 1]
+		if clockTime >= current.hour and clockTime <= following.hour then
+			local alpha = (clockTime - current.hour) / (following.hour - current.hour)
+			return LightingPresets.blend(current.preset, following.preset, alpha)
+		end
+	end
+	return LightingPresets.blend(NIGHT, NIGHT, 0)
+end
+
+return LightingPresets
+]]></ProtectedString>
+						<string name="ScriptGuid">{019D0B30-E1C2-4EB6-A8C6-B4818A2A0E80}</string>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<string name="Name">LightingPresets</string>
+						<BinaryString name="SerializedOverrides"></BinaryString>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+					</Properties>
+				</Item>
+				<Item class="ModuleScript" referent="RBXD3CE5078708D4523BADE843C3F5DC472">
+					<Properties>
+						<Content name="LinkedSource"><null></null></Content>
+						<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	AmbientParticles
+	Particules d'ambiance qui flottent autour du joueur : poussière dorée le jour, lucioles la nuit,
+	braises pendant l'anomalie. Local à ce client.
+
+	Un grand volume invisible suit la caméra ; chaque ambiance est un ParticleEmitter posé dedans,
+	qui fait naître ses particules n'importe où dans ce volume. Les particules, elles, restent dans
+	le monde une fois nées (LockedToPart = false) : le joueur les traverse en avançant.
+
+	Ajouter une ambiance = ajouter une entrée à EMITTER_SETUPS.
+]]
+
+local SPARK_TEXTURE = "rbxasset://textures/particles/sparkles_main.dds" -- livrée avec le client Roblox
+
+local VOLUME_SIZE = Vector3.new(90, 34, 90) -- studs : la zone autour de la caméra où naissent les particules
+
+-- Chaque fonction règle l'émetteur d'une ambiance.
+local EMITTER_SETUPS: { [string]: (ParticleEmitter) -> () } = {
+	-- Jour : grains de poussière qui dérivent dans la lumière.
+	dust = function(emitter: ParticleEmitter)
+		emitter.Rate = 16
+		emitter.Lifetime = NumberRange.new(6, 10)
+		emitter.Speed = NumberRange.new(0.3, 1)
+		emitter.Size = NumberSequence.new(0.12)
+		emitter.Color = ColorSequence.new(Color3.fromRGB(255, 244, 220))
+		emitter.LightEmission = 0.3
+		emitter.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1),
+			NumberSequenceKeypoint.new(0.2, 0.55),
+			NumberSequenceKeypoint.new(0.8, 0.55),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+	end,
+
+	-- Nuit : lucioles, rares, lentes, qui s'allument et s'éteignent.
+	fireflies = function(emitter: ParticleEmitter)
+		emitter.Rate = 7
+		emitter.Lifetime = NumberRange.new(5, 9)
+		emitter.Speed = NumberRange.new(0.5, 1.5)
+		emitter.Acceleration = Vector3.new(0, 0.2, 0)
+		emitter.Size = NumberSequence.new(0.36)
+		emitter.Color = ColorSequence.new(Color3.fromRGB(200, 255, 130))
+		emitter.LightEmission = 1
+		emitter.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1),
+			NumberSequenceKeypoint.new(0.15, 0.1),
+			NumberSequenceKeypoint.new(0.4, 0.75),
+			NumberSequenceKeypoint.new(0.65, 0.1),
+			NumberSequenceKeypoint.new(0.85, 0.6),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+	end,
+
+	-- Anomalie : braises qui montent du sol, de l'orange vers le rouge sombre.
+	embers = function(emitter: ParticleEmitter)
+		emitter.Rate = 50
+		emitter.Lifetime = NumberRange.new(3, 6)
+		emitter.Speed = NumberRange.new(2, 6)
+		emitter.Acceleration = Vector3.new(0, 3, 0)
+		emitter.RotSpeed = NumberRange.new(-90, 90)
+		emitter.Size = NumberSequence.new(0.4, 0)
+		emitter.Color = ColorSequence.new(Color3.fromRGB(255, 120, 40), Color3.fromRGB(120, 10, 10))
+		emitter.LightEmission = 1
+		emitter.Transparency = NumberSequence.new(0.1, 1)
+	end,
+}
+
+local AmbientParticles = {}
+
+local volume: Part? = nil
+local emitters: { [string]: ParticleEmitter } = {}
+
+-- Crée le volume et ses émetteurs (tous éteints). À appeler une fois.
+function AmbientParticles.init()
+	if volume then
+		return
+	end
+
+	local part = Instance.new("Part")
+	part.Name = "AmbientParticleVolume"
+	part.Size = VOLUME_SIZE
+	part.Transparency = 1
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false
+
+	for name, setup in EMITTER_SETUPS do
+		local emitter = Instance.new("ParticleEmitter")
+		emitter.Name = name
+		emitter.Enabled = false
+		emitter.Texture = SPARK_TEXTURE
+		emitter.LightInfluence = 0
+		emitter.LockedToPart = false
+		emitter.Shape = Enum.ParticleEmitterShape.Box
+		emitter.ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume
+		emitter.SpreadAngle = Vector2.new(180, 180)
+		emitter.Drag = 1
+		emitter.WindAffectsDrag = true -- le vent de la météo emporte les particules
+		setup(emitter)
+		emitter.Parent = part
+		emitters[name] = emitter
+	end
+
+	part.Parent = workspace
+	volume = part
+end
+
+-- Allume l'ambiance `name` et éteint les autres. Les particules déjà nées finissent leur vie.
+function AmbientParticles.setActive(name: string)
+	for emitterName, emitter in emitters do
+		emitter.Enabled = emitterName == name
+	end
+end
+
+-- Recentre le volume sur `position` (la caméra). À appeler à chaque frame.
+function AmbientParticles.follow(position: Vector3)
+	if volume then
+		volume.CFrame = CFrame.new(position)
+	end
+end
+
+return AmbientParticles
+]]></ProtectedString>
+						<string name="ScriptGuid">{CFD1B5C1-30B8-489A-9A53-64749E16E9FB}</string>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<string name="Name">AmbientParticles</string>
+						<BinaryString name="SerializedOverrides"></BinaryString>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+					</Properties>
+				</Item>
+				<Item class="ModuleScript" referent="RBX8DF566E4011644308B1B92D2575C8D0B">
+					<Properties>
+						<Content name="LinkedSource"><null></null></Content>
+						<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	WorldMapView
+	Construit la carte du monde, entièrement par code. Comme les autres vues, ce module ne contient
+	AUCUNE logique : il crée les instances et les expose, c'est WorldMapController qui ouvre, ferme
+	et réagit aux clics.
+
+	Style : un vieux parchemin. Tout est dessiné avec des cadres, des dégradés et des polices,
+	sans aucune image ; chaque emplacement d'image de WorldMapConfig remplace le dessin par défaut
+	dès qu'il est renseigné.
+
+	Arborescence produite :
+		WorldMapGui (ScreenGui)
+		├── Backdrop (TextButton)        voile sombre ; il absorbe les clics tant que la carte est ouverte
+		└── Sheet (CanvasGroup)          le parchemin
+		    ├── Title, Footer, Close
+		    ├── MapArea                  mers, rose des vents, un cadre par continent
+		    └── InfoPanel                nom, surnom, vignette et histoire du continent sélectionné
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local sharedFolder = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("World")
+local Config = require(sharedFolder:WaitForChild("WorldMapConfig") :: ModuleScript)
+
+local COLOR_PARCHMENT = Color3.fromRGB(218, 198, 158)
+local COLOR_PARCHMENT_SHADE = Color3.fromRGB(168, 142, 100)
+local COLOR_INK = Color3.fromRGB(52, 36, 22)
+local COLOR_INK_FADED = Color3.fromRGB(110, 86, 60)
+local COLOR_SEAL = Color3.fromRGB(140, 30, 30) -- rouge de cire, pour "Vous êtes ici"
+
+local FONT_TITLE = Enum.Font.GrenzeGotisch -- gothique, pour les titres
+local FONT_HAND = Enum.Font.Fondamento -- calligraphie, pour tout le reste
+
+local SHEET_ASPECT_RATIO = 1.6
+local MAP_AREA_WIDTH = 0.66 -- part du parchemin occupée par la carte (le reste : panneau d'informations)
+
+-- Un continent sur la carte.
+export type ContinentNode = {
+	button: TextButton, -- zone cliquable
+	nameLabel: TextLabel,
+	outline: UIStroke, -- cadre de sélection
+}
+
+export type View = {
+	gui: ScreenGui,
+	backdrop: TextButton,
+	sheet: CanvasGroup,
+	sheetScale: UIScale,
+	closeButton: TextButton,
+	footer: TextLabel,
+	continents: { [string]: ContinentNode }, -- par id de continent
+	infoName: TextLabel,
+	infoEpithet: TextLabel,
+	infoLore: TextLabel,
+	infoIllustration: ImageLabel,
+	infoIllustrationHint: TextLabel, -- texte affiché tant qu'il n'y a pas d'illustration
+	infoHereTag: TextLabel, -- "Vous êtes ici"
+}
+
+local WorldMapView = {}
+
+local function new(className: string, properties: { [string]: any }, parent: Instance?): any
+	local instance = Instance.new(className) :: any
+	for property, value in properties do
+		instance[property] = value
+	end
+	instance.Parent = parent
+	return instance
+end
+
+local function newText(properties: { [string]: any }, parent: Instance): TextLabel
+	local label = new("TextLabel", {
+		BackgroundTransparency = 1,
+		Font = FONT_HAND,
+		TextColor3 = COLOR_INK,
+		TextSize = 20,
+	}, nil)
+	for property, value in properties do
+		label[property] = value
+	end
+	label.Parent = parent
+	return label
+end
+
+--------------------------------------------------------------------------------
+-- Continents
+--------------------------------------------------------------------------------
+
+-- Silhouette par défaut : quelques taches arrondies qui se chevauchent, à l'encre du continent.
+local function drawBlobs(continent: any, parent: Instance)
+	for index, blob in continent.blobs do
+		local shape = new("Frame", {
+			Name = "Blob" .. index,
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(blob.x, blob.y),
+			Size = UDim2.fromScale(blob.width, blob.height),
+			Rotation = blob.rotation,
+			BackgroundColor3 = continent.color,
+			BackgroundTransparency = 0.2,
+			BorderSizePixel = 0,
+		}, parent)
+		new("UICorner", { CornerRadius = UDim.new(0.5, 0) }, shape)
+		new("UIStroke", { Color = COLOR_INK, Transparency = 0.55, Thickness = 1.5 }, shape)
+	end
+end
+
+local function newContinent(continent: any, mapArea: Instance): ContinentNode
+	local frame = new("Frame", {
+		Name = continent.id,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(continent.position.X, continent.position.Y),
+		Size = UDim2.fromScale(continent.size.X, continent.size.Y),
+		BackgroundTransparency = 1,
+	}, mapArea)
+
+	if continent.image ~= "" then
+		new("ImageLabel", {
+			Name = "Shape",
+			Size = UDim2.fromScale(1, 1),
+			BackgroundTransparency = 1,
+			Image = continent.image,
+			ScaleType = Enum.ScaleType.Fit,
+		}, frame)
+	else
+		drawBlobs(continent, frame)
+	end
+
+	local nameLabel = newText({
+		Name = "Name",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromScale(1.2, 0.3),
+		Text = continent.name,
+		TextColor3 = Color3.fromRGB(250, 238, 214),
+		TextStrokeColor3 = COLOR_INK,
+		TextStrokeTransparency = 0.25,
+		TextScaled = true,
+	}, frame)
+	new("UITextSizeConstraint", { MinTextSize = 10, MaxTextSize = 22 }, nameLabel)
+
+	-- Zone cliquable transparente, au-dessus du dessin. Son liseré sert de cadre de sélection.
+	local button = new("TextButton", {
+		Name = "Button",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		AutoButtonColor = false,
+		Text = "",
+		ZIndex = 5,
+	}, frame)
+	new("UICorner", { CornerRadius = UDim.new(0.12, 0) }, button)
+	local outline = new("UIStroke", {
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Color = COLOR_SEAL,
+		Thickness = 2,
+		Transparency = 1,
+	}, button)
+
+	return {
+		button = button,
+		nameLabel = nameLabel,
+		outline = outline,
+	}
+end
+
+--------------------------------------------------------------------------------
+-- Construction
+--------------------------------------------------------------------------------
+
+function WorldMapView.create(parent: Instance): View
+	local gui = new("ScreenGui", {
+		Name = "WorldMapGui",
+		ResetOnSpawn = false,
+		IgnoreGuiInset = true,
+		DisplayOrder = 40,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		Enabled = false,
+	}, nil)
+
+	local backdrop = new("TextButton", {
+		Name = "Backdrop",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = Color3.new(0, 0, 0),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		AutoButtonColor = false,
+		Text = "",
+	}, gui)
+
+	-- Parchemin -----------------------------------------------------------------
+	local sheet = new("CanvasGroup", {
+		Name = "Sheet",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromScale(0.86, 0.86),
+		BackgroundColor3 = COLOR_PARCHMENT,
+		BorderSizePixel = 0,
+		GroupTransparency = 1,
+	}, gui)
+	new("UIAspectRatioConstraint", { AspectRatio = SHEET_ASPECT_RATIO }, sheet)
+	new("UICorner", { CornerRadius = UDim.new(0, 6) }, sheet)
+	new("UIStroke", { Color = COLOR_INK, Thickness = 3, Transparency = 0.2 }, sheet)
+	-- Papier vieilli : plus sombre vers les coins.
+	new("UIGradient", {
+		Rotation = 35,
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, COLOR_PARCHMENT_SHADE),
+			ColorSequenceKeypoint.new(0.3, COLOR_PARCHMENT),
+			ColorSequenceKeypoint.new(0.7, COLOR_PARCHMENT),
+			ColorSequenceKeypoint.new(1, COLOR_PARCHMENT_SHADE),
+		}),
+	}, sheet)
+	local sheetScale = new("UIScale", { Scale = 0.94 }, sheet)
+
+	if Config.PARCHMENT_IMAGE ~= "" then
+		new("ImageLabel", {
+			Name = "ParchmentTexture",
+			Size = UDim2.fromScale(1, 1),
+			BackgroundTransparency = 1,
+			Image = Config.PARCHMENT_IMAGE,
+			ScaleType = Enum.ScaleType.Crop,
+		}, sheet)
+	end
+
+	-- Filet intérieur, comme sur une carte ancienne.
+	local innerBorder = new("Frame", {
+		Name = "InnerBorder",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.new(1, -28, 1, -28),
+		BackgroundTransparency = 1,
+	}, sheet)
+	new("UIStroke", { Color = COLOR_INK_FADED, Thickness = 1, Transparency = 0.3 }, innerBorder)
+
+	newText({
+		Name = "Title",
+		Position = UDim2.fromScale(0, 0.035),
+		Size = UDim2.fromScale(MAP_AREA_WIDTH, 0.09),
+		Font = FONT_TITLE,
+		Text = Config.TITLE,
+		TextScaled = true,
+	}, sheet)
+
+	local footer = newText({
+		Name = "Footer",
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.fromScale(0.04, 0.965),
+		Size = UDim2.fromScale(MAP_AREA_WIDTH - 0.04, 0.045),
+		Text = "",
+		TextColor3 = COLOR_INK_FADED,
+		TextScaled = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, sheet)
+
+	local closeButton = new("TextButton", {
+		Name = "Close",
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -24, 0, 20),
+		Size = UDim2.fromOffset(34, 34),
+		BackgroundTransparency = 1,
+		AutoButtonColor = false,
+		Font = FONT_TITLE,
+		Text = "X",
+		TextColor3 = COLOR_INK,
+		TextSize = 30,
+		ZIndex = 6,
+	}, sheet)
+
+	-- Carte ---------------------------------------------------------------------
+	local mapArea = new("Frame", {
+		Name = "MapArea",
+		Position = UDim2.fromScale(0.03, 0.14),
+		Size = UDim2.fromScale(MAP_AREA_WIDTH - 0.03, 0.76),
+		BackgroundTransparency = 1,
+	}, sheet)
+
+	for _, sea in Config.SEAS do
+		newText({
+			Name = "Sea",
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(sea.position.X, sea.position.Y),
+			Size = UDim2.fromScale(0.3, 0.06),
+			Rotation = sea.rotation,
+			Text = sea.name,
+			TextColor3 = COLOR_INK_FADED,
+			TextTransparency = 0.35,
+			TextScaled = true,
+		}, mapArea)
+	end
+
+	-- Rose des vents, dessinée en caractères.
+	local compass = new("Frame", {
+		Name = "Compass",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.09, 0.14),
+		Size = UDim2.fromScale(0.11, 0.11),
+		SizeConstraint = Enum.SizeConstraint.RelativeXX,
+		BackgroundTransparency = 1,
+	}, mapArea)
+	new("UICorner", { CornerRadius = UDim.new(0.5, 0) }, compass)
+	new("UIStroke", { Color = COLOR_INK_FADED, Thickness = 1.5, Transparency = 0.2 }, compass)
+	newText({ Name = "North", Size = UDim2.fromScale(1, 0.4), Font = FONT_TITLE, Text = "N", TextScaled = true }, compass)
+	newText({
+		Name = "Star",
+		Position = UDim2.fromScale(0, 0.3),
+		Size = UDim2.fromScale(1, 0.6),
+		Text = "+",
+		TextColor3 = COLOR_INK_FADED,
+		TextScaled = true,
+	}, compass)
+
+	local continents: { [string]: ContinentNode } = {}
+	for _, continent in Config.CONTINENTS do
+		continents[continent.id] = newContinent(continent, mapArea)
+	end
+
+	-- Panneau d'informations --------------------------------------------------------
+	local infoPanel = new("Frame", {
+		Name = "InfoPanel",
+		Position = UDim2.fromScale(MAP_AREA_WIDTH + 0.01, 0.1),
+		Size = UDim2.fromScale(1 - MAP_AREA_WIDTH - 0.05, 0.82),
+		BackgroundColor3 = COLOR_PARCHMENT_SHADE,
+		BackgroundTransparency = 0.6,
+		BorderSizePixel = 0,
+	}, sheet)
+	new("UICorner", { CornerRadius = UDim.new(0, 4) }, infoPanel)
+	new("UIStroke", { Color = COLOR_INK_FADED, Thickness = 1, Transparency = 0.3 }, infoPanel)
+	new("UIPadding", {
+		PaddingTop = UDim.new(0.03, 0),
+		PaddingBottom = UDim.new(0.03, 0),
+		PaddingLeft = UDim.new(0.06, 0),
+		PaddingRight = UDim.new(0.06, 0),
+	}, infoPanel)
+
+	local infoName = newText({
+		Name = "Name",
+		Size = UDim2.fromScale(1, 0.1),
+		Font = FONT_TITLE,
+		Text = "",
+		TextScaled = true,
+	}, infoPanel)
+
+	local infoEpithet = newText({
+		Name = "Epithet",
+		Position = UDim2.fromScale(0, 0.1),
+		Size = UDim2.fromScale(1, 0.06),
+		Text = "",
+		TextColor3 = COLOR_INK_FADED,
+		TextScaled = true,
+	}, infoPanel)
+
+	-- Emplacement de la vignette du continent.
+	local illustrationFrame = new("Frame", {
+		Name = "IllustrationFrame",
+		Position = UDim2.fromScale(0, 0.19),
+		Size = UDim2.fromScale(1, 0.3),
+		BackgroundColor3 = COLOR_INK,
+		BackgroundTransparency = 0.85,
+		BorderSizePixel = 0,
+	}, infoPanel)
+	new("UIStroke", { Color = COLOR_INK_FADED, Thickness = 1, Transparency = 0.2 }, illustrationFrame)
+
+	local infoIllustration = new("ImageLabel", {
+		Name = "Illustration",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		Image = "",
+		ScaleType = Enum.ScaleType.Crop,
+	}, illustrationFrame)
+
+	local infoIllustrationHint = newText({
+		Name = "Hint",
+		Size = UDim2.fromScale(1, 1),
+		Text = "Illustration à venir",
+		TextColor3 = COLOR_INK_FADED,
+		TextTransparency = 0.3,
+		TextSize = 18,
+	}, illustrationFrame)
+
+	local infoLore = newText({
+		Name = "Lore",
+		Position = UDim2.fromScale(0, 0.52),
+		Size = UDim2.fromScale(1, 0.38),
+		Text = "",
+		TextWrapped = true,
+		TextScaled = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+	}, infoPanel)
+	new("UITextSizeConstraint", { MinTextSize = 10, MaxTextSize = 20 }, infoLore)
+
+	local infoHereTag = newText({
+		Name = "HereTag",
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.fromScale(0, 1),
+		Size = UDim2.fromScale(1, 0.07),
+		Font = FONT_TITLE,
+		Text = "Vous êtes ici",
+		TextColor3 = COLOR_SEAL,
+		TextScaled = true,
+		Visible = false,
+	}, infoPanel)
+
+	gui.Parent = parent
+
+	return {
+		gui = gui,
+		backdrop = backdrop,
+		sheet = sheet,
+		sheetScale = sheetScale,
+		closeButton = closeButton,
+		footer = footer,
+		continents = continents,
+		infoName = infoName,
+		infoEpithet = infoEpithet,
+		infoLore = infoLore,
+		infoIllustration = infoIllustration,
+		infoIllustrationHint = infoIllustrationHint,
+		infoHereTag = infoHereTag,
+	}
+end
+
+return WorldMapView
+]]></ProtectedString>
+						<string name="ScriptGuid">{461AB06C-EF77-4CD2-8C8C-10565CD86D50}</string>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<string name="Name">WorldMapView   </string>
+						<BinaryString name="SerializedOverrides"></BinaryString>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+					</Properties>
+				</Item>
+			</Item>
+			<Item class="Folder" referent="RBX6FF6F2C2971648289DAFEF86E3D1C022">
+				<Properties>
+					<Color3 name="IconTint">
+						<R>0</R>
+						<G>0</G>
+						<B>0</B>
+					</Color3>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">NPC</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+				<Item class="LocalScript" referent="RBX403B6D46BA59499F961A433B3A06AA31">
+					<Properties>
+						<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	NPCInteraction (LocalScript)
+	Parler aux villageois :
+		- pose un ProximityPrompt ("Parler") sur chaque Model taggé "Villager" ;
+		- au déclenchement, ouvre la boîte de dialogue et écrit les répliques lettre par lettre,
+		  avec un petit son rétro, des pauses sur la ponctuation et un passage à la suite au clic ;
+		- pendant le dialogue, le joueur ne bouge plus et ses touches de combat sont neutralisées.
+
+	Tout est local : les prompts, le texte et le son n'existent que chez ce joueur. Le serveur est
+	seulement prévenu (TalkStarted / TalkEnded) pour que le villageois s'arrête et le regarde.
+
+	Entrées pendant un dialogue : clic n'importe où, F, Espace ou Entrée.
+		- réplique en cours d'écriture -> elle s'affiche entièrement ;
+		- réplique terminée            -> réplique suivante, ou fin du dialogue.
+]]
+
+local CollectionService = game:GetService("CollectionService")
+local ContextActionService = game:GetService("ContextActionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SoundService = game:GetService("SoundService")
+
+local sharedFolder = ReplicatedStorage:WaitForChild("Shared")
+local npcFolder = sharedFolder:WaitForChild("NPC")
+local AvatarConfig = require(sharedFolder:WaitForChild("Avatar"):WaitForChild("AvatarConfig") :: ModuleScript)
+local Config = require(npcFolder:WaitForChild("DialogueConfig") :: ModuleScript)
+local Remotes = require(npcFolder:WaitForChild("NPCRemotes") :: ModuleScript)
+
+local DialogueView = require(script.Parent:WaitForChild("DialogueView") :: ModuleScript)
+
+local ADVANCE_ACTION = "DialogueAdvance"
+local SINK_ACTION = "DialogueSink"
+local ACTION_PRIORITY = 3000 -- au-dessus des contrôles par défaut de Roblox
+local PROMPT_NAME = "TalkPrompt"
+local PROMPT_RETRY_DELAY = 1 -- secondes : un Model reçu en streaming peut arriver avant ses pièces
+local PROMPT_MAX_RETRIES = 10
+
+local localPlayer = Players.LocalPlayer
+local view = DialogueView.create(localPlayer:WaitForChild("PlayerGui"))
+local random = Random.new()
+
+-- Créé depuis un LocalScript : ce son ne se joue que sur ce client.
+local blip = Instance.new("Sound")
+blip.Name = "DialogueBlip"
+blip.SoundId = Config.BLIP_SOUND_ID
+blip.Volume = Config.BLIP_VOLUME
+blip.Parent = SoundService
+
+--------------------------------------------------------------------------------
+-- État
+--------------------------------------------------------------------------------
+
+local prompts: { [Model]: ProximityPrompt } = {}
+
+local activeVillager: Model? = nil -- villageois avec qui on parle (nil = pas de dialogue)
+local lines: { string } = {}
+local lineIndex = 0
+local isTyping = false
+local typingToken = 0 -- change à chaque réplique : arrête l'écriture de la précédente
+
+-- Contrôles de déplacement de Roblox, pour immobiliser le joueur pendant un dialogue.
+local controls: any = nil
+task.spawn(function()
+	local isLoaded, playerModule = pcall(function()
+		local playerScripts = localPlayer:WaitForChild("PlayerScripts")
+		return require(playerScripts:WaitForChild("PlayerModule") :: ModuleScript) :: any
+	end)
+	if isLoaded then
+		controls = playerModule:GetControls()
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- Contenu d'un dialogue
+--------------------------------------------------------------------------------
+
+-- Dialogue générique d'un villageois sans DialogueId : choisi d'après son nom,
+-- donc toujours le même pour lui, mais différent d'un villageois à l'autre.
+local function getGenericDialogue(villager: Model): any
+	local hash = 0
+	for index = 1, #villager.Name do
+		hash += string.byte(villager.Name, index)
+	end
+	local genericIds = Config.GENERIC_DIALOGUE_IDS
+	return Config.DIALOGUES[genericIds[hash % #genericIds + 1]]
+end
+
+local function getDialogue(villager: Model): any
+	local dialogueId = villager:GetAttribute(Config.DIALOGUE_ATTRIBUTE)
+	local dialogue = if type(dialogueId) == "string" then Config.DIALOGUES[dialogueId] else nil
+	return dialogue or getGenericDialogue(villager)
+end
+
+local function getDisplayName(villager: Model): string
+	local customName = villager:GetAttribute(Config.NAME_ATTRIBUTE)
+	if type(customName) == "string" and customName ~= "" then
+		return customName
+	end
+	return getDialogue(villager).name or villager.Name
+end
+
+--------------------------------------------------------------------------------
+-- Machine à écrire
+--------------------------------------------------------------------------------
+
+local function playBlip()
+	if Config.BLIP_SOUND_ID == "" then
+		return
+	end
+	blip.PlaybackSpeed = random:NextNumber(Config.BLIP_SPEED_MIN, Config.BLIP_SPEED_MAX)
+	-- PlayLocalSound joue une copie : deux bips rapprochés se superposent au lieu de se couper.
+	SoundService:PlayLocalSound(blip)
+end
+
+-- Temps d'attente après avoir affiché `character` : plus long sur la ponctuation, comme une respiration.
+local function getLetterDelay(character: string): number
+	if character == "." or character == "!" or character == "?" then
+		return Config.SENTENCE_PAUSE
+	elseif character == "," or character == ";" or character == ":" then
+		return Config.COMMA_PAUSE
+	end
+	return 1 / Config.LETTERS_PER_SECOND
+end
+
+-- La réplique est entièrement affichée : on montre comment continuer.
+local function finishLine()
+	isTyping = false
+	view.line.MaxVisibleGraphemes = -1 -- -1 = tout le texte
+	view.hint.Text = if lineIndex < #lines then "[F] ou clic : continuer" else "[F] ou clic : terminer"
+	view.hint.Visible = true
+end
+
+-- Écrit `text` lettre par lettre. YIELD. S'arrête d'elle-même si une autre réplique a pris sa place.
+local function typeLine(text: string)
+	typingToken += 1
+	local token = typingToken
+
+	isTyping = true
+	view.hint.Visible = false
+	-- Le texte complet est posé d'un coup (la mise en page ne bouge pas), puis dévoilé caractère
+	-- par caractère avec MaxVisibleGraphemes, qui compte correctement les lettres accentuées.
+	view.line.Text = text
+	view.line.MaxVisibleGraphemes = 0
+
+	local shownCount = 0
+	for _, codepoint in utf8.codes(text) do
+		if token ~= typingToken then
+			return
+		end
+
+		shownCount += 1
+		view.line.MaxVisibleGraphemes = shownCount
+
+		local character = utf8.char(codepoint)
+		if character ~= " " and shownCount % Config.BLIP_INTERVAL == 0 then
+			playBlip()
+		end
+		task.wait(getLetterDelay(character))
+	end
+
+	if token == typingToken then
+		finishLine()
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Déroulement d'un dialogue
+--------------------------------------------------------------------------------
+
+local function setPromptsEnabled(isEnabled: boolean)
+	for _, prompt in prompts do
+		prompt.Enabled = isEnabled
+	end
+end
+
+local function closeDialogue()
+	if activeVillager == nil then
+		return
+	end
+	activeVillager = nil
+	typingToken += 1 -- arrête l'écriture en cours
+	isTyping = false
+
+	view.gui.Enabled = false
+	ContextActionService:UnbindAction(ADVANCE_ACTION)
+	ContextActionService:UnbindAction(SINK_ACTION)
+	if controls then
+		controls:Enable()
+	end
+	setPromptsEnabled(true)
+	Remotes.TalkEnded:FireServer()
+end
+
+-- Clic ou touche pendant un dialogue.
+local function advanceDialogue()
+	if activeVillager == nil then
+		return
+	end
+
+	if isTyping then
+		typingToken += 1 -- l'écriture en cours s'arrête...
+		finishLine() -- ...et la réplique s'affiche en entier
+	elseif lineIndex < #lines then
+		lineIndex += 1
+		task.spawn(typeLine, lines[lineIndex])
+	else
+		closeDialogue()
+	end
+end
+
+local function openDialogue(villager: Model)
+	if activeVillager or localPlayer:GetAttribute(AvatarConfig.CUSTOMIZING_ATTRIBUTE) == true then
+		return
+	end
+	activeVillager = villager
+	lines = getDialogue(villager).lines
+	lineIndex = 1
+
+	view.namePlate.Text = getDisplayName(villager)
+	view.gui.Enabled = true
+	setPromptsEnabled(false)
+	if controls then
+		controls:Disable()
+	end
+	Remotes.TalkStarted:FireServer(villager)
+
+	-- Touches qui font avancer le dialogue.
+	ContextActionService:BindActionAtPriority(ADVANCE_ACTION, function(_actionName: string, state: Enum.UserInputState)
+		if state == Enum.UserInputState.Begin then
+			advanceDialogue()
+		end
+		return Enum.ContextActionResult.Sink
+	end, false, ACTION_PRIORITY, Config.INTERACT_KEY, Enum.KeyCode.Space, Enum.KeyCode.Return, Enum.KeyCode.ButtonA)
+
+	-- Touches de jeu neutralisées pendant qu'on parle : ultime, dash, carte. Une entrée "absorbée"
+	-- arrive aux autres scripts marquée gameProcessed, et ils l'ignorent. (R n'y est pas : une
+	-- anomalie doit toujours pouvoir être rembobinée.)
+	ContextActionService:BindActionAtPriority(SINK_ACTION, function()
+		return Enum.ContextActionResult.Sink
+	end, false, ACTION_PRIORITY, Enum.KeyCode.E, Enum.KeyCode.LeftShift, Enum.KeyCode.M)
+
+	task.spawn(typeLine, lines[lineIndex])
+end
+
+--------------------------------------------------------------------------------
+-- Prompts des villageois
+--------------------------------------------------------------------------------
+
+local function findPromptPart(villager: Model): BasePart?
+	local rootPart = villager:FindFirstChild("HumanoidRootPart")
+	if rootPart and rootPart:IsA("BasePart") then
+		return rootPart
+	end
+	return villager.PrimaryPart or villager:FindFirstChildWhichIsA("BasePart", true)
+end
+
+local function addPrompt(instance: Instance)
+	if not instance:IsA("Model") or prompts[instance] then
+		return
+	end
+	local villager = instance
+
+	-- En streaming, le Model peut arriver avant ses pièces : on réessaie un moment.
+	local part = findPromptPart(villager)
+	local retries = 0
+	while part == nil and retries < PROMPT_MAX_RETRIES and villager.Parent ~= nil do
+		retries += 1
+		task.wait(PROMPT_RETRY_DELAY)
+		part = findPromptPart(villager)
+	end
+	if part == nil or prompts[villager] then
+		return
+	end
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = PROMPT_NAME
+	prompt.ActionText = Config.ACTION_TEXT
+	prompt.ObjectText = getDisplayName(villager)
+	prompt.KeyboardKeyCode = Config.INTERACT_KEY
+	prompt.MaxActivationDistance = Config.INTERACT_DISTANCE
+	prompt.HoldDuration = 0
+	prompt.RequiresLineOfSight = false
+	prompt.Enabled = activeVillager == nil
+	prompt.Parent = part
+	prompts[villager] = prompt
+
+	prompt.Triggered:Connect(function()
+		openDialogue(villager)
+	end)
+end
+
+local function removePrompt(instance: Instance)
+	if not instance:IsA("Model") then
+		return
+	end
+	local prompt = prompts[instance]
+	if prompt then
+		prompts[instance] = nil
+		prompt:Destroy()
+	end
+	if activeVillager == instance then
+		closeDialogue() -- le villageois a disparu en pleine conversation
+	end
+end
+
+CollectionService:GetInstanceAddedSignal(Config.TAG):Connect(addPrompt)
+CollectionService:GetInstanceRemovedSignal(Config.TAG):Connect(removePrompt)
+for _, instance in CollectionService:GetTagged(Config.TAG) do
+	task.spawn(addPrompt, instance)
+end
+
+--------------------------------------------------------------------------------
+-- Entrées et cycle de vie
+--------------------------------------------------------------------------------
+
+view.clickCatcher.Activated:Connect(advanceDialogue)
+
+-- Mort ou respawn en pleine conversation : on referme tout proprement.
+localPlayer.CharacterAdded:Connect(closeDialogue)
+]]></ProtectedString>
+						<bool name="Disabled">false</bool>
+						<Content name="LinkedSource"><null></null></Content>
+						<token name="RunContext">0</token>
+						<string name="ScriptGuid">{F651C645-F418-4F93-A34F-8760AD15DD96}</string>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<string name="Name">NPCInteraction </string>
+						<BinaryString name="SerializedOverrides"></BinaryString>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+					</Properties>
+				</Item>
+				<Item class="ModuleScript" referent="RBXC45B9059866142B2BAA05AE9DB656816">
+					<Properties>
+						<Content name="LinkedSource"><null></null></Content>
+						<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	DialogueView
+	Construit la boîte de dialogue en bas de l'écran, entièrement par code. Aucune logique ici :
+	c'est NPCInteraction qui écrit le texte lettre par lettre et réagit aux entrées.
+
+	Arborescence produite :
+		DialogueGui (ScreenGui)
+		├── ClickCatcher (TextButton)   invisible, plein écran : un clic n'importe où fait avancer
+		│                               le dialogue (et n'est donc pas pris pour un coup d'épée)
+		└── Box (Frame)                 la boîte, en bas de l'écran
+		    ├── NamePlate               nom du personnage qui parle
+		    ├── Line                    la réplique
+		    └── Hint                    rappel des touches, visible quand la réplique est finie
+]]
+
+local COLOR_BACKGROUND = Color3.fromRGB(6, 6, 9)
+local COLOR_TEXT = Color3.fromRGB(226, 220, 208)
+local COLOR_MUTED = Color3.fromRGB(128, 122, 114)
+local COLOR_ACCENT = Color3.fromRGB(176, 146, 96) -- or terni, comme le Hub et la jauge
+
+local FONT_TEXT = Enum.Font.Garamond
+local FONT_CAPTION = Enum.Font.GothamMedium
+
+local BOX_SIZE = UDim2.new(0.62, 0, 0, 150)
+local BOTTOM_MARGIN = 96 -- pixels : au-dessus de la jauge de Tension
+
+export type View = {
+	gui: ScreenGui,
+	clickCatcher: TextButton,
+	namePlate: TextLabel,
+	line: TextLabel,
+	hint: TextLabel,
+}
+
+local DialogueView = {}
+
+function DialogueView.create(parent: Instance): View
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "DialogueGui"
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.DisplayOrder = 60
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	gui.Enabled = false
+
+	local clickCatcher = Instance.new("TextButton")
+	clickCatcher.Name = "ClickCatcher"
+	clickCatcher.Size = UDim2.fromScale(1, 1)
+	clickCatcher.BackgroundTransparency = 1
+	clickCatcher.AutoButtonColor = false
+	clickCatcher.Text = ""
+	clickCatcher.Parent = gui
+
+	local box = Instance.new("Frame")
+	box.Name = "Box"
+	box.AnchorPoint = Vector2.new(0.5, 1)
+	box.Position = UDim2.new(0.5, 0, 1, -BOTTOM_MARGIN)
+	box.Size = BOX_SIZE
+	box.BackgroundColor3 = COLOR_BACKGROUND
+	box.BackgroundTransparency = 0.12
+	box.BorderSizePixel = 0
+	box.Parent = gui
+
+	local boxCorner = Instance.new("UICorner")
+	boxCorner.CornerRadius = UDim.new(0, 4)
+	boxCorner.Parent = box
+
+	local boxStroke = Instance.new("UIStroke")
+	boxStroke.Color = COLOR_ACCENT
+	boxStroke.Thickness = 1
+	boxStroke.Transparency = 0.3
+	boxStroke.Parent = box
+
+	local padding = Instance.new("UIPadding")
+	padding.PaddingTop = UDim.new(0, 22)
+	padding.PaddingBottom = UDim.new(0, 14)
+	padding.PaddingLeft = UDim.new(0, 26)
+	padding.PaddingRight = UDim.new(0, 26)
+	padding.Parent = box
+
+	-- Cartouche du nom, à cheval sur le bord supérieur de la boîte.
+	local namePlate = Instance.new("TextLabel")
+	namePlate.Name = "NamePlate"
+	namePlate.AnchorPoint = Vector2.new(0, 0.5)
+	namePlate.Position = UDim2.fromOffset(0, -22)
+	namePlate.Size = UDim2.fromOffset(0, 30)
+	namePlate.AutomaticSize = Enum.AutomaticSize.X
+	namePlate.BackgroundColor3 = COLOR_BACKGROUND
+	namePlate.BorderSizePixel = 0
+	namePlate.Font = FONT_TEXT
+	namePlate.Text = ""
+	namePlate.TextSize = 22
+	namePlate.TextColor3 = COLOR_ACCENT
+	namePlate.Parent = box
+
+	local namePadding = Instance.new("UIPadding")
+	namePadding.PaddingLeft = UDim.new(0, 14)
+	namePadding.PaddingRight = UDim.new(0, 14)
+	namePadding.Parent = namePlate
+
+	local nameStroke = Instance.new("UIStroke")
+	nameStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	nameStroke.Color = COLOR_ACCENT
+	nameStroke.Thickness = 1
+	nameStroke.Transparency = 0.3
+	nameStroke.Parent = namePlate
+
+	local line = Instance.new("TextLabel")
+	line.Name = "Line"
+	line.Size = UDim2.new(1, 0, 1, -22)
+	line.BackgroundTransparency = 1
+	line.Font = FONT_TEXT
+	line.Text = ""
+	line.TextSize = 25
+	line.TextColor3 = COLOR_TEXT
+	line.TextWrapped = true
+	line.TextXAlignment = Enum.TextXAlignment.Left
+	line.TextYAlignment = Enum.TextYAlignment.Top
+	line.Parent = box
+
+	local hint = Instance.new("TextLabel")
+	hint.Name = "Hint"
+	hint.AnchorPoint = Vector2.new(1, 1)
+	hint.Position = UDim2.fromScale(1, 1)
+	hint.Size = UDim2.fromOffset(260, 18)
+	hint.BackgroundTransparency = 1
+	hint.Font = FONT_CAPTION
+	hint.Text = ""
+	hint.TextSize = 12
+	hint.TextColor3 = COLOR_MUTED
+	hint.TextXAlignment = Enum.TextXAlignment.Right
+	hint.Visible = false
+	hint.Parent = box
+
+	gui.Parent = parent
+
+	return {
+		gui = gui,
+		clickCatcher = clickCatcher,
+		namePlate = namePlate,
+		line = line,
+		hint = hint,
+	}
+end
+
+return DialogueView
+]]></ProtectedString>
+						<string name="ScriptGuid">{7D7F1C45-87FD-447C-A13C-35D08C45FA7C}</string>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<string name="Name">DialogueView</string>
+						<BinaryString name="SerializedOverrides"></BinaryString>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+					</Properties>
+				</Item>
+			</Item>
+		</Item>
+	</Item>
+	<SharedStrings>
+		<SharedString md5="yuZpQdnvvUBOTYh1jqZ2cA=="></SharedString>
+	</SharedStrings>
+</roblox>

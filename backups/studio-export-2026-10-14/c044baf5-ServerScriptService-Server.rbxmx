@@ -1,0 +1,3648 @@
+<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">
+	<Meta name="ExplicitAutoJoints">true</Meta>
+	<External>null</External>
+	<External>nil</External>
+	<Item class="Folder" referent="RBX79BC50D06A084EB38FF6D68CAABFF0DD">
+		<Properties>
+			<Color3 name="IconTint">
+				<R>0</R>
+				<G>0</G>
+				<B>0</B>
+			</Color3>
+			<BinaryString name="AttributesSerialize"></BinaryString>
+			<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+			<bool name="DefinesCapabilities">false</bool>
+			<string name="Name">Server</string>
+			<BinaryString name="SerializedOverrides"></BinaryString>
+			<int64 name="SourceAssetId">-1</int64>
+			<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+		</Properties>
+		<Item class="Script" referent="RBX157E4BF7BBB04300BC4EB4ADFF69D686">
+			<Properties>
+				<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	Main (Script serveur)
+	Point d'entrée unique du serveur : démarre les services dans l'ordre.
+	Aucune logique ici, uniquement du câblage.
+]]
+
+local AvatarService = require(script.Parent.Avatar.AvatarService)
+local BossService = require(script.Parent.Boss.BossService)
+local CombatService = require(script.Parent.Combat.CombatService)
+local MovementService = require(script.Parent.Movement.MovementService)
+local ProfileStore = require(script.Parent.Data.ProfileStore)
+local TimeLoopService = require(script.Parent.TimeLoop.TimeLoopService)
+local VillagerService = require(script.Parent.NPC.VillagerService)
+local WorldService = require(script.Parent.World.WorldService)
+
+ProfileStore.start() -- en premier : AvatarService charge les profils dès l'arrivée des joueurs
+WorldService.start() -- avant le boss, qui fait basculer le monde dans l'anomalie
+AvatarService.start()
+TimeLoopService.start()
+MovementService.start()
+CombatService.start()
+BossService.start()
+VillagerService.start()
+]]></ProtectedString>
+				<bool name="Disabled">false</bool>
+				<Content name="LinkedSource"><null></null></Content>
+				<token name="RunContext">0</token>
+				<string name="ScriptGuid">{F0DFC460-AB5F-4618-AEB1-3D43A849CE37}</string>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">Main</string>
+				<BinaryString name="SerializedOverrides"></BinaryString>
+				<int64 name="SourceAssetId">-1</int64>
+				<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+			</Properties>
+		</Item>
+		<Item class="Folder" referent="RBX451DB4E7EA2F42139261E9451FF942E9">
+			<Properties>
+				<Color3 name="IconTint">
+					<R>0</R>
+					<G>0</G>
+					<B>0</B>
+				</Color3>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">TimeLoop</string>
+				<BinaryString name="SerializedOverrides"></BinaryString>
+				<int64 name="SourceAssetId">-1</int64>
+				<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+			</Properties>
+			<Item class="ModuleScript" referent="RBX0012C67C712D4D4DB20A8B86AF1C0008">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	EntitySnapshot
+	Définit ce qu'est un snapshot et sait le lire / l'écrire sur un personnage.
+	Fonctions pures vis-à-vis du reste du système : aucune notion de buffer ni de temps réel ici.
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage.Shared.TimeLoop.TimeLoopConfig)
+
+export type Snapshot = {
+	timestamp: number, -- temps de timeline (pas os.clock) auquel le snapshot a été pris
+	cframe: CFrame, -- CFrame du HumanoidRootPart
+	health: number,
+	humanoidState: Enum.HumanoidStateType, -- conservé pour l'étape combat/animation, non réappliqué ici
+	combatState: string?, -- valeur de l'attribut CombatState (nil si absent)
+}
+
+local EntitySnapshot = {}
+
+-- Retourne le Humanoid et son RootPart, ou nil si le personnage n'est pas (encore) complet.
+function EntitySnapshot.getParts(character: Model): (Humanoid?, BasePart?)
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if humanoid == nil then
+		return nil, nil
+	end
+	return humanoid, humanoid.RootPart
+end
+
+-- Photographie l'état courant. Retourne nil si le personnage est incomplet ou mort
+-- (un Humanoid mort est irréversible : on ne veut pas de frames mortes dans l'historique).
+function EntitySnapshot.capture(character: Model, timestamp: number): Snapshot?
+	local humanoid, rootPart = EntitySnapshot.getParts(character)
+	if humanoid == nil or rootPart == nil or humanoid.Health <= 0 then
+		return nil
+	end
+
+	local combatState = character:GetAttribute(Config.COMBAT_STATE_ATTRIBUTE)
+
+	return {
+		timestamp = timestamp,
+		cframe = rootPart.CFrame,
+		health = humanoid.Health,
+		humanoidState = humanoid:GetState(),
+		combatState = if typeof(combatState) == "string" then combatState else nil,
+	}
+end
+
+-- Applique l'état continu (position, santé) interpolé entre deux snapshots.
+-- alpha = 0 -> `newer`, alpha = 1 -> `older`.
+function EntitySnapshot.applyInterpolated(character: Model, newer: Snapshot, older: Snapshot, alpha: number)
+	local humanoid, rootPart = EntitySnapshot.getParts(character)
+	if humanoid == nil or rootPart == nil then
+		return
+	end
+
+	rootPart.CFrame = newer.cframe:Lerp(older.cframe, alpha)
+	humanoid.Health = newer.health + (older.health - newer.health) * alpha
+end
+
+-- Applique l'état discret (non interpolable) du snapshot d'arrivée, une seule fois en fin de rewind.
+function EntitySnapshot.applyDiscreteState(character: Model, snapshot: Snapshot)
+	character:SetAttribute(Config.COMBAT_STATE_ATTRIBUTE, snapshot.combatState)
+end
+
+return EntitySnapshot
+]]></ProtectedString>
+					<string name="ScriptGuid">{25A60CE7-6729-4DB7-90C8-F330276EBB7D}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">EntitySnapshot</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX53C111C0CCAE4130AEDBA82175F87D3E">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	SnapshotBuffer
+	Buffer circulaire de taille fixe : quand il est plein, le snapshot le plus ancien est écrasé.
+	Mémoire bornée et push/pop en O(1), contrairement à table.insert/table.remove(t, 1).
+
+	Les offsets comptent depuis le plus récent : peek(0) = dernier snapshot, peek(1) = l'avant-dernier.
+]]
+
+local EntitySnapshot = require(script.Parent.EntitySnapshot)
+
+type Snapshot = EntitySnapshot.Snapshot
+
+local SnapshotBuffer = {}
+SnapshotBuffer.__index = SnapshotBuffer
+
+type BufferData = {
+	_slots: { Snapshot? },
+	_capacity: number,
+	_newestSlot: number, -- index (1..capacity) du snapshot le plus récent
+	_count: number,
+}
+
+export type SnapshotBuffer = typeof(setmetatable({} :: BufferData, SnapshotBuffer))
+
+function SnapshotBuffer.new(capacity: number): SnapshotBuffer
+	assert(capacity >= 1, "SnapshotBuffer: la capacité doit être >= 1")
+
+	local data: BufferData = {
+		_slots = table.create(capacity),
+		_capacity = capacity,
+		_newestSlot = 0,
+		_count = 0,
+	}
+	return setmetatable(data, SnapshotBuffer)
+end
+
+function SnapshotBuffer.push(self: SnapshotBuffer, snapshot: Snapshot)
+	self._newestSlot = self._newestSlot % self._capacity + 1
+	self._slots[self._newestSlot] = snapshot
+	self._count = math.min(self._count + 1, self._capacity)
+end
+
+function SnapshotBuffer.peek(self: SnapshotBuffer, offset: number): Snapshot?
+	if offset < 0 or offset >= self._count then
+		return nil
+	end
+	local slot = (self._newestSlot - 1 - offset) % self._capacity + 1
+	return self._slots[slot]
+end
+
+function SnapshotBuffer.peekOldest(self: SnapshotBuffer): Snapshot?
+	return self:peek(self._count - 1)
+end
+
+-- Retire et retourne le snapshot le plus récent (c'est ce qui "consomme" l'historique pendant un rewind).
+function SnapshotBuffer.popNewest(self: SnapshotBuffer): Snapshot?
+	if self._count == 0 then
+		return nil
+	end
+	local snapshot = self._slots[self._newestSlot]
+	self._slots[self._newestSlot] = nil
+	self._newestSlot = (self._newestSlot - 2) % self._capacity + 1
+	self._count -= 1
+	return snapshot
+end
+
+return SnapshotBuffer
+]]></ProtectedString>
+					<string name="ScriptGuid">{9D4A2F5C-AF0F-48C3-840F-CE4AD3DE0054}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">SnapshotBuffer</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX3E30597361764E77B7A32A05C0F75B23">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	TimeLoopSession
+	Une "timeline" partagée par un groupe d'entités (ex. : un combat de boss = 1 session).
+	Deux responsabilités :
+		1. Data Logger : un snapshot de chaque entité tous les RECORD_INTERVAL.
+		2. Rewind     : relecture inversée de ces snapshots, pour toutes les entités en même temps.
+
+	Le temps est mesuré en "temps de timeline" : il avance pendant l'enregistrement et recule
+	pendant un rewind. Après un rewind de 5 s, la timeline reprend donc 5 s plus tôt et
+	l'historique reste cohérent (on peut rembobiner plusieurs fois de suite).
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Config = require(ReplicatedStorage.Shared.TimeLoop.TimeLoopConfig)
+local EntitySnapshot = require(script.Parent.EntitySnapshot)
+local SnapshotBuffer = require(script.Parent.SnapshotBuffer)
+
+type Snapshot = EntitySnapshot.Snapshot
+type Buffer = SnapshotBuffer.SnapshotBuffer
+
+-- +2 : marge pour les snapshots hors cadence pris au début et à la fin d'un rewind.
+local BUFFER_CAPACITY = math.ceil(Config.BUFFER_DURATION / Config.RECORD_INTERVAL) + 2
+
+type Entity = {
+	character: Model,
+	buffer: Buffer,
+	isNpc: boolean,
+	wasAnchored: boolean, -- état Anchored du RootPart avant le gel du rewind
+}
+
+local TimeLoopSession = {}
+TimeLoopSession.__index = TimeLoopSession
+
+type SessionData = {
+	_entities: { [Model]: Entity },
+	_timelineTime: number,
+	_recordAccumulator: number,
+	_isRewinding: boolean,
+	_isRecordingPaused: boolean,
+	_heartbeatConnection: RBXScriptConnection?,
+}
+
+export type TimeLoopSession = typeof(setmetatable({} :: SessionData, TimeLoopSession))
+
+--------------------------------------------------------------------------------
+-- Helpers par entité
+--------------------------------------------------------------------------------
+
+-- Un PNJ doit être simulé par le serveur, sinon sa physique peut être confiée au client le plus proche.
+local function claimServerOwnership(entity: Entity)
+	if not entity.isNpc then
+		return
+	end
+	local _, rootPart = EntitySnapshot.getParts(entity.character)
+	if rootPart and rootPart:CanSetNetworkOwnership() then
+		rootPart:SetNetworkOwner(nil)
+	end
+end
+
+-- Gèle l'entité : un RootPart ancré n'est plus simulé par son propriétaire réseau,
+-- le serveur devient donc seul maître de son CFrame pendant la lecture inversée.
+local function freeze(entity: Entity)
+	local _, rootPart = EntitySnapshot.getParts(entity.character)
+	if rootPart then
+		entity.wasAnchored = rootPart.Anchored
+		rootPart.Anchored = true
+	end
+end
+
+local function unfreeze(entity: Entity)
+	local _, rootPart = EntitySnapshot.getParts(entity.character)
+	if rootPart then
+		rootPart.AssemblyLinearVelocity = Vector3.zero
+		rootPart.AssemblyAngularVelocity = Vector3.zero
+		rootPart.Anchored = entity.wasAnchored
+	end
+	claimServerOwnership(entity)
+end
+
+-- Place l'entité à l'instant `cursor` de la timeline.
+-- Les snapshots plus récents que le curseur sont dépilés au passage : c'est la lecture à l'envers.
+local function scrub(entity: Entity, cursor: number)
+	local buffer = entity.buffer
+
+	-- Tant que l'avant-dernier snapshot est lui aussi "dans le futur" du curseur, le dernier est inutile.
+	while true do
+		local previous = buffer:peek(1)
+		if previous == nil or previous.timestamp < cursor then
+			break
+		end
+		buffer:popNewest()
+	end
+
+	local newer = buffer:peek(0)
+	if newer == nil then
+		return
+	end
+
+	-- Le curseur est maintenant encadré : older.timestamp < cursor <= newer.timestamp
+	-- (ou bien il ne reste qu'un snapshot, et l'entité y reste figée).
+	local older = buffer:peek(1) or newer
+	local span = newer.timestamp - older.timestamp
+	local alpha = if span > 0 then math.clamp((newer.timestamp - cursor) / span, 0, 1) else 0
+
+	EntitySnapshot.applyInterpolated(entity.character, newer, older, alpha)
+end
+
+-- Fin de rewind : purge ce qui reste du "futur annulé" et applique l'état discret d'arrivée.
+local function land(entity: Entity, targetTime: number)
+	local buffer = entity.buffer
+	local landing: Snapshot? = nil
+
+	while true do
+		local newest = buffer:peek(0)
+		if newest == nil then
+			break
+		end
+		landing = newest
+		if newest.timestamp <= targetTime then
+			break
+		end
+		buffer:popNewest()
+	end
+
+	if landing then
+		EntitySnapshot.applyDiscreteState(entity.character, landing)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Helpers de session
+--------------------------------------------------------------------------------
+
+local function captureAll(self: TimeLoopSession)
+	for _, entity in self._entities do
+		local snapshot = EntitySnapshot.capture(entity.character, self._timelineTime)
+		if snapshot then
+			entity.buffer:push(snapshot)
+		end
+	end
+end
+
+-- Instant le plus ancien encore connu d'au moins une entité (borne basse d'un rewind).
+local function getOldestTimestamp(self: TimeLoopSession): number
+	local oldestTimestamp = self._timelineTime
+	for _, entity in self._entities do
+		local oldest = entity.buffer:peekOldest()
+		if oldest then
+			oldestTimestamp = math.min(oldestTimestamp, oldest.timestamp)
+		end
+	end
+	return oldestTimestamp
+end
+
+local function onHeartbeat(self: TimeLoopSession, deltaTime: number)
+	if self._isRewinding or self._isRecordingPaused then
+		return
+	end
+
+	self._timelineTime += deltaTime
+	self._recordAccumulator += deltaTime
+
+	if self._recordAccumulator >= Config.RECORD_INTERVAL then
+		-- Modulo plutôt que soustraction : après un gros lag on prend 1 snapshot, pas une rafale.
+		self._recordAccumulator %= Config.RECORD_INTERVAL
+		captureAll(self)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- API publique
+--------------------------------------------------------------------------------
+
+function TimeLoopSession.new(): TimeLoopSession
+	local data: SessionData = {
+		_entities = {},
+		_timelineTime = 0,
+		_recordAccumulator = 0,
+		_isRewinding = false,
+		_isRecordingPaused = false,
+		_heartbeatConnection = nil,
+	}
+	return setmetatable(data, TimeLoopSession)
+end
+
+-- Démarre l'enregistrement.
+function TimeLoopSession.start(self: TimeLoopSession)
+	if self._heartbeatConnection then
+		return
+	end
+	self._heartbeatConnection = RunService.Heartbeat:Connect(function(deltaTime: number)
+		onHeartbeat(self, deltaTime)
+	end)
+end
+
+function TimeLoopSession.stop(self: TimeLoopSession)
+	if self._heartbeatConnection then
+		self._heartbeatConnection:Disconnect()
+		self._heartbeatConnection = nil
+	end
+end
+
+-- Ajoute un personnage (joueur ou PNJ) à la timeline. Le Model peut être encore incomplet :
+-- il sera simplement ignoré par le logger tant qu'il n'a pas de Humanoid + RootPart.
+function TimeLoopSession.addEntity(self: TimeLoopSession, character: Model)
+	if self._entities[character] then
+		return
+	end
+
+	local entity: Entity = {
+		character = character,
+		buffer = SnapshotBuffer.new(BUFFER_CAPACITY),
+		isNpc = Players:GetPlayerFromCharacter(character) == nil,
+		wasAnchored = false,
+	}
+	self._entities[character] = entity
+	claimServerOwnership(entity)
+end
+
+function TimeLoopSession.removeEntity(self: TimeLoopSession, character: Model)
+	local entity = self._entities[character]
+	if entity == nil then
+		return
+	end
+	if self._isRewinding then
+		unfreeze(entity)
+	end
+	self._entities[character] = nil
+end
+
+function TimeLoopSession.isRewinding(self: TimeLoopSession): boolean
+	return self._isRewinding
+end
+
+-- Arrête / reprend l'horloge de la timeline (et donc l'enregistrement).
+-- Utilisé pendant une anomalie : sans cette pause, les secondes passées figé seraient enregistrées
+-- et un rewind de 5 s ne ramènerait le joueur qu'à 1 s avant l'attaque fatale.
+function TimeLoopSession.setRecordingPaused(self: TimeLoopSession, isPaused: boolean)
+	self._isRecordingPaused = isPaused
+end
+
+--[[
+	Rembobine toutes les entités de `window` secondes de timeline, en `playbackDuration` secondes réelles.
+	YIELD jusqu'à la fin de la lecture. Retourne false si un rewind est déjà en cours.
+
+	S'il y a moins de `window` secondes d'historique, on remonte aussi loin que possible
+	à la même vitesse (la lecture est alors plus courte).
+]]
+function TimeLoopSession.rewind(self: TimeLoopSession, window: number, playbackDuration: number): boolean
+	if self._isRewinding then
+		return false
+	end
+	self._isRewinding = true -- suspend aussi l'enregistrement (voir onHeartbeat)
+
+	-- 1. Snapshot de l'instant présent, pour que la lecture parte exactement de la pose actuelle.
+	captureAll(self)
+	for _, entity in self._entities do
+		freeze(entity)
+	end
+
+	-- 2. Lecture inversée : un curseur recule sur la timeline à vitesse constante.
+	local startTime = self._timelineTime
+	local targetTime = math.max(startTime - window, getOldestTimestamp(self))
+	local speed = window / playbackDuration
+	local cursor = startTime
+
+	while cursor > targetTime do
+		local deltaTime = RunService.Heartbeat:Wait()
+		cursor = math.max(cursor - deltaTime * speed, targetTime)
+		for _, entity in self._entities do
+			scrub(entity, cursor)
+		end
+	end
+
+	-- 3. Atterrissage : la timeline reprend à targetTime.
+	self._timelineTime = targetTime
+	self._recordAccumulator = 0
+	for _, entity in self._entities do
+		land(entity, targetTime)
+		unfreeze(entity)
+	end
+	captureAll(self)
+
+	self._isRewinding = false
+	return true
+end
+
+return TimeLoopSession
+]]></ProtectedString>
+					<string name="ScriptGuid">{791563AD-7664-4EE1-AA58-2C696107D293}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">TimeLoopSession</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX4B512E23E4CB49FFA643318842C4A2E8">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	TimeLoopService
+	Façade serveur du Time-Loop (singleton). C'est le SEUL module que le reste du jeu doit appeler.
+		- inscrit les joueurs et les PNJ taggés dans la session d'enregistrement ;
+		- gère l'état critique "anomalie temporelle" (joueur figé, fenêtre de survie, mort à l'expiration) ;
+		- valide les demandes de rewind des clients (anomalie ouverte, cooldown, joueur vivant) ;
+		- prévient les clients pour qu'ils jouent leurs VFX (aucun effet visuel côté serveur).
+
+	Prototype : une seule session globale. Pour plusieurs arènes simultanées,
+	il suffira d'instancier un TimeLoopSession par combat.
+]]
+
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage.Shared.TimeLoop.TimeLoopConfig)
+local Remotes = require(ReplicatedStorage.Shared.TimeLoop.TimeLoopRemotes)
+local TimeLoopSession = require(script.Parent.TimeLoopSession)
+
+-- État critique d'un joueur touché par une attaque fatale, en attente de rewind ou de mort.
+type Anomaly = {
+	humanoid: Humanoid,
+	rootPart: BasePart,
+	wasAnchored: boolean, -- état Anchored du RootPart avant le gel
+}
+
+local TimeLoopService = {}
+
+local session = TimeLoopSession.new()
+local anomalies: { [Player]: Anomaly } = {}
+local lastRewindEndClock = -math.huge
+local isStarted = false
+
+--------------------------------------------------------------------------------
+-- Anomalie temporelle
+--------------------------------------------------------------------------------
+
+-- La timeline est en pause tant qu'au moins une anomalie est ouverte.
+local function refreshRecordingPause()
+	session:setRecordingPaused(next(anomalies) ~= nil)
+end
+
+-- Ferme l'anomalie de `player` sans décider de l'issue : libère le personnage et prévient le client.
+-- Sans effet si le joueur n'est pas en anomalie.
+local function closeAnomaly(player: Player)
+	local anomaly = anomalies[player]
+	if anomaly == nil then
+		return
+	end
+
+	anomalies[player] = nil
+	refreshRecordingPause()
+
+	anomaly.rootPart.Anchored = anomaly.wasAnchored
+	Remotes.AnomalyClosed:FireClient(player)
+end
+
+-- Issue B : la fenêtre s'est écoulée sans rewind, le serveur applique la véritable mort.
+local function onAnomalyExpired(player: Player, anomaly: Anomaly)
+	-- Si ce n'est plus la même anomalie, elle a déjà été résolue (rewind, respawn, déconnexion).
+	if anomalies[player] ~= anomaly then
+		return
+	end
+
+	closeAnomaly(player)
+	anomaly.humanoid.Health = 0
+
+	if Config.DEBUG_LOGS then
+		print(`[TimeLoop] Anomalie expirée : {player.Name} est mort`)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Inscription des entités
+--------------------------------------------------------------------------------
+
+local function onTaggedInstanceAdded(instance: Instance)
+	-- Les tags suivent aussi les modèles rangés dans ServerStorage : on ne veut que ceux en jeu.
+	if instance:IsA("Model") and instance:IsDescendantOf(workspace) then
+		session:addEntity(instance)
+	end
+end
+
+local function onTaggedInstanceRemoved(instance: Instance)
+	if instance:IsA("Model") then
+		session:removeEntity(instance)
+	end
+end
+
+local function onPlayerAdded(player: Player)
+	player.CharacterAdded:Connect(function(character: Model)
+		session:addEntity(character)
+	end)
+	player.CharacterRemoving:Connect(function(character: Model)
+		closeAnomaly(player)
+		session:removeEntity(character)
+	end)
+	if player.Character then
+		session:addEntity(player.Character)
+	end
+end
+
+local function onPlayerRemoving(player: Player)
+	closeAnomaly(player)
+end
+
+--------------------------------------------------------------------------------
+-- Validation et exécution du rewind
+--------------------------------------------------------------------------------
+
+local function canRewind(player: Player): (boolean, string)
+	if session:isRewinding() then
+		return false, "rewind déjà en cours"
+	end
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid == nil or humanoid.Health <= 0 then
+		return false, "joueur mort ou sans personnage"
+	end
+
+	-- Une anomalie ouverte donne toujours le droit de rembobiner, cooldown ou non :
+	-- le joueur ne doit pas mourir parce qu'il a rembobiné quelques secondes plus tôt.
+	if anomalies[player] then
+		return true, ""
+	end
+
+	if not Config.DEBUG_FREE_REWIND then
+		return false, "aucune anomalie temporelle ouverte"
+	end
+	if os.clock() - lastRewindEndClock < Config.REWIND_COOLDOWN then
+		return false, "cooldown"
+	end
+
+	return true, ""
+end
+
+local function onRewindRequested(player: Player)
+	local isAllowed, reason = canRewind(player)
+	if not isAllowed then
+		if Config.DEBUG_LOGS then
+			print(`[TimeLoop] Rewind refusé pour {player.Name} : {reason}`)
+		end
+		return
+	end
+
+	-- Issue A : le rewind annule l'attaque fatale pour toute la session, donc toutes les anomalies
+	-- ouvertes se ferment. À faire AVANT session:rewind(), qui gèle lui-même les entités et
+	-- mémorise leur état Anchored : il doit retrouver des personnages déjà libérés.
+	for anomalyPlayer in anomalies do
+		closeAnomaly(anomalyPlayer)
+	end
+
+	Remotes.RewindStarted:FireAllClients(Config.REWIND_PLAYBACK_DURATION)
+	session:rewind(Config.REWIND_WINDOW, Config.REWIND_PLAYBACK_DURATION) -- yield
+	lastRewindEndClock = os.clock()
+	Remotes.RewindEnded:FireAllClients()
+
+	if Config.DEBUG_LOGS then
+		print(`[TimeLoop] Rewind terminé (déclenché par {player.Name})`)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- API publique
+--------------------------------------------------------------------------------
+
+-- À appeler une seule fois au démarrage du serveur.
+function TimeLoopService.start()
+	if isStarted then
+		return
+	end
+	isStarted = true
+
+	Players.PlayerAdded:Connect(onPlayerAdded)
+	Players.PlayerRemoving:Connect(onPlayerRemoving)
+	for _, player in Players:GetPlayers() do
+		onPlayerAdded(player)
+	end
+
+	CollectionService:GetInstanceAddedSignal(Config.ENTITY_TAG):Connect(onTaggedInstanceAdded)
+	CollectionService:GetInstanceRemovedSignal(Config.ENTITY_TAG):Connect(onTaggedInstanceRemoved)
+	for _, instance in CollectionService:GetTagged(Config.ENTITY_TAG) do
+		onTaggedInstanceAdded(instance)
+	end
+
+	Remotes.RequestRewind.OnServerEvent:Connect(onRewindRequested)
+
+	session:start()
+end
+
+--[[
+	À appeler par le système de combat quand une attaque fatale touche `player`,
+	À LA PLACE de lui retirer ses points de vie.
+
+	Le personnage est figé et la timeline mise en pause pendant `duration` secondes
+	(ANOMALY_WINDOW par défaut). Deux issues :
+		A. le joueur demande un rewind à temps -> l'anomalie est annulée et le combat reprend 5 s plus tôt ;
+		B. la fenêtre expire                   -> le serveur met ses PV à 0.
+
+	Retourne false si l'anomalie n'a pas pu s'ouvrir (joueur déjà en anomalie, mort ou sans
+	personnage, rewind en cours) : à l'appelant de décider quoi faire dans ce cas.
+]]
+function TimeLoopService.openAnomaly(player: Player, duration: number?): boolean
+	if anomalies[player] or session:isRewinding() then
+		return false
+	end
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local rootPart = humanoid and humanoid.RootPart
+	if humanoid == nil or rootPart == nil or humanoid.Health <= 0 then
+		return false
+	end
+
+	local window = duration or Config.ANOMALY_WINDOW
+	local anomaly: Anomaly = {
+		humanoid = humanoid,
+		rootPart = rootPart,
+		wasAnchored = rootPart.Anchored,
+	}
+	anomalies[player] = anomaly
+
+	-- Ancrage plutôt que WalkSpeed = 0 : il bloque aussi le saut et les poussées,
+	-- et un client tricheur ne peut pas le contourner.
+	rootPart.Anchored = true
+	refreshRecordingPause()
+
+	Remotes.AnomalyOpened:FireClient(player, window)
+	task.delay(window, onAnomalyExpired, player, anomaly)
+
+	if Config.DEBUG_LOGS then
+		print(`[TimeLoop] Anomalie ouverte pour {player.Name} ({window} s)`)
+	end
+	return true
+end
+
+-- Le système de combat doit ignorer les actions et les dégâts d'un joueur en anomalie.
+function TimeLoopService.isInAnomaly(player: Player): boolean
+	return anomalies[player] ~= nil
+end
+
+function TimeLoopService.isRewinding(): boolean
+	return session:isRewinding()
+end
+
+return TimeLoopService
+]]></ProtectedString>
+					<string name="ScriptGuid">{61BB4A32-1115-48F9-8BEA-9263A7E5E36E}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">TimeLoopService</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+		</Item>
+		<Item class="Folder" referent="RBX3ACB6D2C2D6D4B899056A00D539BC96B">
+			<Properties>
+				<Color3 name="IconTint">
+					<R>0</R>
+					<G>0</G>
+					<B>0</B>
+				</Color3>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">Avatar</string>
+				<BinaryString name="SerializedOverrides"></BinaryString>
+				<int64 name="SourceAssetId">-1</int64>
+				<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+			</Properties>
+			<Item class="ModuleScript" referent="RBX89A31EC68F62459796446C83026EF156">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	AvatarService
+	Façade serveur du Hub de création de personnage (singleton). Il orchestre, sans faire lui-même
+	le travail de détail :
+		- AvatarSerializer : valide les données du client, convertit vers / depuis la sauvegarde ;
+		- AvatarAppearance : applique un choix sur le personnage ;
+		- ProfileStore     : lit et écrit la sauvegarde (DataStore).
+
+	Parcours d'un joueur :
+		connexion -> chargement de son profil
+		   a. profil avec un personnage : son apparence et sa Magie Innée sont appliquées
+		      directement, à chaque apparition. Il ne voit jamais le Hub.
+		   b. nouveau joueur : son personnage est figé et le Hub s'ouvre. À la validation,
+		      le choix est appliqué, sauvegardé, et le joueur est libéré.
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local AvatarConfig = require(ReplicatedStorage.Shared.Avatar.AvatarConfig)
+local MagicConfig = require(ReplicatedStorage.Shared.Magic.MagicConfig)
+local Remotes = require(ReplicatedStorage.Shared.Avatar.AvatarRemotes)
+
+local AvatarAppearance = require(script.Parent.AvatarAppearance)
+local AvatarSerializer = require(script.Parent.AvatarSerializer)
+local ProfileStore = require(script.Parent.Parent.Data.ProfileStore)
+
+type Selection = AvatarConfig.Selection
+
+type PlayerState = {
+	savedSelection: Selection?, -- choix validé (ou chargé de la sauvegarde), réappliqué au respawn
+
+	-- Hub
+	isCustomizing: boolean,
+	isConfirmPending: boolean, -- choix final reçu, fermeture dès que l'application est terminée
+	frozenRootPart: BasePart?,
+	wasAnchored: boolean,
+	groundY: number?, -- hauteur du sol sous le personnage figé
+
+	-- File d'application : un seul ApplyDescription à la fois, seule la dernière demande compte
+	isApplying: boolean,
+	pendingSelection: Selection?,
+}
+
+local GROUND_RAY_LENGTH = 50
+
+local AvatarService = {}
+
+local states: { [Player]: PlayerState } = {}
+local isStarted = false
+
+--------------------------------------------------------------------------------
+-- Helpers
+--------------------------------------------------------------------------------
+
+local function getHumanoid(player: Player): Humanoid?
+	local character = player.Character
+	return character and character:FindFirstChildOfClass("Humanoid")
+end
+
+-- Publie la Magie Innée du joueur : CombatService la lit pour son ultime, le client pour son interface.
+local function publishMagic(player: Player, selection: Selection)
+	player:SetAttribute(MagicConfig.ATTRIBUTE, MagicConfig.MAGICS[selection.magicIndex].id)
+end
+
+--------------------------------------------------------------------------------
+-- Gel du personnage pendant le Hub
+--------------------------------------------------------------------------------
+
+-- Un personnage ancré ne se repose pas tout seul au sol : quand sa taille change, on recale
+-- son RootPart pour que ses pieds restent posés (sinon ils s'enfoncent ou flottent).
+local function snapToGround(state: PlayerState, humanoid: Humanoid)
+	local rootPart, groundY = state.frozenRootPart, state.groundY
+	if rootPart == nil or groundY == nil or humanoid.RigType ~= Enum.HumanoidRigType.R15 then
+		return
+	end
+
+	local standingY = groundY + humanoid.HipHeight + rootPart.Size.Y / 2
+	rootPart.CFrame += Vector3.new(0, standingY - rootPart.Position.Y, 0)
+end
+
+local function freeze(state: PlayerState, character: Model)
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local rootPart = humanoid and humanoid.RootPart
+	if humanoid == nil or rootPart == nil then
+		return
+	end
+
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+	raycastParams.FilterDescendantsInstances = { character }
+	local ground = workspace:Raycast(rootPart.Position, Vector3.new(0, -GROUND_RAY_LENGTH, 0), raycastParams)
+
+	state.frozenRootPart = rootPart
+	state.wasAnchored = rootPart.Anchored
+	state.groundY = if ground then ground.Position.Y else nil
+
+	rootPart.Anchored = true
+	snapToGround(state, humanoid)
+end
+
+local function unfreeze(state: PlayerState)
+	if state.frozenRootPart then
+		state.frozenRootPart.Anchored = state.wasAnchored
+	end
+	state.frozenRootPart = nil
+	state.groundY = nil
+end
+
+--------------------------------------------------------------------------------
+-- Hub
+--------------------------------------------------------------------------------
+
+local function openCreator(player: Player, state: PlayerState, character: Model)
+	state.isCustomizing = true
+	player:SetAttribute(AvatarConfig.CUSTOMIZING_ATTRIBUTE, true)
+	freeze(state, character)
+	Remotes.OpenCreator:FireClient(player)
+end
+
+local function closeCreator(player: Player, state: PlayerState)
+	state.isCustomizing = false
+	state.isConfirmPending = false
+	player:SetAttribute(AvatarConfig.CUSTOMIZING_ATTRIBUTE, false)
+	unfreeze(state)
+	Remotes.CreatorClosed:FireClient(player)
+end
+
+-- Applique les demandes en attente une par une. Si plusieurs aperçus arrivent pendant un
+-- chargement, seul le plus récent est appliqué ensuite : le serveur ne peut pas être inondé.
+local function processApplyQueue(player: Player, state: PlayerState)
+	if state.isApplying then
+		return
+	end
+	state.isApplying = true
+
+	while states[player] == state do
+		local selection = state.pendingSelection
+		local character = player.Character
+		if selection == nil or character == nil then
+			break
+		end
+		state.pendingSelection = nil
+
+		AvatarAppearance.apply(character, selection) -- yield
+
+		local humanoid = getHumanoid(player)
+		if humanoid then
+			snapToGround(state, humanoid)
+		end
+	end
+
+	state.isApplying = false
+
+	-- La fermeture a lieu même si l'application a échoué (voir les warn d'AvatarAppearance) :
+	-- un ID d'asset invalide ne doit pas enfermer le joueur dans le Hub.
+	if state.isConfirmPending and states[player] == state then
+		closeCreator(player, state)
+	end
+end
+
+-- Aperçu : le joueur fait défiler une option, on la lui montre sans rien valider.
+local function onPreviewRequested(player: Player, rawSelection: any)
+	local state = states[player]
+	local selection = AvatarSerializer.sanitizeSelection(rawSelection)
+	if state == nil or selection == nil or not state.isCustomizing or state.isConfirmPending then
+		return
+	end
+
+	state.pendingSelection = selection
+	processApplyQueue(player, state)
+end
+
+-- Validation finale : on applique, on publie la magie, on sauvegarde, puis le Hub se ferme.
+local function onApplyRequested(player: Player, rawSelection: any)
+	local state = states[player]
+	local selection = AvatarSerializer.sanitizeSelection(rawSelection)
+	if state == nil or selection == nil or not state.isCustomizing or state.isConfirmPending then
+		return
+	end
+
+	state.savedSelection = selection
+	publishMagic(player, selection)
+
+	local profile = ProfileStore.get(player)
+	if profile then
+		profile.avatar = AvatarSerializer.toSaved(selection)
+		ProfileStore.markDirty(player)
+		task.spawn(ProfileStore.save, player) -- en arrière-plan : le joueur n'attend pas le DataStore
+	end
+
+	state.pendingSelection = selection
+	state.isConfirmPending = true
+	processApplyQueue(player, state)
+end
+
+--------------------------------------------------------------------------------
+-- Cycle de vie des joueurs
+--------------------------------------------------------------------------------
+
+-- Appelé quand un personnage vient d'apparaître avec son apparence Roblox chargée.
+local function onCharacterReady(player: Player, character: Model)
+	local state = states[player]
+	if state == nil then
+		return
+	end
+
+	if state.savedSelection and not state.isCustomizing then
+		-- Joueur déjà créé (cette session ou une précédente) : on lui rend son apparence.
+		state.pendingSelection = state.savedSelection
+		processApplyQueue(player, state)
+	else
+		-- Nouveau joueur (ou mort pendant la création) : le Hub s'ouvre sur ce personnage.
+		openCreator(player, state, character)
+	end
+end
+
+-- YIELD : attend le chargement de la sauvegarde avant de décider quoi faire du joueur.
+local function onPlayerAdded(player: Player)
+	local state: PlayerState = {
+		savedSelection = nil,
+		isCustomizing = false,
+		isConfirmPending = false,
+		frozenRootPart = nil,
+		wasAnchored = false,
+		groundY = nil,
+		isApplying = false,
+		pendingSelection = nil,
+	}
+	states[player] = state
+	-- Tant qu'on ne sait pas si le joueur a déjà un personnage, les interfaces de jeu restent masquées.
+	player:SetAttribute(AvatarConfig.CUSTOMIZING_ATTRIBUTE, true)
+
+	local profile = ProfileStore.load(player) -- yield
+	if states[player] ~= state then
+		return -- le joueur est parti pendant le chargement
+	end
+
+	local savedSelection = AvatarSerializer.fromSaved(profile.avatar)
+	if savedSelection and not AvatarConfig.DEBUG_ALWAYS_OPEN_CREATOR then
+		state.savedSelection = savedSelection
+		publishMagic(player, savedSelection)
+		player:SetAttribute(AvatarConfig.CUSTOMIZING_ATTRIBUTE, false)
+	end
+
+	player.CharacterAppearanceLoaded:Connect(function(character: Model)
+		onCharacterReady(player, character)
+	end)
+	if player.Character and player:HasAppearanceLoaded() then
+		onCharacterReady(player, player.Character)
+	end
+end
+
+local function onPlayerRemoving(player: Player)
+	states[player] = nil
+	ProfileStore.release(player) -- yield : dernière sauvegarde
+end
+
+--------------------------------------------------------------------------------
+-- API publique
+--------------------------------------------------------------------------------
+
+-- À appeler une seule fois au démarrage du serveur.
+function AvatarService.start()
+	if isStarted then
+		return
+	end
+	isStarted = true
+
+	Remotes.PreviewAvatar.OnServerEvent:Connect(onPreviewRequested)
+	Remotes.ApplyAvatar.OnServerEvent:Connect(onApplyRequested)
+
+	Players.PlayerAdded:Connect(onPlayerAdded)
+	Players.PlayerRemoving:Connect(onPlayerRemoving)
+	for _, player in Players:GetPlayers() do
+		task.spawn(onPlayerAdded, player) -- en parallèle : chaque chargement de profil est un yield
+	end
+end
+
+-- true tant que le joueur est dans le Hub (figé, hors combat).
+function AvatarService.isCustomizing(player: Player): boolean
+	local state = states[player]
+	return state ~= nil and state.isCustomizing
+end
+
+return AvatarService
+]]></ProtectedString>
+					<string name="ScriptGuid">{AB7D13CD-7454-4B5B-91FD-E59C0D1BDCC8}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">AvatarService</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX3C3E8754389F4F37A6BF6CAE81F6558B">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	AvatarAppearance
+	Applique un Selection sur un personnage. C'est le seul module qui touche au corps du personnage ;
+	il ne sait rien du Hub, des joueurs ni de la sauvegarde.
+
+	Trois étapes, dans apply() :
+		1. corps, cheveux, tenue, taille : un HumanoidDescription (API officielle) ;
+		2. tête classique : remplace la tête animée de Roblox, sur laquelle un Decal s'affiche déformé ;
+		3. visage (Decal) et marque (cicatrice, tatouage : image sur un SurfaceGui, placée librement).
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local AvatarConfig = require(ReplicatedStorage.Shared.Avatar.AvatarConfig)
+
+type Selection = AvatarConfig.Selection
+
+-- Tête classique de Roblox : un bloc 2x1x1 arrondi par un SpecialMesh.
+local CLASSIC_HEAD_SIZE = Vector3.new(2, 1, 1)
+local CLASSIC_HEAD_MESH_SCALE = Vector3.new(1.25, 1.25, 1.25)
+local CLASSIC_HEAD_ATTACHMENTS: { [string]: Vector3 } = {
+	NeckRigAttachment = Vector3.new(0, -0.5, 0),
+	FaceCenterAttachment = Vector3.new(0, 0, 0),
+	FaceFrontAttachment = Vector3.new(0, 0, -0.6),
+	HairAttachment = Vector3.new(0, 0.6, 0),
+	HatAttachment = Vector3.new(0, 0.6, 0),
+}
+
+-- Panneau des marques (voir addMark).
+local MARK_CANVAS_NAME = "FaceCanvas"
+local MARK_CANVAS_THICKNESS = 0.05 -- studs
+local MARK_CANVAS_PIXELS = 420 -- résolution du SurfaceGui (celle des images de marque)
+
+local AvatarAppearance = {}
+
+--------------------------------------------------------------------------------
+-- 1. HumanoidDescription
+--------------------------------------------------------------------------------
+
+local function buildDescription(humanoid: Humanoid, selection: Selection): HumanoidDescription
+	local base = AvatarConfig.BASE_OPTIONS[selection.baseIndex]
+	local hair = AvatarConfig.HAIR_OPTIONS[selection.hairIndex]
+	local outfit = AvatarConfig.OUTFIT_OPTIONS[selection.outfitIndex]
+
+	-- On part de l'apparence actuelle pour conserver la couleur de peau du joueur.
+	local description = humanoid:GetAppliedDescription()
+
+	-- Les accessoires de l'avatar Roblox (chapeaux, vêtements 3D, ailes...) jurent avec l'univers :
+	-- on les retire tous, puis on ne repose que ceux du jeu.
+	description:SetAccessories({}, true)
+	description.GraphicTShirt = 0
+
+	-- Corps : les 5 parties de la base choisie.
+	description.Torso = base.torsoId
+	description.RightArm = base.rightArmId
+	description.LeftArm = base.leftArmId
+	description.LeftLeg = base.leftLegId
+	description.RightLeg = base.rightLegId
+
+	-- Tête et visage par défaut : ils sont de toute façon remplacés ensuite (étapes 2 et 3).
+	-- Les garder constants évite qu'ApplyDescription refasse la tête à chaque changement d'option.
+	description.Head = 0
+	description.Face = 0
+
+	description.HairAccessory = tostring(hair.assetId)
+	description.BackAccessory = if outfit.backAccessoryId > 0 then tostring(outfit.backAccessoryId) else ""
+	description.Shirt = outfit.shirtId
+	description.Pants = outfit.pantsId
+	description.HeightScale = selection.heightScale
+	description.WidthScale = selection.widthScale
+
+	return description
+end
+
+--------------------------------------------------------------------------------
+-- 2. Tête classique
+--------------------------------------------------------------------------------
+-- Les têtes actuelles de Roblox (y compris la tête par défaut et celles des bundles Man / Woman)
+-- sont des MeshParts "animées" : leur visage est peint dans la texture du mesh et leurs UV ne
+-- sont pas prévus pour un Decal. La tête classique (Part + SpecialMesh de type Head) est la
+-- seule sur laquelle un Decal de visage 2D se plaque correctement.
+
+local function isClassicHead(head: Instance): boolean
+	return head:IsA("Part") and head:FindFirstChildOfClass("SpecialMesh") ~= nil
+end
+
+local function buildClassicHead(color: Color3): Part
+	local head = Instance.new("Part")
+	head.Name = "Head"
+	head.Size = CLASSIC_HEAD_SIZE
+	head.Color = color
+	head.TopSurface = Enum.SurfaceType.Smooth
+	head.BottomSurface = Enum.SurfaceType.Smooth
+
+	local mesh = Instance.new("SpecialMesh")
+	mesh.Name = "Mesh"
+	mesh.MeshType = Enum.MeshType.Head
+	mesh.Scale = CLASSIC_HEAD_MESH_SCALE
+	mesh.Parent = head
+
+	-- Points d'ancrage standard d'une tête R15 : le cou (indispensable au rig) et les accessoires.
+	for name, position in CLASSIC_HEAD_ATTACHMENTS do
+		local attachment = Instance.new("Attachment")
+		attachment.Name = name
+		attachment.Position = position
+		attachment.Parent = head
+	end
+
+	return head
+end
+
+-- Un accessoire soudé à l'ancienne tête (les cheveux) perd sa soudure quand elle disparaît :
+-- on redonne au Humanoid ceux qui ne tiennent plus à rien pour qu'il les ressoude.
+local function isHeldByCharacter(accessory: Accessory, character: Model): boolean
+	local handle = accessory:FindFirstChild("Handle")
+	local weld = handle and handle:FindFirstChild("AccessoryWeld")
+	if weld == nil or not weld:IsA("Weld") then
+		return false
+	end
+
+	-- Une pièce détruite n'est plus dans le personnage : la soudure qui la référence ne tient plus rien.
+	local part0, part1 = weld.Part0, weld.Part1
+	return part0 ~= nil and part1 ~= nil and part0:IsDescendantOf(character) and part1:IsDescendantOf(character)
+end
+
+local function reattachLooseAccessories(character: Model, humanoid: Humanoid)
+	for _, child in character:GetChildren() do
+		if child:IsA("Accessory") and not isHeldByCharacter(child, character) then
+			child.Parent = nil
+			humanoid:AddAccessory(child)
+		end
+	end
+end
+
+-- Garantit que le personnage porte la tête classique et la retourne (nil si ce n'est pas possible).
+local function ensureClassicHead(character: Model, humanoid: Humanoid): BasePart?
+	local head = character:FindFirstChild("Head")
+	if head == nil or not head:IsA("BasePart") or humanoid.RigType ~= Enum.HumanoidRigType.R15 then
+		return nil
+	end
+	if isClassicHead(head) then
+		return head
+	end
+
+	local classicHead = buildClassicHead(head.Color)
+	classicHead.CFrame = head.CFrame
+
+	-- Un Humanoid meurt s'il se retrouve sans cou : on suspend cette règle le temps de l'échange.
+	local requiredNeck = humanoid.RequiresNeck
+	humanoid.RequiresNeck = false
+
+	if not humanoid:ReplaceBodyPartR15(Enum.BodyPartR15.Head, classicHead) then
+		classicHead:Destroy()
+		humanoid.RequiresNeck = requiredNeck
+		return nil
+	end
+	if head.Parent ~= nil then
+		head:Destroy()
+	end
+	if classicHead:FindFirstChild("Neck") == nil then
+		humanoid:BuildRigFromAttachments()
+	end
+
+	if classicHead:FindFirstChild("Neck") then
+		humanoid.RequiresNeck = requiredNeck
+	else
+		warn(`[Avatar] Cou non reconstruit pour {character.Name} : RequiresNeck reste désactivé`)
+	end
+
+	reattachLooseAccessories(character, humanoid)
+	return classicHead
+end
+
+--------------------------------------------------------------------------------
+-- 3. Calques du visage
+--------------------------------------------------------------------------------
+
+-- Visage : un Decal sur l'avant de la tête. Il suit la courbure de la tête classique.
+local function addFace(head: BasePart, texture: string)
+	local face = Instance.new("Decal")
+	face.Name = "face"
+	face.Face = Enum.NormalId.Front
+	face.Texture = texture
+	face.Parent = head
+end
+
+--[[
+	Marque : un Decal ne se déplace pas et ne se redimensionne pas (il est étiré sur toute la face,
+	enroulé autour de la tête), d'où des cicatrices décentrées. On utilise donc un SurfaceGui :
+		Head
+		└── FaceCanvas (Part invisible, soudée juste devant le visage)
+		    └── MarkSurface (SurfaceGui, face avant)
+		        └── Mark (ImageLabel : Position, Size et Rotation réglables au pixel)
+	Position, taille et rotation viennent de la MarkOption (offset, scale, rotation).
+]]
+local function addMark(head: BasePart, mark: AvatarConfig.MarkOption)
+	if mark.texture == "" then
+		return
+	end
+
+	local size = AvatarConfig.FACE_CANVAS_SIZE
+	-- La face avant du panneau (celle qui porte l'image) se trouve à FACE_CANVAS_DEPTH du centre de la tête.
+	local offset = CFrame.new(0, 0, -(AvatarConfig.FACE_CANVAS_DEPTH - MARK_CANVAS_THICKNESS / 2))
+
+	local canvas = Instance.new("Part")
+	canvas.Name = MARK_CANVAS_NAME
+	canvas.Size = Vector3.new(size, size, MARK_CANVAS_THICKNESS)
+	canvas.Transparency = 1
+	canvas.CanCollide = false
+	canvas.CanQuery = false
+	canvas.CanTouch = false
+	canvas.Massless = true
+	canvas.CastShadow = false
+	canvas.CFrame = head.CFrame * offset
+
+	local weld = Instance.new("Weld")
+	weld.Name = "FaceCanvasWeld"
+	weld.Part0 = head
+	weld.Part1 = canvas
+	weld.C0 = offset
+	weld.Parent = canvas
+
+	local surface = Instance.new("SurfaceGui")
+	surface.Name = "MarkSurface"
+	surface.Face = Enum.NormalId.Front
+	surface.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
+	surface.CanvasSize = Vector2.new(MARK_CANVAS_PIXELS, MARK_CANVAS_PIXELS)
+	surface.LightInfluence = 1 -- éclairée comme le reste du visage, pas comme une interface
+	surface.Parent = canvas
+
+	local image = Instance.new("ImageLabel")
+	image.Name = "Mark"
+	image.BackgroundTransparency = 1
+	image.Image = mark.texture
+	image.AnchorPoint = Vector2.new(0.5, 0.5)
+	image.Position = UDim2.fromScale(0.5 + mark.offset.X, 0.5 + mark.offset.Y)
+	image.Size = UDim2.fromScale(mark.scale, mark.scale)
+	image.Rotation = mark.rotation
+	image.Parent = surface
+
+	canvas.Parent = head
+end
+
+-- Pose le visage puis la marque. Tout ce qui restait d'un choix précédent est d'abord détruit,
+-- pour ne jamais superposer deux visages ou deux marques.
+local function applyFaceLayers(character: Model, humanoid: Humanoid, selection: Selection)
+	local head = ensureClassicHead(character, humanoid)
+	if head == nil then
+		return
+	end
+
+	for _, child in head:GetChildren() do
+		if child:IsA("Decal") or child.Name == MARK_CANVAS_NAME then
+			child:Destroy()
+		end
+	end
+
+	addFace(head, AvatarConfig.FACE_OPTIONS[selection.faceIndex].texture)
+	addMark(head, AvatarConfig.MARK_OPTIONS[selection.markIndex])
+end
+
+--------------------------------------------------------------------------------
+-- API publique
+--------------------------------------------------------------------------------
+
+-- Applique `selection` sur `character`. YIELD (chargement des assets).
+-- Retourne false si le HumanoidDescription n'a pas pu être appliqué.
+function AvatarAppearance.apply(character: Model, selection: Selection): boolean
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if humanoid == nil or humanoid.Health <= 0 then
+		return false
+	end
+
+	local isApplied, errorMessage = pcall(function()
+		humanoid:ApplyDescription(buildDescription(humanoid, selection))
+	end)
+	if not isApplied then
+		warn(`[Avatar] Apparence non appliquée pour {character.Name} (ID d'asset invalide ?) : {errorMessage}`)
+	end
+
+	-- Après ApplyDescription (qui peut remettre une tête animée), et à l'abri d'une erreur :
+	-- un visage raté ne doit pas empêcher la suite (recalage au sol, fermeture du Hub).
+	local isFaceApplied, faceError = pcall(applyFaceLayers, character, humanoid, selection)
+	if not isFaceApplied then
+		warn(`[Avatar] Visage non appliqué pour {character.Name} : {faceError}`)
+	end
+
+	return isApplied
+end
+
+return AvatarAppearance
+]]></ProtectedString>
+					<string name="ScriptGuid">{4917A406-1C82-4F50-B30B-6C7718246139}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">AvatarAppearance</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX76FBAA9E23DC4CF882963DB6AAD1BE07">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	AvatarSerializer
+	Les deux conversions de données du Hub. Fonctions pures : aucune instance, aucun état.
+
+	1. Client -> serveur : sanitizeSelection()
+	   Ce que le client envoie n'est jamais fiable. On reconstruit un Selection à partir de ses
+	   données en vérifiant chaque index et en bornant chaque échelle.
+
+	2. Serveur <-> sauvegarde : toSaved() / fromSaved()
+	   En jeu, un choix est un INDEX dans une liste d'AvatarConfig. Dans la sauvegarde, c'est
+	   l'`id` de l'option : ainsi on peut ajouter des coiffures ou réordonner les listes sans
+	   fausser les personnages déjà sauvegardés.
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local AvatarConfig = require(ReplicatedStorage.Shared.Avatar.AvatarConfig)
+local MagicConfig = require(ReplicatedStorage.Shared.Magic.MagicConfig)
+
+type Selection = AvatarConfig.Selection
+type ScaleRange = AvatarConfig.ScaleRange
+
+-- Forme du champ `avatar` d'un profil sauvegardé.
+export type SavedAvatar = {
+	base: string,
+	face: string,
+	mark: string,
+	hair: string,
+	outfit: string,
+	magic: string,
+	height: number,
+	width: number,
+}
+
+local AvatarSerializer = {}
+
+--------------------------------------------------------------------------------
+-- Helpers
+--------------------------------------------------------------------------------
+
+local function sanitizeIndex(value: any, optionCount: number): number?
+	if type(value) ~= "number" or value % 1 ~= 0 or value < 1 or value > optionCount then
+		return nil
+	end
+	return value
+end
+
+local function sanitizeScale(value: any, range: ScaleRange): number?
+	if type(value) ~= "number" or value ~= value then -- value ~= value : NaN
+		return nil
+	end
+	return math.clamp(value, range.min, range.max)
+end
+
+-- Index de l'option d'identifiant `id` dans `options`, ou 1 (la première) si elle n'existe plus.
+local function findIndexById(options: { any }, id: any): number
+	for index, option in options do
+		if option.id == id then
+			return index
+		end
+	end
+	return 1
+end
+
+--------------------------------------------------------------------------------
+-- API publique
+--------------------------------------------------------------------------------
+
+-- Reconstruit un Selection sûr à partir de ce que le client a envoyé, ou nil si c'est invalide.
+function AvatarSerializer.sanitizeSelection(raw: any): Selection?
+	if type(raw) ~= "table" then
+		return nil
+	end
+
+	local baseIndex = sanitizeIndex(raw.baseIndex, #AvatarConfig.BASE_OPTIONS)
+	local faceIndex = sanitizeIndex(raw.faceIndex, #AvatarConfig.FACE_OPTIONS)
+	local markIndex = sanitizeIndex(raw.markIndex, #AvatarConfig.MARK_OPTIONS)
+	local hairIndex = sanitizeIndex(raw.hairIndex, #AvatarConfig.HAIR_OPTIONS)
+	local outfitIndex = sanitizeIndex(raw.outfitIndex, #AvatarConfig.OUTFIT_OPTIONS)
+	local magicIndex = sanitizeIndex(raw.magicIndex, #MagicConfig.MAGICS)
+	local heightScale = sanitizeScale(raw.heightScale, AvatarConfig.HEIGHT_SCALE)
+	local widthScale = sanitizeScale(raw.widthScale, AvatarConfig.WIDTH_SCALE)
+	if
+		baseIndex == nil
+		or faceIndex == nil
+		or markIndex == nil
+		or hairIndex == nil
+		or outfitIndex == nil
+		or magicIndex == nil
+		or heightScale == nil
+		or widthScale == nil
+	then
+		return nil
+	end
+
+	return {
+		baseIndex = baseIndex,
+		faceIndex = faceIndex,
+		markIndex = markIndex,
+		hairIndex = hairIndex,
+		outfitIndex = outfitIndex,
+		magicIndex = magicIndex,
+		heightScale = heightScale,
+		widthScale = widthScale,
+	}
+end
+
+-- Selection (index) -> données à écrire dans le profil (id).
+function AvatarSerializer.toSaved(selection: Selection): SavedAvatar
+	return {
+		base = AvatarConfig.BASE_OPTIONS[selection.baseIndex].id,
+		face = AvatarConfig.FACE_OPTIONS[selection.faceIndex].id,
+		mark = AvatarConfig.MARK_OPTIONS[selection.markIndex].id,
+		hair = AvatarConfig.HAIR_OPTIONS[selection.hairIndex].id,
+		outfit = AvatarConfig.OUTFIT_OPTIONS[selection.outfitIndex].id,
+		magic = MagicConfig.MAGICS[selection.magicIndex].id,
+		height = selection.heightScale,
+		width = selection.widthScale,
+	}
+end
+
+-- Données lues dans le profil -> Selection, ou nil si le joueur n'a encore rien sauvegardé.
+-- Une option qui n'existe plus dans le catalogue est remplacée par la première de sa liste.
+function AvatarSerializer.fromSaved(saved: any): Selection?
+	if type(saved) ~= "table" then
+		return nil
+	end
+
+	return {
+		baseIndex = findIndexById(AvatarConfig.BASE_OPTIONS, saved.base),
+		faceIndex = findIndexById(AvatarConfig.FACE_OPTIONS, saved.face),
+		markIndex = findIndexById(AvatarConfig.MARK_OPTIONS, saved.mark),
+		hairIndex = findIndexById(AvatarConfig.HAIR_OPTIONS, saved.hair),
+		outfitIndex = findIndexById(AvatarConfig.OUTFIT_OPTIONS, saved.outfit),
+		magicIndex = findIndexById(MagicConfig.MAGICS, saved.magic),
+		heightScale = sanitizeScale(saved.height, AvatarConfig.HEIGHT_SCALE) or AvatarConfig.HEIGHT_SCALE.default,
+		widthScale = sanitizeScale(saved.width, AvatarConfig.WIDTH_SCALE) or AvatarConfig.WIDTH_SCALE.default,
+	}
+end
+
+return AvatarSerializer
+]]></ProtectedString>
+					<string name="ScriptGuid">{3DD8F96E-BF37-4FAC-8BE0-54FF5B861C95}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">AvatarSerializer</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+		</Item>
+		<Item class="Folder" referent="RBXAB3CDF2A201340E998DAF5336644D47D">
+			<Properties>
+				<Color3 name="IconTint">
+					<R>0</R>
+					<G>0</G>
+					<B>0</B>
+				</Color3>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">Combat</string>
+				<BinaryString name="SerializedOverrides"></BinaryString>
+				<int64 name="SourceAssetId">-1</int64>
+				<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+			</Properties>
+			<Item class="ModuleScript" referent="RBX6B19850C358D4292BAFECA02C91F6DA1">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	CombatService
+	Façade serveur du combat (singleton).
+		- équipe chaque personnage de son épée (Motor6D, voir SwordFactory) ;
+		- valide les demandes d'attaque : état du joueur, ordre et cadence du combo ;
+		- valide chaque impact signalé par le client : fenêtre de frappe, cible autorisée, distance,
+		  ligne de vue (raycast serveur), une seule touche par cible et par coup ;
+		- applique les dégâts et l'éjection. C'est le SEUL endroit du jeu où un coup d'épée blesse ;
+		- tient la Tension de chaque joueur (gagnée à chaque impact validé) et déclenche le pouvoir
+		  ultime de sa Magie Innée : jauge vérifiée ici, vidée ici, dégâts de zone infligés ici.
+
+	Le client détecte les impacts (zone de frappe devant lui, sans latence), mais il ne fait que
+	DEMANDER : il n'envoie ni dégâts ni position, seulement "j'ai touché ce Model".
+
+	Le serveur ne vérifie pas l'orientation de l'attaquant : avec le soft-lock, il se tourne
+	instantanément vers sa cible, et cette rotation n'est pas encore répliquée quand l'impact
+	arrive. Ce qui compte, et qui est vérifié, c'est que la cible soit à portée de sa zone de frappe.
+]]
+
+local CollectionService = game:GetService("CollectionService")
+local Debris = game:GetService("Debris")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage.Shared.Combat.CombatConfig)
+local MagicConfig = require(ReplicatedStorage.Shared.Magic.MagicConfig)
+local Remotes = require(ReplicatedStorage.Shared.Combat.CombatRemotes)
+local SpatialHitbox = require(ReplicatedStorage.Shared.Combat.SpatialHitbox)
+local TimeLoopConfig = require(ReplicatedStorage.Shared.TimeLoop.TimeLoopConfig)
+
+local AvatarService = require(script.Parent.Parent.Avatar.AvatarService)
+local MovementService = require(script.Parent.Parent.Movement.MovementService)
+local SwordFactory = require(script.Parent.SwordFactory)
+local TimeLoopService = require(script.Parent.Parent.TimeLoop.TimeLoopService)
+local UltimateBehaviors = require(script.Parent.UltimateBehaviors)
+
+-- Dernier coup accepté d'un joueur.
+type AttackState = {
+	comboIndex: number,
+	startClock: number,
+	hitTargets: { [Model]: boolean }, -- cibles déjà blessées par ce coup
+}
+
+local HAND_READY_TIMEOUT = 10 -- secondes d'attente maximum pour qu'une main (ou son point de prise) existe
+local KNOCKBACK_MAX_FORCE = 1e6 -- assez pour imposer la vitesse d'éjection malgré le Humanoid de la cible
+
+local CombatService = {}
+
+local attacks: { [Player]: AttackState } = {}
+local isStarted = false
+
+--------------------------------------------------------------------------------
+-- Helpers
+--------------------------------------------------------------------------------
+
+local function logRejection(player: Player, reason: string)
+	if Config.DEBUG_LOGS then
+		print(`[Combat] Refusé pour {player.Name} : {reason}`)
+	end
+end
+
+-- Retourne le Humanoid et le RootPart d'un personnage vivant, sinon nil.
+local function getLivingParts(character: Model?): (Humanoid?, BasePart?)
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local rootPart = humanoid and humanoid.RootPart
+	if humanoid == nil or rootPart == nil or humanoid.Health <= 0 then
+		return nil, nil
+	end
+	return humanoid, rootPart
+end
+
+-- Un joueur figé par un autre système (Hub, anomalie, rewind) est hors combat :
+-- il ne peut ni frapper ni être frappé.
+local function isOutOfCombat(player: Player): boolean
+	return AvatarService.isCustomizing(player) or TimeLoopService.isInAnomaly(player) or TimeLoopService.isRewinding()
+end
+
+local function isInvulnerable(target: Model): boolean
+	return target:GetAttribute(Config.INVULNERABLE_ATTRIBUTE) == true
+end
+
+--------------------------------------------------------------------------------
+-- Tension
+--------------------------------------------------------------------------------
+-- La Tension vit dans un attribut du Player : écrite ici, répliquée automatiquement au client
+-- pour sa jauge. Une modification faite par un client reste chez lui, le serveur ne la voit pas.
+
+local function getTension(player: Player): number
+	local tension = player:GetAttribute(Config.TENSION_ATTRIBUTE)
+	return if type(tension) == "number" then tension else 0
+end
+
+local function setTension(player: Player, tension: number)
+	player:SetAttribute(Config.TENSION_ATTRIBUTE, math.clamp(tension, 0, Config.TENSION_MAX))
+end
+
+--------------------------------------------------------------------------------
+-- Épée
+--------------------------------------------------------------------------------
+
+local function equipSword(character: Model)
+	local sword = SwordFactory.create()
+
+	-- YIELD : attend que la main ait son point de prise avant d'y fixer l'épée.
+	local function attachTo(hand: Instance)
+		if not hand:IsA("BasePart") then
+			return
+		end
+		hand:WaitForChild(Config.GRIP_ATTACHMENT_NAME, HAND_READY_TIMEOUT)
+
+		-- Entre-temps la main a pu être remplacée à son tour : seule la main actuelle compte.
+		if hand.Parent == character and SwordFactory.attach(sword, hand) then
+			sword.Parent = character -- seulement une fois fixée : libre, elle tomberait dans le vide
+		end
+	end
+
+	-- ApplyDescription remplace le RightHand quand l'avatar change de bras (et détruit avec lui
+	-- le Motor6D qui y était relié) : on refixe l'épée chaque fois qu'une main droite apparaît.
+	character.ChildAdded:Connect(function(child: Instance)
+		if child.Name == Config.HAND_NAME then
+			attachTo(child)
+		end
+	end)
+
+	task.spawn(function()
+		local hand = character:WaitForChild(Config.HAND_NAME, HAND_READY_TIMEOUT)
+		if hand then
+			attachTo(hand)
+		else
+			warn(`[Combat] {character.Name} n'a pas de {Config.HAND_NAME} (rig R15 requis) : pas d'épée`)
+		end
+	end)
+
+	character.Destroying:Connect(function()
+		sword:Destroy()
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- Validation d'une attaque
+--------------------------------------------------------------------------------
+
+-- Vérifie que `comboIndex` est un enchaînement plausible après `last`. Retourne (ok, raison du refus).
+local function isComboStepAllowed(last: AttackState?, comboIndex: number, now: number): (boolean, string)
+	if last == nil then
+		return comboIndex == 1, "le combo doit commencer par le coup 1"
+	end
+
+	local lastEndClock = last.startClock + Config.COMBO[last.comboIndex].duration
+	if now < lastEndClock - Config.LATENCY_TOLERANCE then
+		return false, "coup précédent encore en cours"
+	end
+	if comboIndex == 1 then
+		return true, ""
+	end
+
+	local isNextStep = comboIndex == last.comboIndex + 1
+	local isInTime = now - lastEndClock <= Config.COMBO_RESET_DELAY + Config.LATENCY_TOLERANCE
+	return isNextStep and isInTime, "enchaînement de combo invalide"
+end
+
+local function onAttackRequested(player: Player, comboIndex: any)
+	if type(comboIndex) ~= "number" or Config.COMBO[comboIndex] == nil then
+		return
+	end
+
+	local character = player.Character
+	if getLivingParts(character) == nil or isOutOfCombat(player) then
+		logRejection(player, "joueur hors combat")
+		return
+	end
+
+	local now = os.clock()
+	local isAllowed, reason = isComboStepAllowed(attacks[player], comboIndex, now)
+	if not isAllowed then
+		logRejection(player, reason)
+		return
+	end
+
+	attacks[player] = {
+		comboIndex = comboIndex,
+		startClock = now,
+		hitTargets = {},
+	}
+
+	-- L'animation de l'attaquant est répliquée par Roblox, mais pas ses VFX (traînée de lame) :
+	-- les autres clients sont prévenus pour les jouer chez eux. L'attaquant, lui, l'a déjà fait.
+	for _, otherPlayer in Players:GetPlayers() do
+		if otherPlayer ~= player then
+			Remotes.AttackStarted:FireClient(otherPlayer, character, comboIndex)
+		end
+	end
+
+	if Config.DEBUG_LOGS then
+		print(`[Combat] {player.Name} lance le coup {comboIndex} ({Config.COMBO[comboIndex].name})`)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Validation d'un impact
+--------------------------------------------------------------------------------
+
+-- Une cible valide est un PNJ taggé, ou le personnage d'un autre joueur si le PvP est actif.
+-- Dans tous les cas, une cible déclarée invulnérable (boss en charge) ou en plein dash est épargnée.
+local function isTargetAllowed(target: Model): boolean
+	if isInvulnerable(target) then
+		return false
+	end
+
+	local targetPlayer = Players:GetPlayerFromCharacter(target)
+	if targetPlayer then
+		return Config.PVP_ENABLED and not isOutOfCombat(targetPlayer) and not MovementService.isDashing(targetPlayer)
+	end
+	return CollectionService:HasTag(target, TimeLoopConfig.ENTITY_TAG)
+end
+
+-- Distance maximale (studs) entre l'attaquant et le bord d'une cible pour qu'elle ait pu se trouver
+-- dans la zone de frappe de ce coup : le coin le plus éloigné de la boîte, plus la marge du serveur.
+local function getMaxHitDistance(step: Config.ComboStep): number
+	local halfWidth = Config.HITBOX_SIZE.X / 2
+	local depth = Config.HITBOX_SIZE.Z + step.reachBonus
+	return math.sqrt(depth * depth + halfWidth * halfWidth) + Config.HITBOX_RANGE_TOLERANCE
+end
+
+-- Distance mesurée jusqu'au bord de la cible (et non son centre), pour rester juste face à un gros boss.
+local function isInRange(attackerRoot: BasePart, target: Model, targetRoot: BasePart, maxDistance: number): boolean
+	local extents = target:GetExtentsSize()
+	local targetRadius = math.max(extents.X, extents.Z) / 2
+	local distance = (targetRoot.Position - attackerRoot.Position).Magnitude - targetRadius
+	return distance <= maxDistance
+end
+
+-- Raycast serveur attaquant -> cible : aucun élément de décor solide ne doit les séparer.
+local function hasLineOfSight(attacker: Model, attackerRoot: BasePart, target: Model, targetRoot: BasePart): boolean
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+	raycastParams.FilterDescendantsInstances = { attacker, target }
+	raycastParams.RespectCanCollide = true
+
+	local result = workspace:Raycast(attackerRoot.Position, targetRoot.Position - attackerRoot.Position, raycastParams)
+	-- Un autre personnage sur la trajectoire ne protège pas la cible : seul le décor compte.
+	return result == nil or SpatialHitbox.getCharacterFromPart(result.Instance) ~= nil
+end
+
+-- Éjecte `targetRoot` à l'opposé de l'attaquant : une LinearVelocity posée par le serveur le
+-- temps de KNOCKBACK_DURATION. Elle agit aussi sur un joueur, dont le client simule la physique
+-- (la contrainte lui est répliquée).
+local function applyKnockback(attackerRoot: BasePart, targetRoot: BasePart, speed: number)
+	if targetRoot.Anchored then
+		return
+	end
+
+	local direction = (targetRoot.Position - attackerRoot.Position) * Vector3.new(1, 0, 1)
+	if direction.Magnitude < 0.1 then
+		direction = attackerRoot.CFrame.LookVector * Vector3.new(1, 0, 1)
+	end
+
+	local attachment = Instance.new("Attachment")
+	attachment.Name = "KnockbackAttachment"
+	attachment.Parent = targetRoot
+
+	local velocity = Instance.new("LinearVelocity")
+	velocity.Name = "KnockbackVelocity"
+	velocity.Attachment0 = attachment
+	velocity.RelativeTo = Enum.ActuatorRelativeTo.World
+	velocity.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+	velocity.VectorVelocity = direction.Unit * speed + Vector3.new(0, Config.KNOCKBACK_LIFT, 0)
+	velocity.MaxForce = KNOCKBACK_MAX_FORCE
+	velocity.Parent = targetRoot
+
+	Debris:AddItem(velocity, Config.KNOCKBACK_DURATION)
+	Debris:AddItem(attachment, Config.KNOCKBACK_DURATION)
+end
+
+local function onHitReported(player: Player, target: any)
+	if typeof(target) ~= "Instance" or not target:IsA("Model") then
+		return
+	end
+
+	local attack = attacks[player]
+	local attacker = player.Character
+	local _, attackerRoot = getLivingParts(attacker)
+	if attack == nil or attacker == nil or attackerRoot == nil or isOutOfCombat(player) then
+		return
+	end
+
+	-- 1. Le coup doit être dans sa fenêtre de frappe.
+	local step = Config.COMBO[attack.comboIndex]
+	local elapsed = os.clock() - attack.startClock
+	if elapsed < step.hitStart - Config.LATENCY_TOLERANCE or elapsed > step.hitEnd + Config.LATENCY_TOLERANCE then
+		logRejection(player, "impact hors de la fenêtre de frappe")
+		return
+	end
+
+	-- 2. La cible doit être légitime, vivante, et pas encore touchée par ce coup.
+	local targetHumanoid, targetRoot = getLivingParts(target)
+	if
+		target == attacker
+		or attack.hitTargets[target]
+		or targetHumanoid == nil
+		or targetRoot == nil
+		or not isTargetAllowed(target)
+	then
+		return
+	end
+
+	-- 3. La géométrie doit rendre l'impact possible.
+	if not isInRange(attackerRoot, target, targetRoot, getMaxHitDistance(step)) then
+		logRejection(player, "cible hors de portée")
+		return
+	end
+	if not hasLineOfSight(attacker, attackerRoot, target, targetRoot) then
+		logRejection(player, "cible derrière un obstacle")
+		return
+	end
+
+	attack.hitTargets[target] = true
+	targetHumanoid:TakeDamage(step.damage)
+	if step.knockback > 0 then
+		applyKnockback(attackerRoot, targetRoot, step.knockback)
+	end
+	setTension(player, getTension(player) + Config.TENSION_PER_HIT)
+	Remotes.HitConfirmed:FireAllClients(attacker, target, step.damage)
+
+	if Config.DEBUG_LOGS then
+		print(`[Combat] {player.Name} touche {target.Name} : -{step.damage} PV (reste {targetHumanoid.Health})`)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Pouvoir ultime
+--------------------------------------------------------------------------------
+
+-- Tous les PNJ taggés, vivants, à moins de `radius` studs de `origin`.
+local function findUltimateTargets(origin: Vector3, radius: number): { Model }
+	local targets = {}
+	for _, instance in CollectionService:GetTagged(TimeLoopConfig.ENTITY_TAG) do
+		if instance:IsA("Model") and instance:IsDescendantOf(workspace) then
+			local _, rootPart = getLivingParts(instance)
+			if rootPart and (rootPart.Position - origin).Magnitude <= radius then
+				table.insert(targets, instance)
+			end
+		end
+	end
+	return targets
+end
+
+local function onUltimateRequested(player: Player)
+	local caster = player.Character
+	local _, casterRoot = getLivingParts(caster)
+	if caster == nil or casterRoot == nil or isOutOfCombat(player) then
+		logRejection(player, "ultime demandé hors combat")
+		return
+	end
+	if getTension(player) < Config.TENSION_MAX then
+		logRejection(player, "ultime demandé sans Tension pleine")
+		return
+	end
+
+	-- La jauge est vidée AVANT tout le reste : deux demandes rapprochées ne donnent qu'un ultime.
+	setTension(player, 0)
+
+	-- L'ultime est celui de la Magie Innée du joueur : l'attribut est écrit par AvatarService,
+	-- côté serveur, donc le client ne peut pas s'en attribuer une autre.
+	local magic = MagicConfig.getById(player:GetAttribute(MagicConfig.ATTRIBUTE))
+	local origin = casterRoot.Position
+	local targets = findUltimateTargets(origin, magic.radius)
+	Remotes.UltimateFired:FireAllClients(caster, origin, targets, magic.id)
+
+	if Config.DEBUG_LOGS then
+		print(`[Combat] {player.Name} déclenche {magic.ultimateName} : {#targets} cible(s)`)
+	end
+
+	-- Les dégâts tombent à la fin de l'arrêt sur image des clients, quand l'onde de choc part.
+	task.wait(Config.ULTIMATE_HIT_STOP)
+	if TimeLoopService.isRewinding() then
+		return -- le temps a été rembobiné entre-temps : l'explosion n'a "pas eu lieu"
+	end
+	local damageDealt = 0
+	for _, target in targets do
+		local targetHumanoid = getLivingParts(target)
+		if targetHumanoid and not isInvulnerable(target) then
+			local healthBefore = targetHumanoid.Health
+			targetHumanoid:TakeDamage(magic.damage)
+			damageDealt += healthBefore - targetHumanoid.Health
+		end
+	end
+
+	-- Effet propre à la magie (implosion, brûlure, paralysie, gel, drain) : voir UltimateBehaviors.
+	local casterHumanoid = getLivingParts(caster)
+	if casterHumanoid then
+		task.spawn(UltimateBehaviors.run, {
+			casterHumanoid = casterHumanoid,
+			origin = origin,
+			targets = targets,
+			magic = magic,
+			damageDealt = damageDealt,
+		})
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Cycle de vie des joueurs
+--------------------------------------------------------------------------------
+
+local function onPlayerAdded(player: Player)
+	setTension(player, 0)
+
+	player.CharacterAdded:Connect(function(character: Model)
+		attacks[player] = nil
+		setTension(player, 0) -- la Tension accumulée est perdue à la mort
+		equipSword(character)
+	end)
+	if player.Character then
+		equipSword(player.Character)
+	end
+end
+
+local function onPlayerRemoving(player: Player)
+	attacks[player] = nil
+end
+
+--------------------------------------------------------------------------------
+-- API publique
+--------------------------------------------------------------------------------
+
+-- À appeler une seule fois au démarrage du serveur.
+function CombatService.start()
+	if isStarted then
+		return
+	end
+	isStarted = true
+
+	Remotes.RequestAttack.OnServerEvent:Connect(onAttackRequested)
+	Remotes.ReportHit.OnServerEvent:Connect(onHitReported)
+	Remotes.RequestUltimate.OnServerEvent:Connect(onUltimateRequested)
+
+	Players.PlayerAdded:Connect(onPlayerAdded)
+	Players.PlayerRemoving:Connect(onPlayerRemoving)
+	for _, player in Players:GetPlayers() do
+		onPlayerAdded(player)
+	end
+end
+
+return CombatService
+]]></ProtectedString>
+					<string name="ScriptGuid">{37366B00-A784-4E31-846A-7C69A6F58B27}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">CombatService</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBXE53B63BC2DC244FC92DEEA96F8A21836">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	SwordFactory
+	Fabrique l'épée d'un personnage et la fixe dans sa main droite par un Motor6D (pas de Tool).
+
+	Source du modèle :
+		- ServerStorage > Assets > Sword s'il existe et qu'il est conforme :
+		    * un Model dont le PrimaryPart est la poignée (c'est lui qui est tenu en main) ;
+		    * toutes ses pièces soudées entre elles ;
+		    * deux Attachments nommés BladeStart (base de la lame) et BladeEnd (pointe) ;
+		    * l'axe Y du PrimaryPart pointe de la poignée vers la pointe.
+		- sinon, une épée provisoire en Parts est générée par code.
+
+	Jointures :
+		- pièces de l'épée entre elles : des Weld à décalage EXPLICITE (C0). Pas de WeldConstraint
+		  ici : son décalage est déduit de la position des pièces au moment où il devient actif,
+		  ce qui est fragile quand le Motor6D déplace la poignée dans la main au même instant
+		  (la lame peut rester soudée loin de la poignée).
+		- épée -> main : un Motor6D recréé à chaque attach(), Part0 = RightHand, Part1 = poignée.
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
+
+local Config = require(ReplicatedStorage.Shared.Combat.CombatConfig)
+
+-- Dimensions de l'épée provisoire (studs). L'axe Y de la poignée va vers la pointe.
+local GRIP_SIZE = Vector3.new(0.25, 1.1, 0.25)
+local GUARD_SIZE = Vector3.new(1.1, 0.18, 0.3)
+local BLADE_SIZE = Vector3.new(0.32, 3.6, 0.08)
+local GUARD_OFFSET_Y = GRIP_SIZE.Y / 2 + GUARD_SIZE.Y / 2
+local BLADE_START_Y = GRIP_SIZE.Y / 2 + GUARD_SIZE.Y
+local BLADE_END_Y = BLADE_START_Y + BLADE_SIZE.Y
+
+-- Traînée de lame : blanc froid à la lame, violet en bout de sillage.
+local TRAIL_LIFETIME = 0.18 -- secondes de persistance du sillage
+local TRAIL_COLOR_HEAD = Color3.fromRGB(235, 240, 255)
+local TRAIL_COLOR_TAIL = Color3.fromRGB(150, 90, 255)
+
+-- Prise standard d'une main R15, utilisée si la main n'a pas (encore) son RightGripAttachment.
+local DEFAULT_GRIP_CFRAME = CFrame.new(0, -0.15, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+
+local SwordFactory = {}
+
+--------------------------------------------------------------------------------
+-- Épée provisoire
+--------------------------------------------------------------------------------
+
+local function newPart(name: string, size: Vector3, color: Color3, material: Enum.Material): Part
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Size = size
+	part.Color = color
+	part.Material = material
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	return part
+end
+
+-- Soude `part` à la poignée, à `offset` du centre de celle-ci.
+local function weldToHandle(handle: BasePart, part: BasePart, offset: CFrame)
+	part.CFrame = handle.CFrame * offset
+
+	local weld = Instance.new("Weld")
+	weld.Name = "SwordWeld"
+	weld.Part0 = handle
+	weld.Part1 = part
+	weld.C0 = offset
+	weld.Parent = part
+end
+
+local function newAttachment(name: string, offsetY: number, parent: BasePart)
+	local attachment = Instance.new("Attachment")
+	attachment.Name = name
+	attachment.Position = Vector3.new(0, offsetY, 0)
+	attachment.Parent = parent
+end
+
+local function buildPlaceholder(): Model
+	local sword = Instance.new("Model")
+	sword.Name = Config.SWORD_NAME
+
+	local handle = newPart("Handle", GRIP_SIZE, Color3.fromRGB(45, 32, 26), Enum.Material.Wood)
+	handle.Parent = sword
+	sword.PrimaryPart = handle
+
+	local guard = newPart("Guard", GUARD_SIZE, Color3.fromRGB(70, 62, 50), Enum.Material.Metal)
+	guard.Parent = sword
+	weldToHandle(handle, guard, CFrame.new(0, GUARD_OFFSET_Y, 0))
+
+	local blade = newPart("Blade", BLADE_SIZE, Color3.fromRGB(170, 175, 185), Enum.Material.Metal)
+	blade.Parent = sword
+	weldToHandle(handle, blade, CFrame.new(0, BLADE_START_Y + BLADE_SIZE.Y / 2, 0))
+
+	newAttachment(Config.BLADE_START_NAME, BLADE_START_Y, handle)
+	newAttachment(Config.BLADE_END_NAME, BLADE_END_Y, handle)
+
+	return sword
+end
+
+--------------------------------------------------------------------------------
+-- Modèle fourni par le développeur
+--------------------------------------------------------------------------------
+
+local function isValidTemplate(template: Instance): boolean
+	return template:IsA("Model")
+		and template.PrimaryPart ~= nil
+		and template:FindFirstChild(Config.BLADE_START_NAME, true) ~= nil
+		and template:FindFirstChild(Config.BLADE_END_NAME, true) ~= nil
+end
+
+local function cloneTemplate(): Model?
+	local assets = ServerStorage:FindFirstChild(Config.ASSETS_FOLDER_NAME)
+	local template = assets and assets:FindFirstChild(Config.SWORD_NAME)
+	if template == nil then
+		return nil
+	end
+	if not isValidTemplate(template) then
+		warn("[Combat] ServerStorage.Assets.Sword est invalide (PrimaryPart, BladeStart ou BladeEnd manquant) : épée provisoire utilisée")
+		return nil
+	end
+	return template:Clone() :: Model
+end
+
+--------------------------------------------------------------------------------
+-- Traînée de lame
+--------------------------------------------------------------------------------
+
+-- Ajoute un Trail tendu entre la base et la pointe de la lame : un ruban lumineux qui suit le
+-- mouvement. Il est créé ÉTEINT ; ce sont les clients qui l'allument pendant la fenêtre de frappe
+-- (voir CombatEffects.playBladeTrail), jamais le serveur.
+local function addBladeTrail(sword: Model)
+	local handle = sword.PrimaryPart
+	local bladeStart = sword:FindFirstChild(Config.BLADE_START_NAME, true)
+	local bladeEnd = sword:FindFirstChild(Config.BLADE_END_NAME, true)
+	if
+		handle == nil
+		or bladeStart == nil
+		or bladeEnd == nil
+		or not bladeStart:IsA("Attachment")
+		or not bladeEnd:IsA("Attachment")
+	then
+		return
+	end
+
+	local trail = Instance.new("Trail")
+	trail.Name = Config.BLADE_TRAIL_NAME
+	trail.Enabled = false
+	trail.Attachment0 = bladeStart
+	trail.Attachment1 = bladeEnd
+	trail.Lifetime = TRAIL_LIFETIME
+	trail.MinLength = 0.02
+	trail.FaceCamera = false -- le ruban garde la largeur réelle de la lame
+	trail.LightEmission = 1
+	trail.LightInfluence = 0
+	trail.Color = ColorSequence.new(TRAIL_COLOR_HEAD, TRAIL_COLOR_TAIL)
+	trail.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.1),
+		NumberSequenceKeypoint.new(0.6, 0.55),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	trail.Parent = handle
+end
+
+--------------------------------------------------------------------------------
+-- API publique
+--------------------------------------------------------------------------------
+
+-- Crée une épée prête à être fixée (non parentée). À détruire avec le personnage.
+function SwordFactory.create(): Model
+	local sword = cloneTemplate() or buildPlaceholder()
+	sword.Name = Config.SWORD_NAME
+
+	-- Sur l'épée provisoire comme sur un modèle fourni, sauf si celui-ci a déjà sa traînée.
+	if sword:FindFirstChild(Config.BLADE_TRAIL_NAME, true) == nil then
+		addBladeTrail(sword)
+	end
+
+	-- Sur TOUTES les pièces : l'épée ne doit ni heurter le décor ou le personnage (CanCollide),
+	-- ni peser sur lui (Massless), ni arrêter les rayons des hitboxes (CanQuery).
+	for _, descendant in sword:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			descendant.Anchored = false
+			descendant.CanCollide = false
+			descendant.CanQuery = false
+			descendant.CanTouch = false
+			descendant.Massless = true
+		end
+	end
+
+	return sword
+end
+
+-- Fixe la poignée de l'épée dans `hand` (le RightHand du personnage). Peut être rappelée à
+-- volonté : l'ancien Motor6D est remplacé, ce qui permet de suivre un changement de main.
+function SwordFactory.attach(sword: Model, hand: BasePart): boolean
+	local handle = sword.PrimaryPart
+	if handle == nil then
+		return false
+	end
+
+	local previousMotor = handle:FindFirstChild(Config.SWORD_MOTOR_NAME)
+	if previousMotor then
+		previousMotor:Destroy()
+	end
+
+	local gripAttachment = hand:FindFirstChild(Config.GRIP_ATTACHMENT_NAME)
+	local gripCFrame = if gripAttachment and gripAttachment:IsA("Attachment")
+		then gripAttachment.CFrame
+		else DEFAULT_GRIP_CFRAME
+
+	local motor = Instance.new("Motor6D")
+	motor.Name = Config.SWORD_MOTOR_NAME
+	motor.Part0 = hand
+	motor.Part1 = handle
+	motor.C0 = gripCFrame * Config.SWORD_GRIP_OFFSET
+	motor.Parent = handle
+
+	return true
+end
+
+return SwordFactory
+]]></ProtectedString>
+					<string name="ScriptGuid">{D4B42DD4-BC40-4F9C-9196-6E42D26C7F00}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">SwordFactory</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+			<Item class="ModuleScript" referent="RBX17818389F2654763B00B790132F4CE51">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	UltimateBehaviors
+	Ce qui rend les cinq ultimes DIFFÉRENTS en jeu, au-delà de leur rayon et de leurs dégâts.
+
+	CombatService inflige les dégâts de zone communs, puis appelle run() : l'effet propre à la magie
+	du lanceur s'applique alors aux cibles encore en vie.
+		antimatter : implosion   - les survivants sont aspirés vers le lanceur (à portée d'épée) ;
+		pyromancy  : brûlure     - ils continuent de perdre des PV pendant quelques secondes ;
+		lightning  : paralysie   - ils ne peuvent plus bouger un court instant ;
+		ice        : gel         - ils sont fortement ralentis, longtemps ;
+		shadow     : drain       - le lanceur récupère une part des dégâts infligés.
+
+	Ajouter ou changer un effet : une fonction dans BEHAVIORS, rangée sous l'`id` de la magie.
+	Une magie sans entrée n'a simplement pas d'effet secondaire.
+]]
+
+local Debris = game:GetService("Debris")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local CombatConfig = require(ReplicatedStorage.Shared.Combat.CombatConfig)
+local MagicConfig = require(ReplicatedStorage.Shared.Magic.MagicConfig)
+
+local TimeLoopService = require(script.Parent.Parent.TimeLoop.TimeLoopService)
+
+export type Context = {
+	casterHumanoid: Humanoid,
+	origin: Vector3, -- position du lanceur au moment de l'ultime
+	targets: { Model }, -- cibles touchées par les dégâts de zone
+	magic: MagicConfig.Magic,
+	damageDealt: number, -- total des PV retirés par les dégâts de zone
+}
+
+-- Antimatière
+local PULL_SPEED = 45 -- studs/s
+local PULL_DURATION = 0.3
+local PULL_STOP_DISTANCE = 5 -- studs : on n'aspire pas une cible déjà au contact
+-- Pyromancie
+local BURN_TICKS = 5
+local BURN_TICK_INTERVAL = 1
+local BURN_TICK_DAMAGE = 6
+-- Foudre
+local STUN_DURATION = 1.5
+-- Glace
+local SLOW_FACTOR = 0.35 -- vitesse restante
+local SLOW_DURATION = 5
+-- Ombre
+local DRAIN_RATIO = 0.4 -- part des dégâts rendue au lanceur
+
+-- Attributs posés sur le Humanoid ralenti, pour que deux effets de vitesse ne se marchent pas dessus.
+local BASE_SPEED_ATTRIBUTE = "BaseWalkSpeed"
+local SPEED_TOKEN_ATTRIBUTE = "SpeedEffectToken"
+
+local UltimateBehaviors = {}
+
+--------------------------------------------------------------------------------
+-- Helpers
+--------------------------------------------------------------------------------
+
+-- Humanoid et RootPart d'une cible encore vivante et vulnérable, sinon nil.
+local function getAffectableParts(target: Model): (Humanoid?, BasePart?)
+	local humanoid = target:FindFirstChildOfClass("Humanoid")
+	local rootPart = humanoid and humanoid.RootPart
+	if humanoid == nil or rootPart == nil or humanoid.Health <= 0 then
+		return nil, nil
+	end
+	if target:GetAttribute(CombatConfig.INVULNERABLE_ATTRIBUTE) == true then
+		return nil, nil
+	end
+	return humanoid, rootPart
+end
+
+-- Multiplie la vitesse de marche de `humanoid` par `factor` pendant `duration` secondes.
+-- Un effet plus récent remplace le précédent ; la vitesse d'origine est toujours rendue à la fin.
+local function applySpeedFactor(humanoid: Humanoid, factor: number, duration: number)
+	local baseSpeed = humanoid:GetAttribute(BASE_SPEED_ATTRIBUTE)
+	if type(baseSpeed) ~= "number" then
+		baseSpeed = humanoid.WalkSpeed
+		humanoid:SetAttribute(BASE_SPEED_ATTRIBUTE, baseSpeed)
+	end
+
+	local token = ((humanoid:GetAttribute(SPEED_TOKEN_ATTRIBUTE) :: number?) or 0) + 1
+	humanoid:SetAttribute(SPEED_TOKEN_ATTRIBUTE, token)
+	humanoid.WalkSpeed = (baseSpeed :: number) * factor
+
+	task.delay(duration, function()
+		if humanoid:GetAttribute(SPEED_TOKEN_ATTRIBUTE) == token then
+			humanoid.WalkSpeed = baseSpeed :: number
+			humanoid:SetAttribute(BASE_SPEED_ATTRIBUTE, nil)
+		end
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- Effets par magie
+--------------------------------------------------------------------------------
+
+local BEHAVIORS: { [string]: (Context) -> () } = {
+	-- Implosion : une LinearVelocity brève tire chaque survivant vers le point d'origine.
+	antimatter = function(context: Context)
+		for _, target in context.targets do
+			local _, rootPart = getAffectableParts(target)
+			if rootPart and not rootPart.Anchored then
+				local toOrigin = (context.origin - rootPart.Position) * Vector3.new(1, 0, 1)
+				if toOrigin.Magnitude > PULL_STOP_DISTANCE then
+					local attachment = Instance.new("Attachment")
+					attachment.Name = "PullAttachment"
+					attachment.Parent = rootPart
+
+					local velocity = Instance.new("LinearVelocity")
+					velocity.Name = "PullVelocity"
+					velocity.Attachment0 = attachment
+					velocity.RelativeTo = Enum.ActuatorRelativeTo.World
+					velocity.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+					velocity.VectorVelocity = toOrigin.Unit * PULL_SPEED
+					velocity.MaxForce = 1e6
+					velocity.Parent = rootPart
+
+					Debris:AddItem(velocity, PULL_DURATION)
+					Debris:AddItem(attachment, PULL_DURATION)
+				end
+			end
+		end
+	end,
+
+	-- Brûlure : des dégâts répétés. Ils s'interrompent si le temps est rembobiné entre-temps.
+	pyromancy = function(context: Context)
+		for _ = 1, BURN_TICKS do
+			task.wait(BURN_TICK_INTERVAL)
+			if TimeLoopService.isRewinding() then
+				return
+			end
+			for _, target in context.targets do
+				local humanoid = getAffectableParts(target)
+				if humanoid then
+					humanoid:TakeDamage(BURN_TICK_DAMAGE)
+				end
+			end
+		end
+	end,
+
+	-- Paralysie : vitesse nulle un court instant.
+	lightning = function(context: Context)
+		for _, target in context.targets do
+			local humanoid = getAffectableParts(target)
+			if humanoid then
+				applySpeedFactor(humanoid, 0, STUN_DURATION)
+			end
+		end
+	end,
+
+	-- Gel : fort ralentissement, plus long.
+	ice = function(context: Context)
+		for _, target in context.targets do
+			local humanoid = getAffectableParts(target)
+			if humanoid then
+				applySpeedFactor(humanoid, SLOW_FACTOR, SLOW_DURATION)
+			end
+		end
+	end,
+
+	-- Drain : le lanceur se soigne d'une part des dégâts qu'il vient d'infliger.
+	shadow = function(context: Context)
+		local humanoid = context.casterHumanoid
+		if humanoid.Health > 0 then
+			humanoid.Health = math.min(humanoid.Health + context.damageDealt * DRAIN_RATIO, humanoid.MaxHealth)
+		end
+	end,
+}
+
+--------------------------------------------------------------------------------
+-- API publique
+--------------------------------------------------------------------------------
+
+-- Applique l'effet secondaire de `context.magic`. Peut YIELD (brûlure) : à lancer avec task.spawn.
+function UltimateBehaviors.run(context: Context)
+	local behavior = BEHAVIORS[context.magic.id]
+	if behavior then
+		behavior(context)
+	end
+end
+
+return UltimateBehaviors
+]]></ProtectedString>
+					<string name="ScriptGuid">{A1E1E2C2-9711-47B6-BC59-CA7A7219CF5D}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">UltimateBehaviors</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+		</Item>
+		<Item class="Folder" referent="RBX028D40A8B0264B4AAFF756E2A53425F8">
+			<Properties>
+				<Color3 name="IconTint">
+					<R>0</R>
+					<G>0</G>
+					<B>0</B>
+				</Color3>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">Movement</string>
+				<BinaryString name="SerializedOverrides"></BinaryString>
+				<int64 name="SourceAssetId">-1</int64>
+				<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+			</Properties>
+			<Item class="ModuleScript" referent="RBX3B0B3250F58E41B4A8199AA09E5DA816">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	MovementService
+	Façade serveur de la mobilité (singleton).
+
+	Le déplacement d'un personnage est simulé par le client de son joueur : c'est donc lui qui
+	se propulse (voir DashController). Le serveur, lui :
+		- valide chaque dash annoncé (joueur en état d'agir, cooldown respecté) ;
+		- prévient les autres clients pour qu'ils jouent l'effet visuel ;
+		- accorde une courte invulnérabilité, que les sources de dégâts consultent avec isDashing().
+
+	Sans dash validé ici, pas d'invulnérabilité : un client ne peut pas se la donner tout seul.
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage.Shared.Movement.MovementConfig)
+local Remotes = require(ReplicatedStorage.Shared.Movement.MovementRemotes)
+
+local AvatarService = require(script.Parent.Parent.Avatar.AvatarService)
+local TimeLoopService = require(script.Parent.Parent.TimeLoop.TimeLoopService)
+
+local MovementService = {}
+
+local lastDashClock: { [Player]: number } = {} -- os.clock() du dernier dash accepté
+local isStarted = false
+
+local function canAct(player: Player): boolean
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid == nil or humanoid.Health <= 0 then
+		return false
+	end
+	return not (AvatarService.isCustomizing(player) or TimeLoopService.isInAnomaly(player) or TimeLoopService.isRewinding())
+end
+
+local function onDashRequested(player: Player)
+	if not canAct(player) then
+		return
+	end
+
+	local now = os.clock()
+	local lastClock = lastDashClock[player]
+	if lastClock and now - lastClock < Config.DASH_COOLDOWN - Config.LATENCY_TOLERANCE then
+		if Config.DEBUG_LOGS then
+			print(`[Movement] Dash refusé pour {player.Name} : cooldown`)
+		end
+		return
+	end
+	lastDashClock[player] = now
+
+	-- Le joueur joue déjà son effet en local : seuls les autres clients sont prévenus.
+	for _, otherPlayer in Players:GetPlayers() do
+		if otherPlayer ~= player then
+			Remotes.DashStarted:FireClient(otherPlayer, player.Character)
+		end
+	end
+end
+
+--------------------------------------------------------------------------------
+-- API publique
+--------------------------------------------------------------------------------
+
+-- À appeler une seule fois au démarrage du serveur.
+function MovementService.start()
+	if isStarted then
+		return
+	end
+	isStarted = true
+
+	Remotes.RequestDash.OnServerEvent:Connect(onDashRequested)
+	Players.PlayerRemoving:Connect(function(player: Player)
+		lastDashClock[player] = nil
+	end)
+end
+
+-- true pendant la fenêtre d'invulnérabilité d'un dash validé. Toute source de dégâts
+-- (épée d'un autre joueur, coups du boss...) doit épargner un joueur pour qui c'est vrai.
+function MovementService.isDashing(player: Player): boolean
+	local lastClock = lastDashClock[player]
+	return lastClock ~= nil and os.clock() - lastClock <= Config.DASH_INVULNERABILITY
+end
+
+return MovementService
+]]></ProtectedString>
+					<string name="ScriptGuid">{6D88B003-AA31-4F03-AF35-711B5A6AA29E}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">MovementService</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+		</Item>
+		<Item class="Folder" referent="RBX2F4F734D1B534A55AC7C3CB9D0274926">
+			<Properties>
+				<Color3 name="IconTint">
+					<R>0</R>
+					<G>0</G>
+					<B>0</B>
+				</Color3>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">Boss</string>
+				<BinaryString name="SerializedOverrides"></BinaryString>
+				<int64 name="SourceAssetId">-1</int64>
+				<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+			</Properties>
+			<Item class="ModuleScript" referent="RBX0444E34B0E8340A68BA9B69DB2B47327">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	BossService
+	IA des boss (singleton serveur). Tout Model taggé BossConfig.TAG dans le Workspace devient un boss.
+
+	Chaque boss fait tourner la même boucle de décision, toutes les THINK_INTERVAL secondes :
+		1. pas de cible vivante à portée              -> Idle
+		2. PV <= 20 % et attaque fatale disponible    -> performUltimate()
+		3. cible au corps-à-corps                     -> performAttack()
+		4. sinon                                      -> chase() (PathfindingService)
+
+	L'attaque fatale est le lien avec le Time-Loop :
+		charge (immobile, invulnérable) -> TimeLoopService.openAnomaly(joueur le plus proche)
+		   A. le joueur rembobine -> tout revient 5 s en arrière, le boss reste sonné : la faille ;
+		   B. le joueur ne fait rien -> TimeLoopService le tue, le boss reprend sa traque.
+
+	Le serveur ne joue aucun effet visuel : il publie l'état du boss dans un attribut du Model,
+	et BossEffectsController (client) fait le spectacle.
+]]
+
+local CollectionService = game:GetService("CollectionService")
+local PathfindingService = game:GetService("PathfindingService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage.Shared.Boss.BossConfig)
+local CombatConfig = require(ReplicatedStorage.Shared.Combat.CombatConfig)
+local CombatRemotes = require(ReplicatedStorage.Shared.Combat.CombatRemotes)
+local TimeLoopConfig = require(ReplicatedStorage.Shared.TimeLoop.TimeLoopConfig)
+
+local AvatarService = require(script.Parent.Parent.Avatar.AvatarService)
+local MovementService = require(script.Parent.Parent.Movement.MovementService)
+local TimeLoopService = require(script.Parent.Parent.TimeLoop.TimeLoopService)
+local WorldService = require(script.Parent.Parent.World.WorldService)
+
+local STATES = Config.STATES
+local POLL_INTERVAL = 0.1 -- secondes entre deux vérifications pendant une attente (anomalie, rewind)
+
+type Boss = {
+	model: Model,
+	humanoid: Humanoid,
+	rootPart: BasePart,
+	path: Path,
+	walkTrack: AnimationTrack?,
+	attackTrack: AnimationTrack?,
+	nextAttackClock: number, -- os.clock() à partir duquel il peut refrapper
+	ultimateReadyClock: number, -- os.clock() à partir duquel l'attaque fatale est disponible
+}
+
+local BossService = {}
+
+local bosses: { [Model]: Boss } = {}
+local isStarted = false
+
+--------------------------------------------------------------------------------
+-- Helpers
+--------------------------------------------------------------------------------
+
+local function log(boss: Boss, message: string)
+	if Config.DEBUG_LOGS then
+		print(`[Boss] {boss.model.Name} : {message}`)
+	end
+end
+
+local function isAlive(boss: Boss): boolean
+	return bosses[boss.model] == boss and boss.model.Parent ~= nil and boss.humanoid.Health > 0
+end
+
+-- Publie l'état pour les clients et règle l'animation de marche en conséquence.
+local function setState(boss: Boss, state: string)
+	if boss.model:GetAttribute(Config.STATE_ATTRIBUTE) == state then
+		return
+	end
+	boss.model:SetAttribute(Config.STATE_ATTRIBUTE, state)
+
+	if boss.walkTrack then
+		if state == STATES.Chasing then
+			boss.walkTrack:Play(0.2)
+		else
+			boss.walkTrack:Stop(0.2)
+		end
+	end
+end
+
+-- Charge une animation sur l'Animator du boss. Jouée par le serveur, elle est répliquée aux clients.
+local function loadTrack(animator: Animator, animationId: string, isLooped: boolean): AnimationTrack?
+	local animation = Instance.new("Animation")
+	animation.AnimationId = animationId
+
+	local isLoaded, track = pcall(function()
+		return animator:LoadAnimation(animation)
+	end)
+	if not isLoaded then
+		return nil -- rig incompatible (R6...) : le boss fonctionnera sans cette animation
+	end
+	track.Looped = isLooped
+	return track
+end
+
+-- Retourne le Humanoid et le RootPart du personnage d'un joueur s'il peut être pris pour cible.
+local function getTargetParts(player: Player): (Humanoid?, BasePart?)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local rootPart = humanoid and humanoid.RootPart
+	if humanoid == nil or rootPart == nil or humanoid.Health <= 0 or AvatarService.isCustomizing(player) then
+		return nil, nil
+	end
+	return humanoid, rootPart
+end
+
+-- Le joueur vivant le plus proche dans AGGRO_RANGE, avec son RootPart et sa distance.
+local function findNearestPlayer(boss: Boss): (Player?, BasePart?, number)
+	local nearestPlayer: Player? = nil
+	local nearestRoot: BasePart? = nil
+	local nearestDistance = Config.AGGRO_RANGE
+
+	for _, player in Players:GetPlayers() do
+		local _, rootPart = getTargetParts(player)
+		if rootPart then
+			local distance = (rootPart.Position - boss.rootPart.Position).Magnitude
+			if distance <= nearestDistance then
+				nearestPlayer, nearestRoot, nearestDistance = player, rootPart, distance
+			end
+		end
+	end
+
+	return nearestPlayer, nearestRoot, nearestDistance
+end
+
+-- Le boss doit être simulé par le serveur, sinon sa physique peut être confiée au client le plus
+-- proche. (Interdit sur un assemblage ancré, d'où la vérification.)
+local function claimServerOwnership(rootPart: BasePart)
+	if rootPart:CanSetNetworkOwnership() then
+		rootPart:SetNetworkOwner(nil)
+	end
+end
+
+local function faceTowards(boss: Boss, position: Vector3)
+	local origin = boss.rootPart.Position
+	local flatTarget = Vector3.new(position.X, origin.Y, position.Z)
+	if (flatTarget - origin).Magnitude > 0.1 then
+		boss.rootPart.CFrame = CFrame.lookAt(origin, flatTarget)
+	end
+end
+
+local function stopMoving(boss: Boss)
+	boss.humanoid:MoveTo(boss.rootPart.Position)
+end
+
+--------------------------------------------------------------------------------
+-- Comportements
+--------------------------------------------------------------------------------
+
+-- Poursuite : on recalcule un chemin vers la cible à chaque décision et on vise son prochain
+-- point de passage. Comme la cible bouge sans arrêt, suivre un chemin entier n'aurait pas de sens.
+local function chase(boss: Boss, targetRoot: BasePart)
+	setState(boss, STATES.Chasing)
+	local destination = targetRoot.Position
+
+	local isComputed = pcall(function()
+		boss.path:ComputeAsync(boss.rootPart.Position, destination) -- yield
+	end)
+
+	if isComputed and boss.path.Status == Enum.PathStatus.Success then
+		local waypoints = boss.path:GetWaypoints()
+		local nextWaypoint = waypoints[2] -- [1] est la position actuelle du boss
+		if nextWaypoint then
+			if nextWaypoint.Action == Enum.PathWaypointAction.Jump then
+				boss.humanoid.Jump = true
+			end
+			boss.humanoid:MoveTo(nextWaypoint.Position)
+			return
+		end
+	end
+
+	-- Pas de chemin (cible en l'air, zone non navigable...) : on fonce en ligne droite.
+	boss.humanoid:MoveTo(destination)
+end
+
+-- Corps-à-corps : un geste annoncé (ATTACK_WINDUP), puis l'impact si la cible est toujours là.
+-- Le joueur peut l'éviter en reculant hors de portée ou en dashant au bon moment.
+local function performAttack(boss: Boss, target: Player, targetRoot: BasePart)
+	stopMoving(boss)
+	if os.clock() < boss.nextAttackClock then
+		setState(boss, STATES.Idle)
+		return
+	end
+	boss.nextAttackClock = os.clock() + Config.ATTACK_COOLDOWN
+
+	setState(boss, STATES.Attacking)
+	faceTowards(boss, targetRoot.Position)
+	if boss.attackTrack then
+		boss.attackTrack:Play(0.05)
+	end
+
+	task.wait(Config.ATTACK_WINDUP)
+	if not isAlive(boss) or TimeLoopService.isRewinding() then
+		return
+	end
+
+	local targetHumanoid, currentRoot = getTargetParts(target)
+	if targetHumanoid == nil or currentRoot == nil then
+		return
+	end
+
+	local distance = (currentRoot.Position - boss.rootPart.Position).Magnitude
+	local isOutOfReach = distance > Config.ATTACK_RANGE + Config.ATTACK_RANGE_TOLERANCE
+	if isOutOfReach or MovementService.isDashing(target) or TimeLoopService.isInAnomaly(target) then
+		log(boss, `{target.Name} esquive le coup`)
+		return
+	end
+
+	targetHumanoid:TakeDamage(Config.ATTACK_DAMAGE)
+	-- Même événement que pour un coup d'épée : les clients jouent impact, hit-stop et secousse.
+	CombatRemotes.HitConfirmed:FireAllClients(boss.model, target.Character, Config.ATTACK_DAMAGE)
+end
+
+-- Attend la fin de l'anomalie de `target`. Retourne true si elle s'est terminée par un rewind.
+local function waitForAnomalyOutcome(target: Player): boolean
+	while TimeLoopService.isInAnomaly(target) do
+		task.wait(POLL_INTERVAL)
+	end
+	-- Un rewind ferme l'anomalie et démarre dans la même frame : s'il y en a un en cours
+	-- maintenant, c'est que le joueur a rembobiné. Sinon, la fenêtre a expiré (ou il est parti).
+	return TimeLoopService.isRewinding()
+end
+
+local function waitForRewindEnd()
+	while TimeLoopService.isRewinding() do
+		task.wait(POLL_INTERVAL)
+	end
+end
+
+-- Attaque fatale : charge, puis anomalie temporelle sur le joueur le plus proche.
+local function performUltimate(boss: Boss)
+	boss.ultimateReadyClock = os.clock() + Config.ULTIMATE_COOLDOWN
+
+	-- 1. Charge : immobile et intouchable. Les clients voient l'état Charging et jouent l'effet.
+	log(boss, "charge son attaque fatale")
+	stopMoving(boss)
+	boss.rootPart.Anchored = true
+	boss.model:SetAttribute(CombatConfig.INVULNERABLE_ATTRIBUTE, true)
+	setState(boss, STATES.Charging)
+	-- Le monde entier bascule : ciel noir, lumière rouge sang, pour tous les joueurs.
+	WorldService.setAnomaly(boss.model, true)
+	task.wait(Config.CHARGE_DURATION)
+
+	-- 2. L'attaque part : au lieu de tuer le joueur, on ouvre son anomalie temporelle.
+	local wasRewound = false
+	if isAlive(boss) and not TimeLoopService.isRewinding() then
+		local target = findNearestPlayer(boss)
+		if target and TimeLoopService.openAnomaly(target) then
+			log(boss, `anomalie ouverte sur {target.Name}`)
+			wasRewound = waitForAnomalyOutcome(target)
+		end
+	end
+	if wasRewound then
+		-- Dès le début du rewind : l'effet de charge s'éteint chez les clients pendant que le temps recule.
+		setState(boss, STATES.Staggered)
+	end
+
+	-- 3. Fin de la charge. On attend la fin d'un éventuel rewind avant de libérer le boss :
+	--    le rewind gèle lui-même les entités et leur rend ensuite leur état Anchored d'avant.
+	waitForRewindEnd()
+	WorldService.setAnomaly(boss.model, false) -- le danger est passé (rewind ou mort) : le ciel se rouvre
+	if not isAlive(boss) then
+		return
+	end
+	boss.rootPart.Anchored = false
+	claimServerOwnership(boss.rootPart)
+	boss.model:SetAttribute(CombatConfig.INVULNERABLE_ATTRIBUTE, false)
+
+	-- 4. La faille : après un rewind, le boss reste sonné, vulnérable, sans attaque fatale.
+	if wasRewound then
+		log(boss, "sonné par le rewind")
+		task.wait(Config.STAGGER_DURATION)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Boucle de décision
+--------------------------------------------------------------------------------
+
+local function runBoss(boss: Boss)
+	while isAlive(boss) do
+		local target, targetRoot, distance = findNearestPlayer(boss)
+		local healthRatio = boss.humanoid.Health / boss.humanoid.MaxHealth
+		local isUltimateReady = healthRatio <= Config.ULTIMATE_HEALTH_RATIO and os.clock() >= boss.ultimateReadyClock
+
+		if TimeLoopService.isRewinding() then
+			-- Le temps se rembobine : le boss est entre les mains du Time-Loop, on ne décide rien.
+		elseif target == nil or targetRoot == nil then
+			stopMoving(boss)
+			setState(boss, STATES.Idle)
+		elseif isUltimateReady then
+			performUltimate(boss)
+		elseif distance <= Config.ATTACK_RANGE then
+			performAttack(boss, target, targetRoot)
+		else
+			chase(boss, targetRoot)
+		end
+
+		task.wait(Config.THINK_INTERVAL)
+	end
+
+	boss.model:SetAttribute(Config.STATE_ATTRIBUTE, STATES.Dead)
+	boss.model:SetAttribute(CombatConfig.INVULNERABLE_ATTRIBUTE, false)
+	WorldService.setAnomaly(boss.model, false)
+	bosses[boss.model] = nil
+end
+
+--------------------------------------------------------------------------------
+-- Inscription des boss
+--------------------------------------------------------------------------------
+
+local function registerBoss(instance: Instance)
+	-- Les tags suivent aussi les modèles rangés dans ServerStorage : on ne veut que ceux en jeu.
+	if not instance:IsA("Model") or not instance:IsDescendantOf(workspace) or bosses[instance] then
+		return
+	end
+
+	local humanoid = instance:FindFirstChildOfClass("Humanoid")
+	local rootPart = humanoid and humanoid.RootPart
+	if humanoid == nil or rootPart == nil then
+		warn(`[Boss] {instance.Name} est taggé {Config.TAG} mais n'a pas de Humanoid avec un RootPart`)
+		return
+	end
+
+	humanoid.DisplayName = Config.DISPLAY_NAME
+	humanoid.MaxHealth = Config.MAX_HEALTH
+	humanoid.Health = Config.MAX_HEALTH
+	humanoid.WalkSpeed = Config.WALK_SPEED
+	-- Un rig posé dans Studio peut avoir des pièces ancrées : il ne bougerait jamais.
+	for _, descendant in instance:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			descendant.Anchored = false
+		end
+	end
+	claimServerOwnership(rootPart)
+
+	local animator = humanoid:FindFirstChildOfClass("Animator")
+	if animator == nil then
+		local newAnimator = Instance.new("Animator")
+		newAnimator.Parent = humanoid
+		animator = newAnimator
+	end
+
+	local boss: Boss = {
+		model = instance,
+		humanoid = humanoid,
+		rootPart = rootPart,
+		path = PathfindingService:CreatePath({
+			AgentRadius = 2,
+			AgentHeight = 5,
+			AgentCanJump = true,
+			WaypointSpacing = 6,
+		}),
+		walkTrack = loadTrack(animator :: Animator, Config.WALK_ANIMATION_ID, true),
+		attackTrack = loadTrack(animator :: Animator, Config.ATTACK_ANIMATION_ID, false),
+		nextAttackClock = 0,
+		ultimateReadyClock = 0,
+	}
+	bosses[instance] = boss
+	instance:SetAttribute(Config.STATE_ATTRIBUTE, STATES.Idle)
+
+	-- Un boss est toujours une entité du Time-Loop : position et PV enregistrés, rembobinables.
+	CollectionService:AddTag(instance, TimeLoopConfig.ENTITY_TAG)
+
+	task.spawn(runBoss, boss)
+end
+
+local function unregisterBoss(instance: Instance)
+	if instance:IsA("Model") then
+		bosses[instance] = nil -- la boucle du boss s'arrête à sa prochaine décision (voir isAlive)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- API publique
+--------------------------------------------------------------------------------
+
+-- À appeler une seule fois au démarrage du serveur.
+function BossService.start()
+	if isStarted then
+		return
+	end
+	isStarted = true
+
+	CollectionService:GetInstanceAddedSignal(Config.TAG):Connect(registerBoss)
+	CollectionService:GetInstanceRemovedSignal(Config.TAG):Connect(unregisterBoss)
+	for _, instance in CollectionService:GetTagged(Config.TAG) do
+		registerBoss(instance)
+	end
+end
+
+return BossService
+]]></ProtectedString>
+					<string name="ScriptGuid">{4654AFA6-EC5B-489D-AA53-0203C09CF2DF}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">BossService</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+		</Item>
+		<Item class="Folder" referent="RBX907CA62E9CA84194A80896115044241A">
+			<Properties>
+				<Color3 name="IconTint">
+					<R>0</R>
+					<G>0</G>
+					<B>0</B>
+				</Color3>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">Data</string>
+				<BinaryString name="SerializedOverrides"></BinaryString>
+				<int64 name="SourceAssetId">-1</int64>
+				<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+			</Properties>
+			<Item class="ModuleScript" referent="RBX965249C998FC49CD8219CA5742FDB4BA">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	ProfileStore
+	Sauvegarde des joueurs avec DataStoreService (singleton serveur).
+
+	Un "profil" est une simple table par joueur, chargée à sa connexion et gardée en mémoire :
+		{ version = 1, avatar = <apparence + magie choisies dans le Hub, ou nil> }
+	Les autres services lisent et modifient cette table, puis appellent save().
+	Ajouter une donnée à sauvegarder = ajouter un champ au profil (et à newProfile()).
+
+	Garde-fou essentiel : si le chargement a ÉCHOUÉ (DataStore en panne, accès API désactivé dans
+	Studio...), le joueur joue quand même avec un profil vide, mais rien ne sera écrit pour lui :
+	on n'écrase jamais une sauvegarde qu'on n'a pas réussi à lire.
+
+	Dans Studio, les DataStores ne marchent que si le jeu est publié et que
+	Game Settings > Security > "Enable Studio Access to API Services" est coché.
+]]
+
+local DataStoreService = game:GetService("DataStoreService")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+-- Changer ce nom repart d'une base vide (utile pour remettre tous les joueurs à zéro).
+local STORE_NAME = "PlayerProfiles_v4"
+local PROFILE_VERSION = 1
+local MAX_ATTEMPTS = 3
+local RETRY_DELAY = 1.5 -- secondes entre deux tentatives
+
+export type Profile = {
+	version: number,
+	avatar: any?, -- écrit et relu par AvatarSerializer
+}
+
+type Session = {
+	profile: Profile,
+	canSave: boolean, -- false si le chargement a échoué
+	isDirty: boolean, -- le profil a changé depuis la dernière écriture
+}
+
+local ProfileStore = {}
+
+local sessions: { [Player]: Session } = {}
+local dataStore: DataStore? = nil
+local hasWarnedUnavailable = false
+local isStarted = false
+
+--------------------------------------------------------------------------------
+-- Accès au DataStore
+--------------------------------------------------------------------------------
+
+local function newProfile(): Profile
+	return {
+		version = PROFILE_VERSION,
+		avatar = nil,
+	}
+end
+
+local function getKey(player: Player): string
+	return `Player_{player.UserId}`
+end
+
+local function warnUnavailable(errorMessage: any)
+	if hasWarnedUnavailable then
+		return
+	end
+	hasWarnedUnavailable = true
+	warn(
+		`[Data] DataStore indisponible : rien ne sera sauvegardé pendant cette session. ({errorMessage})\n`
+			.. `Dans Studio : publier le jeu, puis cocher Game Settings > Security > "Enable Studio Access to API Services".`
+	)
+end
+
+local function getDataStore(): DataStore?
+	if dataStore == nil then
+		local isAvailable, result = pcall(function()
+			return DataStoreService:GetDataStore(STORE_NAME)
+		end)
+		if isAvailable then
+			dataStore = result
+		else
+			warnUnavailable(result)
+		end
+	end
+	return dataStore
+end
+
+-- Exécute `request` jusqu'à MAX_ATTEMPTS fois. Retourne (succès, résultat ou message d'erreur).
+local function withRetries(request: () -> any): (boolean, any)
+	local lastError: any = nil
+	for attempt = 1, MAX_ATTEMPTS do
+		local isSuccess, result = pcall(request)
+		if isSuccess then
+			return true, result
+		end
+		lastError = result
+
+		-- Dans Studio, un échec vient presque toujours de l'accès API désactivé : réessayer
+		-- ne ferait que retarder l'ouverture du jeu de plusieurs secondes.
+		if RunService:IsStudio() or attempt == MAX_ATTEMPTS then
+			break
+		end
+		task.wait(RETRY_DELAY * attempt)
+	end
+	return false, lastError
+end
+
+--------------------------------------------------------------------------------
+-- API publique
+--------------------------------------------------------------------------------
+
+-- Charge le profil de `player`. YIELD. Retourne toujours un profil utilisable :
+-- celui de la sauvegarde, ou un profil vide (nouveau joueur, ou chargement impossible).
+function ProfileStore.load(player: Player): Profile
+	local existingSession = sessions[player]
+	if existingSession then
+		return existingSession.profile
+	end
+
+	local session: Session = {
+		profile = newProfile(),
+		canSave = false,
+		isDirty = false,
+	}
+
+	local store = getDataStore()
+	if store then
+		local isLoaded, data = withRetries(function()
+			return store:GetAsync(getKey(player))
+		end)
+		if isLoaded then
+			session.canSave = true
+			if type(data) == "table" then
+				session.profile.avatar = data.avatar
+			end
+		else
+			warnUnavailable(data)
+		end
+	end
+
+	-- Le joueur a pu partir pendant le chargement : on ne garde rien pour un absent.
+	if player:IsDescendantOf(Players) then
+		sessions[player] = session
+	end
+	return session.profile
+end
+
+-- Profil déjà chargé de `player`, ou nil s'il ne l'est pas (encore).
+function ProfileStore.get(player: Player): Profile?
+	local session = sessions[player]
+	return session and session.profile
+end
+
+-- À appeler après avoir modifié le profil : il sera écrit au prochain save().
+function ProfileStore.markDirty(player: Player)
+	local session = sessions[player]
+	if session then
+		session.isDirty = true
+	end
+end
+
+-- Écrit le profil de `player` s'il a changé. YIELD. Retourne false si rien n'a pu être écrit.
+function ProfileStore.save(player: Player): boolean
+	local session = sessions[player]
+	local store = getDataStore()
+	if session == nil or store == nil or not session.canSave then
+		return false
+	end
+	if not session.isDirty then
+		return true
+	end
+
+	session.isDirty = false -- avant l'écriture : un changement fait pendant qu'elle a lieu reste à sauver
+	local isSaved, errorMessage = withRetries(function()
+		store:SetAsync(getKey(player), session.profile)
+		return nil
+	end)
+	if not isSaved then
+		session.isDirty = true
+		warn(`[Data] Sauvegarde impossible pour {player.Name} : {errorMessage}`)
+	end
+	return isSaved
+end
+
+-- Départ du joueur : dernière sauvegarde, puis oubli du profil. YIELD.
+function ProfileStore.release(player: Player)
+	ProfileStore.save(player)
+	sessions[player] = nil
+end
+
+-- À appeler une seule fois au démarrage du serveur.
+function ProfileStore.start()
+	if isStarted then
+		return
+	end
+	isStarted = true
+
+	-- Fermeture du serveur : on écrit tous les profils modifiés avant de rendre la main
+	-- (PlayerRemoving n'a pas toujours le temps de finir quand le serveur s'arrête).
+	game:BindToClose(function()
+		local pendingSaves = 0
+		for player in sessions do
+			pendingSaves += 1
+			task.spawn(function()
+				ProfileStore.save(player)
+				pendingSaves -= 1
+			end)
+		end
+		while pendingSaves > 0 do
+			task.wait()
+		end
+	end)
+end
+
+return ProfileStore
+]]></ProtectedString>
+					<string name="ScriptGuid">{7DC1009D-4A7A-4E5E-8AC2-57C0DC08C51E}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">ProfileStore</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+		</Item>
+		<Item class="Folder" referent="RBXFD42F7D16D0E43EDB327517605EEC80E">
+			<Properties>
+				<Color3 name="IconTint">
+					<R>0</R>
+					<G>0</G>
+					<B>0</B>
+				</Color3>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">World</string>
+				<BinaryString name="SerializedOverrides"></BinaryString>
+				<int64 name="SourceAssetId">-1</int64>
+				<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+			</Properties>
+			<Item class="ModuleScript" referent="RBX34C2591876A44E46B3ECBA4F784010D7">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	WorldService
+	L'état du monde, côté serveur (singleton). Il ne touche ni au Lighting ni à aucun effet :
+	il DÉCIDE et publie, les clients mettent en image (voir WorldAtmosphere).
+		- météo   : tirée au sort toutes les quelques minutes, publiée dans un attribut du Workspace ;
+		- humeur  : "Anomaly" tant qu'au moins un système le demande (setAnomaly), sinon "Normal" ;
+		- présages : de temps à autre, une phrase murmurée à tous les joueurs.
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage.Shared.World.WorldConfig)
+local Remotes = require(ReplicatedStorage.Shared.World.WorldRemotes)
+
+local WorldService = {}
+
+local random = Random.new()
+local anomalySources: { [any]: boolean } = {} -- qui réclame l'anomalie en ce moment
+local isStarted = false
+
+--------------------------------------------------------------------------------
+-- Météo
+--------------------------------------------------------------------------------
+
+-- Tire une météo au sort selon les poids, différente de `currentId`.
+local function pickWeather(currentId: string): string
+	local totalWeight = 0
+	for id, weather in Config.WEATHERS do
+		if id ~= currentId then
+			totalWeight += weather.weight
+		end
+	end
+
+	local roll = random:NextNumber(0, totalWeight)
+	for id, weather in Config.WEATHERS do
+		if id ~= currentId then
+			roll -= weather.weight
+			if roll <= 0 then
+				return id
+			end
+		end
+	end
+	return currentId
+end
+
+local function runWeatherCycle()
+	local currentId = Config.DEFAULT_WEATHER
+	while true do
+		workspace:SetAttribute(Config.WEATHER_ATTRIBUTE, currentId)
+		task.wait(random:NextNumber(Config.WEATHER_MIN_DURATION, Config.WEATHER_MAX_DURATION))
+		currentId = pickWeather(currentId)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Présages
+--------------------------------------------------------------------------------
+
+local function runOmenCycle()
+	while true do
+		task.wait(random:NextNumber(Config.OMEN_MIN_INTERVAL, Config.OMEN_MAX_INTERVAL))
+
+		-- Pas de murmure pendant une anomalie : l'écran a déjà assez à dire.
+		local isCalm = workspace:GetAttribute(Config.MOOD_ATTRIBUTE) == Config.MOODS.Normal
+		if isCalm and #Players:GetPlayers() > 0 then
+			Remotes.Omen:FireAllClients(Config.OMENS[random:NextInteger(1, #Config.OMENS)])
+		end
+	end
+end
+
+--------------------------------------------------------------------------------
+-- API publique
+--------------------------------------------------------------------------------
+
+-- À appeler une seule fois au démarrage du serveur.
+function WorldService.start()
+	if isStarted then
+		return
+	end
+	isStarted = true
+
+	workspace:SetAttribute(Config.MOOD_ATTRIBUTE, Config.MOODS.Normal)
+	task.spawn(runWeatherCycle)
+	task.spawn(runOmenCycle)
+end
+
+--[[
+	Fait basculer le monde entier dans l'anomalie (ciel noir, lumière rouge sang, brouillard lourd),
+	ou l'en fait sortir. `source` identifie le demandeur (par exemple le Model d'un boss) :
+	le monde ne redevient normal que lorsque TOUS ceux qui l'ont demandée l'ont relâchée.
+]]
+function WorldService.setAnomaly(source: any, isActive: boolean)
+	anomalySources[source] = if isActive then true else nil
+
+	local mood = if next(anomalySources) ~= nil then Config.MOODS.Anomaly else Config.MOODS.Normal
+	workspace:SetAttribute(Config.MOOD_ATTRIBUTE, mood)
+end
+
+return WorldService
+]]></ProtectedString>
+					<string name="ScriptGuid">{CC72D626-ACE3-41C7-BDA1-595A4CCA9552}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">WorldService</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+		</Item>
+		<Item class="Folder" referent="RBX8DF36E98D712475880B0AA907B06EF57">
+			<Properties>
+				<Color3 name="IconTint">
+					<R>0</R>
+					<G>0</G>
+					<B>0</B>
+				</Color3>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">NPC</string>
+				<BinaryString name="SerializedOverrides"></BinaryString>
+				<int64 name="SourceAssetId">-1</int64>
+				<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+			</Properties>
+			<Item class="ModuleScript" referent="RBXF934002E811449B983AAEF2B42333AC2">
+				<Properties>
+					<Content name="LinkedSource"><null></null></Content>
+					<ProtectedString name="Source"><![CDATA[--!strict
+--[[
+	VillagerService
+	La vie du village, côté serveur (singleton). Tout Model taggé "Villager" qui a un Humanoid :
+		- se promène autour de l'endroit où il a été posé (sauf attribut Wanders = false) ;
+		- s'arrête et se tourne vers le joueur qui lui adresse la parole, puis reprend sa route.
+
+	Le dialogue (texte, son, interface) est géré par chaque client : voir NPCInteraction.
+	Une seule boucle fait bouger tous les villageois, quel que soit leur nombre.
+]]
+
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage.Shared.NPC.DialogueConfig)
+local Remotes = require(ReplicatedStorage.Shared.NPC.NPCRemotes)
+
+local THINK_INTERVAL = 0.5 -- secondes entre deux passages de la boucle
+local TALK_DISTANCE_TOLERANCE = 6 -- studs de marge sur la distance d'interaction (latence, déplacement)
+
+type Villager = {
+	model: Model,
+	humanoid: Humanoid,
+	rootPart: BasePart,
+	home: Vector3, -- point autour duquel il se promène
+	canWander: boolean,
+	nextMoveClock: number,
+	talkingUntil: number, -- os.clock() jusqu'auquel il reste auprès d'un joueur
+}
+
+local VillagerService = {}
+
+local random = Random.new()
+local villagers: { [Model]: Villager } = {}
+local talkingWith: { [Player]: Villager } = {}
+local isStarted = false
+
+--------------------------------------------------------------------------------
+-- Inscription
+--------------------------------------------------------------------------------
+
+-- Animation de marche, jouée par le serveur dès que le villageois avance (répliquée aux clients).
+local function setupWalkAnimation(humanoid: Humanoid)
+	local animator = humanoid:FindFirstChildOfClass("Animator") or Instance.new("Animator")
+	animator.Parent = humanoid
+
+	local animation = Instance.new("Animation")
+	animation.AnimationId = Config.WALK_ANIMATION_ID
+
+	local isLoaded, track = pcall(function()
+		return (animator :: Animator):LoadAnimation(animation)
+	end)
+	if not isLoaded then
+		return -- rig incompatible (R6...) : il glissera sans animation
+	end
+
+	humanoid.Running:Connect(function(speed: number)
+		if speed > 0.5 then
+			if not track.IsPlaying then
+				track:Play(0.2)
+			end
+		else
+			track:Stop(0.2)
+		end
+	end)
+end
+
+local function registerVillager(instance: Instance)
+	-- Les tags suivent aussi les modèles rangés dans ServerStorage : on ne veut que ceux en jeu.
+	if not instance:IsA("Model") or not instance:IsDescendantOf(workspace) or villagers[instance] then
+		return
+	end
+
+	local humanoid = instance:FindFirstChildOfClass("Humanoid")
+	local rootPart = humanoid and humanoid.RootPart
+	if humanoid == nil or rootPart == nil then
+		return -- simple décor parlant (statue, panneau...) : rien à animer côté serveur
+	end
+
+	humanoid.WalkSpeed = Config.WANDER_SPEED
+	-- Un villageois ancré dans Studio ne peut pas marcher : il reste sur place, mais se tournera vers le joueur.
+	local canWander = instance:GetAttribute(Config.WANDER_ATTRIBUTE) ~= false and not rootPart.Anchored
+	if canWander then
+		-- Simulé par le serveur, pas par le client le plus proche. (Interdit si une autre pièce
+		-- du rig est ancrée, d'où la vérification.)
+		if rootPart:CanSetNetworkOwnership() then
+			rootPart:SetNetworkOwner(nil)
+		end
+		setupWalkAnimation(humanoid)
+	end
+
+	villagers[instance] = {
+		model = instance,
+		humanoid = humanoid,
+		rootPart = rootPart,
+		home = rootPart.Position,
+		canWander = canWander,
+		nextMoveClock = os.clock() + random:NextNumber(0, Config.WANDER_PAUSE_MAX),
+		talkingUntil = 0,
+	}
+end
+
+local function unregisterVillager(instance: Instance)
+	if instance:IsA("Model") then
+		villagers[instance] = nil
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Promenade
+--------------------------------------------------------------------------------
+
+local function wander(villager: Villager)
+	local angle = random:NextNumber(0, math.pi * 2)
+	local distance = random:NextNumber(Config.WANDER_RADIUS * 0.3, Config.WANDER_RADIUS)
+	local destination = villager.home + Vector3.new(math.cos(angle) * distance, 0, math.sin(angle) * distance)
+	villager.humanoid:MoveTo(destination)
+end
+
+local function runVillage()
+	while true do
+		local now = os.clock()
+		for model, villager in villagers do
+			if model.Parent == nil or villager.humanoid.Health <= 0 then
+				villagers[model] = nil
+			elseif villager.canWander and now >= villager.talkingUntil and now >= villager.nextMoveClock then
+				villager.nextMoveClock = now + random:NextNumber(Config.WANDER_PAUSE_MIN, Config.WANDER_PAUSE_MAX)
+				wander(villager)
+			end
+		end
+		task.wait(THINK_INTERVAL)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Conversation
+--------------------------------------------------------------------------------
+
+local function onTalkStarted(player: Player, target: any)
+	if typeof(target) ~= "Instance" then
+		return
+	end
+	local villager = villagers[target :: any]
+	local character = player.Character
+	local playerRoot = character and character:FindFirstChild("HumanoidRootPart")
+	if villager == nil or playerRoot == nil or not playerRoot:IsA("BasePart") then
+		return
+	end
+
+	-- Le client ne peut pas immobiliser un villageois à l'autre bout du monde.
+	local distance = (playerRoot.Position - villager.rootPart.Position).Magnitude
+	if distance > Config.INTERACT_DISTANCE + TALK_DISTANCE_TOLERANCE then
+		return
+	end
+
+	villager.talkingUntil = os.clock() + Config.TALK_TIMEOUT
+	talkingWith[player] = villager
+
+	-- Il s'arrête et fait face au joueur.
+	local origin = villager.rootPart.Position
+	villager.humanoid:MoveTo(origin)
+	local lookTarget = Vector3.new(playerRoot.Position.X, origin.Y, playerRoot.Position.Z)
+	if (lookTarget - origin).Magnitude > 0.1 then
+		villager.rootPart.CFrame = CFrame.lookAt(origin, lookTarget)
+	end
+end
+
+local function onTalkEnded(player: Player)
+	local villager = talkingWith[player]
+	if villager then
+		talkingWith[player] = nil
+		villager.talkingUntil = 0
+		villager.nextMoveClock = os.clock() + Config.WANDER_PAUSE_MIN -- il ne repart pas dans la seconde
+	end
+end
+
+--------------------------------------------------------------------------------
+-- API publique
+--------------------------------------------------------------------------------
+
+-- À appeler une seule fois au démarrage du serveur.
+function VillagerService.start()
+	if isStarted then
+		return
+	end
+	isStarted = true
+
+	CollectionService:GetInstanceAddedSignal(Config.TAG):Connect(registerVillager)
+	CollectionService:GetInstanceRemovedSignal(Config.TAG):Connect(unregisterVillager)
+	for _, instance in CollectionService:GetTagged(Config.TAG) do
+		registerVillager(instance)
+	end
+
+	Remotes.TalkStarted.OnServerEvent:Connect(onTalkStarted)
+	Remotes.TalkEnded.OnServerEvent:Connect(onTalkEnded)
+	Players.PlayerRemoving:Connect(onTalkEnded)
+
+	task.spawn(runVillage)
+end
+
+return VillagerService
+]]></ProtectedString>
+					<string name="ScriptGuid">{23E41780-380B-4198-99AE-64B1D2F992C8}</string>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<string name="Name">VillagerService</string>
+					<BinaryString name="SerializedOverrides"></BinaryString>
+					<int64 name="SourceAssetId">-1</int64>
+					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+				</Properties>
+			</Item>
+		</Item>
+	</Item>
+	<SharedStrings>
+		<SharedString md5="yuZpQdnvvUBOTYh1jqZ2cA=="></SharedString>
+	</SharedStrings>
+</roblox>
