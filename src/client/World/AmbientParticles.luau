@@ -116,6 +116,19 @@ function AmbientParticles.setActive(name: string)
 end
 
 -- Recentre le volume sur `position` (la caméra). À appeler à chaque frame.
+-- Densité des particules (1 = normale) : le mode « effets réduits » la baisse.
+local baseRates: { [string]: number } = {}
+function AmbientParticles.setDensity(factor: number)
+	for name, emitter in emitters do
+		local base = baseRates[name]
+		if base == nil then
+			base = emitter.Rate
+			baseRates[name] = base
+		end
+		emitter.Rate = base * factor
+	end
+end
+
 function AmbientParticles.follow(position: Vector3)
 	if volume then
 		volume.CFrame = CFrame.new(position)

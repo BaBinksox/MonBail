@@ -22,6 +22,8 @@ local AvatarConfig = require(ReplicatedStorage.Shared.Avatar.AvatarConfig)
 local DialogueConfig = require(ReplicatedStorage.Shared.NPC.DialogueConfig)
 local NpcConfig = require(ReplicatedStorage.Shared.NPC.NpcConfig)
 
+local CharacterPlacement = require(script.Parent.Parent.Core.CharacterPlacement)
+local NpcCostume = require(script.Parent.NpcCostume)
 local WorldAnchors = require(script.Parent.Parent.World.WorldAnchors)
 
 local FOLDER_NAME = "NPCs"
@@ -115,7 +117,25 @@ local function createModel(npcId: string, definition: NpcConfig.Npc): Model?
 		warn(`[NPC] Impossible de créer {npcId} : {result}`)
 		return nil
 	end
-	return result
+	local model = result :: Model
+	-- Visage dessiné du catalogue du jeu (pas de visage moderne) et détails médiévaux du costume.
+	local face = findById(AvatarConfig.FACE_OPTIONS, definition.look.face)
+	local head = model:FindFirstChild("Head")
+	if face and head then
+		local decal: Decal? = head:FindFirstChildOfClass("Decal")
+		if decal == nil then
+			local newDecal = Instance.new("Decal")
+			newDecal.Name = "face"
+			newDecal.Face = Enum.NormalId.Front
+			newDecal.Parent = head
+			decal = newDecal
+		end
+		if decal then
+			decal.Texture = face.texture
+		end
+	end
+	NpcCostume.dress(model, definition.look.details)
+	return model
 end
 
 local function spawnNpc(npcId: string, definition: NpcConfig.Npc)
@@ -147,6 +167,8 @@ local function spawnNpc(npcId: string, definition: NpcConfig.Npc)
 	end
 	model:PivotTo(anchor)
 	model.Parent = getFolder()
+	-- Debout sur le sol réel, quelle que soit sa taille (même règle que les joueurs).
+	CharacterPlacement.place(model, anchor)
 	spawned[npcId] = model
 	-- Le tag en dernier : VillagerService mémorise sa position d'origine à l'inscription.
 	CollectionService:AddTag(model, DialogueConfig.TAG)

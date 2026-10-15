@@ -34,6 +34,8 @@ local clientFolder = script.Parent.Parent
 local Theme = require(clientFolder:WaitForChild("UI"):WaitForChild("Theme") :: ModuleScript)
 local UIBus = require(clientFolder:WaitForChild("UI"):WaitForChild("UIBus") :: ModuleScript)
 local PlayerState = require(clientFolder:WaitForChild("State"):WaitForChild("PlayerState") :: ModuleScript)
+local ClientSettings = require(clientFolder:WaitForChild("State"):WaitForChild("ClientSettings") :: ModuleScript)
+local StateRemotes = require(sharedFolder:WaitForChild("State"):WaitForChild("StateRemotes") :: ModuleScript)
 
 local ACTION_NAME = "ToggleGrimoire"
 local BACK_ACTION_NAME = "CloseGrimoire"
@@ -43,6 +45,7 @@ local TABS = {
 	{ id = "missions", label = "Contrats" },
 	{ id = "companions", label = "Compagnons" },
 	{ id = "progression", label = "Progression" },
+	{ id = "options", label = "Options" },
 }
 local PANEL_TO_TAB: { [string]: string } = {
 	journal = "journal",
@@ -51,12 +54,15 @@ local PANEL_TO_TAB: { [string]: string } = {
 	party = "companions",
 	progression = "progression",
 	inventory = "progression",
+	options = "options",
+	settings = "options",
 }
 local TAB_SLICES: { [string]: { string } } = {
 	journal = { "quests" },
 	missions = { "missions", "progression", "party" },
 	companions = { "party", "guild" },
 	progression = { "progression", "inventory", "discoveries" },
+	options = {}, -- pas de redessin pendant qu'on règle : les curseurs ne sautent pas
 }
 
 local localPlayer = Players.LocalPlayer
@@ -611,11 +617,77 @@ end
 -- Ouverture, onglets, rafraîchissement
 --------------------------------------------------------------------------------
 
+-- Options -------------------------------------------------------------------------
+-- Chaque changement s'entend / se voit tout de suite (aperçu local), puis part au serveur une fois
+-- le curseur lâché (SETTINGS_SAVE_DELAY) : le serveur borne et enregistre, la tranche "settings"
+-- revient et confirme. Les réglages sont restaurés à la prochaine connexion.
+local SETTINGS_SAVE_DELAY = 0.8
+local pendingSettings: { [string]: any } = {}
+local settingsSaveToken = 0
+
+local function changeSetting(key: string, value: any)
+	pendingSettings[key] = value
+	ClientSettings.preview({ [key] = value })
+	settingsSaveToken += 1
+	local token = settingsSaveToken
+	task.delay(SETTINGS_SAVE_DELAY, function()
+		if token ~= settingsSaveToken then
+			return
+		end
+		local payload = pendingSettings
+		pendingSettings = {}
+		StateRemotes.UpdateSettings:FireServer(payload)
+		setStatus("Réglages enregistrés.")
+	end)
+end
+
+local function percent(value: number): string
+	return `{math.round(value * 100)} %`
+end
+
+local function renderOptions()
+	local settings = ClientSettings.get()
+	heading("Son")
+	local function volumeSlider(label: string, key: string, value: number)
+		local slider = Theme.slider({ label = label, min = 0, max = 1, step = 0.05, value = value, format = percent, layoutOrder = nextOrder(), parent = content })
+		slider.instance.Size = UDim2.new(1, -8, 0, slider.instance.Size.Y.Offset)
+		slider:onChanged(function(newValue: number)
+			changeSetting(key, newValue)
+		end)
+	end
+	volumeSlider("MUSIQUE", "music", settings.music)
+	volumeSlider("AMBIANCE (VENT, BOURDONS)", "ambience", settings.ambience)
+	volumeSlider("EFFETS SONORES", "sfx", settings.sfx)
+
+	heading("Affichage")
+	local scaleSlider = Theme.slider({ label = "TAILLE DE L'INTERFACE", min = 0.8, max = 1.3, step = 0.05, value = settings.uiScale, format = percent, layoutOrder = nextOrder(), parent = content })
+	scaleSlider.instance.Size = UDim2.new(1, -8, 0, scaleSlider.instance.Size.Y.Offset)
+	scaleSlider:onChanged(function(newValue: number)
+		changeSetting("uiScale", newValue)
+	end)
+
+	local row = buttonRow(content)
+	local reduced = Theme.button({
+		parent = row,
+		text = if settings.reducedEffects then "Effets réduits : activés" else "Effets réduits : désactivés",
+		selected = settings.reducedEffects,
+		size = UDim2.fromOffset(300, 38),
+	})
+	reduced:onActivated(function()
+		local enabled = not ClientSettings.isReducedEffects()
+		changeSetting("reducedEffects", enabled)
+		reduced:setSelected(enabled)
+		reduced:setText(if enabled then "Effets réduits : activés" else "Effets réduits : désactivés")
+	end)
+	caption("Effets réduits : moins de secousses, de particules, d'éblouissement et de sursauts d'image.")
+end
+
 local RENDERERS: { [string]: () -> () } = {
 	journal = renderJournal,
 	missions = renderMissions,
 	companions = renderCompanions,
 	progression = renderProgression,
+	options = renderOptions,
 }
 
 local function render()

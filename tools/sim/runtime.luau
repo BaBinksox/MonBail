@@ -433,8 +433,11 @@ return function(mock)
 			LeftHand = mock.Vector3.new(-1.5, -0.6, 0),
 			LeftFoot = mock.Vector3.new(-0.5, -2.5, 0),
 			RightFoot = mock.Vector3.new(0.5, -2.5, 0),
+			LowerTorso = mock.Vector3.new(0, -0.4, 0),
+			LeftUpperArm = mock.Vector3.new(-1.5, 0.5, 0),
+			RightUpperArm = mock.Vector3.new(1.5, 0.5, 0),
 		}
-		for _, partName in ipairs({ "Head", "UpperTorso", "RightHand", "LeftHand", "LeftFoot", "RightFoot" }) do
+		for _, partName in ipairs({ "Head", "UpperTorso", "RightHand", "LeftHand", "LeftFoot", "RightFoot", "LowerTorso", "LeftUpperArm", "RightUpperArm" }) do
 			local p = Instance.new("Part")
 			p.Name = partName
 			p.Size = mock.Vector3.new(1, 1, 1)

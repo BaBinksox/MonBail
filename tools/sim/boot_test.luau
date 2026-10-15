@@ -51,6 +51,24 @@ for _ in pairs(NpcConfig.NPCS or {}) do
 	expectedNpcs += 1
 end
 check("villageois apparus sur leurs marqueurs", villagers > 0 and (expectedNpcs == 0 or villagers == expectedNpcs), villagers .. " / " .. expectedNpcs)
+local costumeParts, solidCostume, dressed = 0, 0, 0
+for _, villager in ipairs(CollectionService:GetTagged("Villager")) do
+	local count = 0
+	for _, d in ipairs(villager:GetDescendants()) do
+		if d:IsA("BasePart") and string.find(d.Name, "^Costume_") then
+			count += 1
+			if d.CanCollide or d.CanQuery or d.CanTouch or not d.Massless then
+				solidCostume += 1
+			end
+		end
+	end
+	costumeParts += count
+	if count > 0 then
+		dressed += 1
+	end
+end
+check("PNJ habillés de détails médiévaux (" .. dressed .. " PNJ, " .. costumeParts .. " pièces)", dressed == villagers and costumeParts > 0)
+check("pièces de costume sans collision ni masse", solidCostume == 0, solidCostume)
 local prompts = 0
 for _, inst in ipairs(CollectionService:GetTagged("Interactable")) do
 	if inst:FindFirstChildOfClass("ProximityPrompt") then

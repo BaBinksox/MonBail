@@ -4,6 +4,8 @@
 	Trois SoundGroups dans SoundService — Music, Ambience, Sfx — dont le volume suit les réglages du
 	joueur (tranche "settings" de PlayerState : music, ambience, sfx, de 0 à 1). Tout son du jeu est
 	rangé dans l'un d'eux : baisser « Musique » baisse la musique du créateur ET celle des régions.
+	Les volumes suivent ClientSettings : les réglages enregistrés, et l'aperçu pendant qu'on bouge
+	un curseur des options.
 
 	API :
 		AudioMixer.assign(sound, category)      range `sound` dans "Music" | "Ambience" | "Sfx"
@@ -16,7 +18,7 @@ local SoundService = game:GetService("SoundService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local AudioConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Audio"):WaitForChild("AudioConfig") :: ModuleScript)
-local PlayerState = require(script.Parent.Parent:WaitForChild("State"):WaitForChild("PlayerState") :: ModuleScript)
+local ClientSettings = require(script.Parent.Parent:WaitForChild("State"):WaitForChild("ClientSettings") :: ModuleScript)
 
 export type Category = "Music" | "Ambience" | "Sfx"
 
@@ -62,11 +64,9 @@ function AudioMixer.getVolume(category: Category): number
 	return groups[category].Volume
 end
 
-AudioMixer.preview(PlayerState.get("settings"))
-PlayerState.Changed:Connect(function(slice: string, data: any)
-	if slice == "settings" then
-		AudioMixer.preview(data)
-	end
+AudioMixer.preview(ClientSettings.get())
+ClientSettings.Changed:Connect(function(settings: any)
+	AudioMixer.preview(settings)
 end)
 
 return AudioMixer

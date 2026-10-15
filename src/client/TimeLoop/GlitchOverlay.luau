@@ -20,6 +20,9 @@ local TweenService = game:GetService("TweenService")
 
 local sharedFolder = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("TimeLoop")
 local Config = require(sharedFolder:WaitForChild("TimeLoopConfig") :: ModuleScript)
+local ClientSettings = require(script.Parent.Parent:WaitForChild("State"):WaitForChild("ClientSettings") :: ModuleScript)
+
+local REDUCED_INTERVAL = 2.5 -- « effets réduits » : sursauts d'image 2,5 fois plus espacés
 
 type Range = { min: number, max: number }
 
@@ -293,7 +296,7 @@ function GlitchOverlay.start(profileName: string)
 	connection = RunService.RenderStepped:Connect(function()
 		local now = os.clock()
 		if now >= nextFrameClock then
-			nextFrameClock = now + pick(profile.interval)
+			nextFrameClock = now + pick(profile.interval) * (if ClientSettings.isReducedEffects() then REDUCED_INTERVAL else 1)
 			applyFrame(profile)
 		end
 	end)

@@ -133,6 +133,36 @@ H.advance(0.5)
 H.check("touche J : le Grimoire se ferme", grimoire.Enabled == false)
 H.noNewErrors("guilde sans erreur")
 
+print("== Options (Grimoire)")
+UIBus.OpenPanel:Fire("options")
+H.advance(0.5)
+H.check("onglet Options ouvert", grimoire.Enabled == true and C.findText("MUSIQUE", grimoire) ~= nil)
+local musicSlider = C.findText("MUSIQUE", grimoire)
+while musicSlider and rawget(musicSlider, "_props").Name ~= "Slider" do
+	musicSlider = rawget(musicSlider, "_props").Parent
+end
+local minus = musicSlider and musicSlider:FindFirstChild("Minus", true)
+H.check("curseur Musique avec bouton −", minus ~= nil)
+if minus then
+	C.click(minus)
+	C.click(minus)
+end
+H.advance(2)
+H.check("volume Musique enregistré côté serveur (90 %)", math.abs(H.profile(player).settings.music - 0.9) < 1e-6, H.profile(player).settings.music)
+local AudioMixer = env.require("StarterPlayer/StarterPlayerScripts/Client/Audio/AudioMixer")
+H.check("volume appliqué au groupe Music", math.abs(AudioMixer.getVolume("Music") - 0.9) < 1e-6, AudioMixer.getVolume("Music"))
+local reducedButton = C.findButton("Effets réduits", grimoire)
+if reducedButton then
+	C.click(reducedButton)
+end
+H.advance(2)
+local ClientSettings = env.require("StarterPlayer/StarterPlayerScripts/Client/State/ClientSettings")
+H.check("effets réduits : appliqués chez le client", ClientSettings.isReducedEffects() == true)
+H.check("effets réduits : enregistrés dans le profil", H.profile(player).settings.reducedEffects == true)
+C.pressKey(Enum.KeyCode.J)
+H.advance(0.5)
+H.noNewErrors("options sans erreur")
+
 print("== Parade et ennemis")
 local enemy = H.enemyAt("enemy_forest_1")
 if enemy then

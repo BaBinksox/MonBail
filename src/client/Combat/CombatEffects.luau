@@ -21,6 +21,9 @@ local TweenService = game:GetService("TweenService")
 
 local sharedFolder = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Combat")
 local Config = require(sharedFolder:WaitForChild("CombatConfig") :: ModuleScript)
+local ClientSettings = require(script.Parent.Parent:WaitForChild("State"):WaitForChild("ClientSettings") :: ModuleScript)
+
+local REDUCED_SHAKE = 0.3 -- « effets réduits » : secousses de caméra à 30 %
 
 -- Palette ----------------------------------------------------------------------
 -- (Les couleurs d'un ultime ne sont pas ici : elles viennent de la palette de la magie du lanceur.)
@@ -219,6 +222,9 @@ local function updateShake()
 end
 
 local function shakeCamera(duration: number, amplitude: number)
+	if ClientSettings.isReducedEffects() then
+		amplitude *= REDUCED_SHAKE
+	end
 	if amplitude <= 0 then
 		return
 	end

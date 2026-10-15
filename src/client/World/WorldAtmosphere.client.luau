@@ -36,6 +36,12 @@ local Remotes = require(worldFolder:WaitForChild("WorldRemotes") :: ModuleScript
 
 local AmbientParticles = require(script.Parent:WaitForChild("AmbientParticles") :: ModuleScript)
 local AudioMixer = require(script.Parent.Parent:WaitForChild("Audio"):WaitForChild("AudioMixer") :: ModuleScript)
+local ClientSettings = require(script.Parent.Parent:WaitForChild("State"):WaitForChild("ClientSettings") :: ModuleScript)
+
+-- Mode « effets réduits » (options du joueur).
+local REDUCED_BLOOM = 0.5
+local REDUCED_SUN_RAYS = 0.4
+local REDUCED_PARTICLES = 0.35
 local LightingPresets = require(script.Parent:WaitForChild("LightingPresets") :: ModuleScript)
 
 local APPLY_INTERVAL = 0.5 -- secondes entre deux mises à jour de la lumière en temps normal
@@ -199,6 +205,14 @@ local function apply(elapsed: number)
 	preset.ColorCorrection.Saturation += ambience.saturation
 	local tint: Color3 = preset.ColorCorrection.TintColor
 	preset.ColorCorrection.TintColor = Color3.new(tint.R * ambience.tint.R, tint.G * ambience.tint.G, tint.B * ambience.tint.B)
+
+	-- 2 ter. Effets réduits : moins d'éblouissement et de particules (la lumière reste la même).
+	local isReduced = ClientSettings.isReducedEffects()
+	if isReduced then
+		preset.Bloom.Intensity *= REDUCED_BLOOM
+		preset.SunRays.Intensity *= REDUCED_SUN_RAYS
+	end
+	AmbientParticles.setDensity(if isReduced then REDUCED_PARTICLES else 1)
 
 	-- 3. L'anomalie écrase le tout, à proportion de moodAlpha.
 	if moodAlpha > 0 then
