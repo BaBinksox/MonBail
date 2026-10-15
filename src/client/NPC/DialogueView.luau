@@ -8,10 +8,13 @@
 		DialogueGui (ScreenGui)
 		├── ClickCatcher (TextButton)   invisible, plein écran : un clic n'importe où fait avancer
 		│                               le dialogue (et n'est donc pas pris pour un coup d'épée)
-		└── Box (Frame)                 la boîte, en bas de l'écran
-		    ├── NamePlate               nom du personnage qui parle
-		    ├── Line                    la réplique
-		    └── Hint                    rappel des touches, visible quand la réplique est finie
+		├── Box (Frame)                 la boîte, en bas de l'écran
+		│   ├── NamePlate               nom du personnage qui parle
+		│   ├── Line                    la réplique
+		│   └── Hint                    rappel des touches, visible quand la réplique est finie
+		└── Options (Frame)             choix proposés par le serveur (accepter une quête, ouvrir les contrats...)
+
+	La taille s'adapte à l'écran (UIScale d'après la hauteur, largeur bornée) : lisible sur téléphone.
 ]]
 
 local COLOR_BACKGROUND = Color3.fromRGB(6, 6, 9)
@@ -22,8 +25,13 @@ local COLOR_ACCENT = Color3.fromRGB(176, 146, 96) -- or terni, comme le Hub et l
 local FONT_TEXT = Enum.Font.Garamond
 local FONT_CAPTION = Enum.Font.GothamMedium
 
-local BOX_SIZE = UDim2.new(0.62, 0, 0, 150)
+local BOX_SIZE = UDim2.new(0.9, 0, 0, 150)
+local BOX_MAX_WIDTH = 940 -- pixels (avant mise à l'échelle)
 local BOTTOM_MARGIN = 96 -- pixels : au-dessus de la jauge de Tension
+local REFERENCE_HEIGHT = 720 -- hauteur d'écran pour laquelle l'échelle vaut 1
+local OPTION_HEIGHT = 40
+
+export type Option = { id: string, label: string }
 
 export type View = {
 	gui: ScreenGui,
@@ -31,6 +39,7 @@ export type View = {
 	namePlate: TextLabel,
 	line: TextLabel,
 	hint: TextLabel,
+	options: Frame,
 }
 
 local DialogueView = {}
@@ -52,6 +61,19 @@ function DialogueView.create(parent: Instance): View
 	clickCatcher.Text = ""
 	clickCatcher.Parent = gui
 
+	-- Mise à l'échelle selon la hauteur de l'écran (téléphone en paysage ~ 0.6, PC 1080p ~ 1.2).
+	local scale = Instance.new("UIScale")
+	scale.Parent = gui
+	local function refreshScale()
+		local camera = workspace.CurrentCamera
+		local height = if camera then camera.ViewportSize.Y else REFERENCE_HEIGHT
+		scale.Scale = math.clamp(height / REFERENCE_HEIGHT, 0.6, 1.25)
+	end
+	refreshScale()
+	if workspace.CurrentCamera then
+		workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(refreshScale)
+	end
+
 	local box = Instance.new("Frame")
 	box.Name = "Box"
 	box.AnchorPoint = Vector2.new(0.5, 1)
@@ -61,6 +83,10 @@ function DialogueView.create(parent: Instance): View
 	box.BackgroundTransparency = 0.12
 	box.BorderSizePixel = 0
 	box.Parent = gui
+
+	local boxConstraint = Instance.new("UISizeConstraint")
+	boxConstraint.MaxSize = Vector2.new(BOX_MAX_WIDTH, math.huge)
+	boxConstraint.Parent = box
 
 	local boxCorner = Instance.new("UICorner")
 	boxCorner.CornerRadius = UDim.new(0, 4)
@@ -133,6 +159,23 @@ function DialogueView.create(parent: Instance): View
 	hint.Visible = false
 	hint.Parent = box
 
+	-- Choix : une colonne de boutons au-dessus de la boîte, à droite.
+	local options = Instance.new("Frame")
+	options.Name = "Options"
+	options.AnchorPoint = Vector2.new(1, 1)
+	options.Position = UDim2.new(0.95, 0, 1, -(BOTTOM_MARGIN + 170))
+	options.Size = UDim2.fromOffset(320, 0)
+	options.AutomaticSize = Enum.AutomaticSize.Y
+	options.BackgroundTransparency = 1
+	options.Visible = false
+	options.Parent = gui
+
+	local optionsLayout = Instance.new("UIListLayout")
+	optionsLayout.Padding = UDim.new(0, 8)
+	optionsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	optionsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	optionsLayout.Parent = options
+
 	gui.Parent = parent
 
 	return {
@@ -141,7 +184,60 @@ function DialogueView.create(parent: Instance): View
 		namePlate = namePlate,
 		line = line,
 		hint = hint,
+		options = options,
 	}
+end
+
+-- Affiche les choix `list` (numérotés 1, 2, 3...) ; `onChoose(id)` est appelé au clic.
+-- Retourne les boutons (dans l'ordre) pour la navigation clavier / manette.
+function DialogueView.setOptions(view: View, list: { Option }, onChoose: (id: string) -> ()): { TextButton }
+	DialogueView.clearOptions(view)
+	local buttons = {}
+	for index, option in list do
+		local button = Instance.new("TextButton")
+		button.Name = `Option{index}`
+		button.LayoutOrder = index
+		button.Size = UDim2.fromOffset(320, OPTION_HEIGHT)
+		button.BackgroundColor3 = COLOR_BACKGROUND
+		button.BackgroundTransparency = 0.08
+		button.BorderSizePixel = 0
+		button.AutoButtonColor = true
+		button.Font = FONT_TEXT
+		button.Text = `{index}.  {option.label}`
+		button.TextSize = 21
+		button.TextColor3 = COLOR_TEXT
+		button.TextXAlignment = Enum.TextXAlignment.Left
+		button.Selectable = true
+		button.Parent = view.options
+
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0, 4)
+		corner.Parent = button
+		local stroke = Instance.new("UIStroke")
+		stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		stroke.Color = COLOR_ACCENT
+		stroke.Transparency = 0.35
+		stroke.Parent = button
+		local padding = Instance.new("UIPadding")
+		padding.PaddingLeft = UDim.new(0, 14)
+		padding.Parent = button
+
+		button.Activated:Connect(function()
+			onChoose(option.id)
+		end)
+		table.insert(buttons, button)
+	end
+	view.options.Visible = #buttons > 0
+	return buttons
+end
+
+function DialogueView.clearOptions(view: View)
+	for _, child in view.options:GetChildren() do
+		if child:IsA("TextButton") then
+			child:Destroy()
+		end
+	end
+	view.options.Visible = false
 end
 
 return DialogueView

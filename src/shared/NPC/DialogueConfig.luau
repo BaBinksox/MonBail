@@ -47,6 +47,44 @@ local DIALOGUES: { [string]: Dialogue } = {
 		},
 	},
 
+	-- PNJ de la Région 1 (placés par NpcSpawner, voir Shared/NPC/NpcConfig). Ces répliques sont leur texte
+	-- HABITUEL : quand une quête les concerne, le serveur fournit d'autres répliques (DialogueService).
+	bellkeeper = {
+		name = "Aldric le Sonneur",
+		lines = {
+			"Elle ne sonne plus. Elle ne devrait plus jamais sonner.",
+			"Allez, laissez un vieil homme regarder sa chapelle en paix.",
+		},
+	},
+	quartermaster = {
+		name = "Ysolde",
+		lines = {
+			"Des contrats, du travail honnête, et des pièces qui ne disparaissent pas quand le temps recule.",
+			"Le tableau est derrière moi. Choisissez selon votre rang : je n'enterre pas les imprudents.",
+		},
+	},
+	guildmaster = {
+		name = "Corvin l'Archiviste",
+		lines = {
+			"Une guilde, c'est un serment écrit à plusieurs mains. Je garde les serments.",
+			"Fondez la vôtre, ou rejoignez celle d'un ami. Les Archives n'ouvrent qu'aux serments qui ont tenu.",
+		},
+	},
+	trainer = {
+		name = "Bran, maître d'armes",
+		lines = {
+			"Trois coups. Le dernier avec le poids du corps.",
+			"Et la garde : juste avant l'impact. Pas avant. Jamais avant.",
+		},
+	},
+	wanderer = {
+		name = "Le Voyageur Répété",
+		lines = {
+			"Bonjour. Bonjour. Bonjour... Pardon. Ça me prend parfois.",
+			"Les arbres répètent ce qu'ils entendent. Moi aussi. Nous nous entendons bien.",
+		},
+	},
+
 	-- Dialogues génériques : attribués aux villageois sans DialogueId.
 	villager_weather = {
 		lines = {

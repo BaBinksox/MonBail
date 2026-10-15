@@ -13,8 +13,11 @@ local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local AvatarConfig = require(ReplicatedStorage.Shared.Avatar.AvatarConfig)
 local Config = require(ReplicatedStorage.Shared.NPC.DialogueConfig)
 local Remotes = require(ReplicatedStorage.Shared.NPC.NPCRemotes)
+
+local RateLimiter = require(script.Parent.Parent.Net.RateLimiter)
 
 local THINK_INTERVAL = 0.5 -- secondes entre deux passages de la boucle
 local TALK_DISTANCE_TOLERANCE = 6 -- studs de marge sur la distance d'interaction (latence, déplacement)
@@ -27,6 +30,7 @@ type Villager = {
 	canWander: boolean,
 	nextMoveClock: number,
 	talkingUntil: number, -- os.clock() jusqu'auquel il reste auprès d'un joueur
+	talkers: { [Player]: boolean }, -- joueurs qui lui parlent en ce moment (il attend que tous aient fini)
 }
 
 local VillagerService = {}
@@ -34,6 +38,7 @@ local VillagerService = {}
 local random = Random.new()
 local villagers: { [Model]: Villager } = {}
 local talkingWith: { [Player]: Villager } = {}
+local talkLimiter = RateLimiter.new(1, 3) -- un client ne peut pas faire pivoter un villageois en boucle
 local isStarted = false
 
 --------------------------------------------------------------------------------
@@ -98,6 +103,7 @@ local function registerVillager(instance: Instance)
 		canWander = canWander,
 		nextMoveClock = os.clock() + random:NextNumber(0, Config.WANDER_PAUSE_MAX),
 		talkingUntil = 0,
+		talkers = {},
 	}
 end
 
@@ -137,8 +143,24 @@ end
 -- Conversation
 --------------------------------------------------------------------------------
 
+local function onTalkEnded(player: Player)
+	local villager = talkingWith[player]
+	if villager == nil then
+		return
+	end
+	talkingWith[player] = nil
+	villager.talkers[player] = nil
+	if next(villager.talkers) == nil then
+		villager.talkingUntil = 0
+		villager.nextMoveClock = os.clock() + Config.WANDER_PAUSE_MIN -- il ne repart pas dans la seconde
+	end
+end
+
 local function onTalkStarted(player: Player, target: any)
-	if typeof(target) ~= "Instance" then
+	if typeof(target) ~= "Instance" or not talkLimiter:allow(player) then
+		return
+	end
+	if player:GetAttribute(AvatarConfig.CUSTOMIZING_ATTRIBUTE) == true then
 		return
 	end
 	local villager = villagers[target :: any]
@@ -154,7 +176,12 @@ local function onTalkStarted(player: Player, target: any)
 		return
 	end
 
+	-- Parler à un autre villageois termine la conversation précédente (il n'attend pas 45 s pour rien).
+	if talkingWith[player] and talkingWith[player] ~= villager then
+		onTalkEnded(player)
+	end
 	villager.talkingUntil = os.clock() + Config.TALK_TIMEOUT
+	villager.talkers[player] = true
 	talkingWith[player] = villager
 
 	-- Il s'arrête et fait face au joueur.
@@ -163,15 +190,6 @@ local function onTalkStarted(player: Player, target: any)
 	local lookTarget = Vector3.new(playerRoot.Position.X, origin.Y, playerRoot.Position.Z)
 	if (lookTarget - origin).Magnitude > 0.1 then
 		villager.rootPart.CFrame = CFrame.lookAt(origin, lookTarget)
-	end
-end
-
-local function onTalkEnded(player: Player)
-	local villager = talkingWith[player]
-	if villager then
-		talkingWith[player] = nil
-		villager.talkingUntil = 0
-		villager.nextMoveClock = os.clock() + Config.WANDER_PAUSE_MIN -- il ne repart pas dans la seconde
 	end
 end
 
