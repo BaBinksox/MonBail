@@ -46,6 +46,9 @@ export type Interactable = {
 	requiresMagic: string?, -- visible et utilisable seulement par cette Magie Innée
 	reward: { xp: number?, reputation: number?, items: { [string]: number }?, discoveries: { string }? }?, -- chest
 	discovery: string?, -- découverte accordée à la première utilisation (examine, chest, collect)
+	-- Condition de quête : l'objet n'est utilisable qu'à cette étape (et, si `objective` est donné,
+	-- une fois cet objectif atteint). Les autres joueurs voient un texte d'attente.
+	requiresQuest: { quest: string, stage: string, objective: string?, waitText: string }?,
 	builderHint: string, -- pour le générateur : à quoi l'objet ressemble et où il est
 }
 
@@ -149,6 +152,12 @@ local INTERACTABLES: { [string]: Interactable } = {
 		title = "Battant de la Cloche",
 		item = "bell_clapper",
 		discovery = "secret_crypt_relic",
+		requiresQuest = {
+			quest = "bell_silent",
+			stage = "trial",
+			objective = "defeat_guardian",
+			waitText = "Le battant est rivé à l'autel par une poigne de cendre. Le Veilleur ne le lâchera pas tant qu'il veille.",
+		},
 		builderHint = "Battant de cloche en bronze posé sur un autel, au fond de la salle de la crypte (derrière le Veilleur).",
 	},
 	crypt_exit = {
@@ -165,6 +174,11 @@ local INTERACTABLES: { [string]: Interactable } = {
 		text = "Le bronze est fendu de haut en bas. Le battant manque.",
 		consumes = { bell_clapper = 1 },
 		maxDistance = 14,
+		requiresQuest = {
+			quest = "bell_silent",
+			stage = "reward",
+			waitText = "Le bronze est fendu de haut en bas. Le battant manque.",
+		},
 		builderHint = "Cordon de la cloche qui pend au pied du clocher (la cloche elle-même est en haut). Interactable = la corde.",
 	},
 

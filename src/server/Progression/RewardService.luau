@@ -121,8 +121,8 @@ function RewardService.grant(player: Player, key: string?, reward: Reward, optio
 		return false, "already"
 	end
 
-	local addedItems = {}
-	local newUnlocks = {}
+	local addedItems: { { id: string, name: string, count: number } } = {}
+	local newUnlocks: { string } = {}
 	PlayerData.mutate(player, { "progression", "inventory", "unlocks", "ledger" }, function(p)
 		if key then
 			p.ledger[key] = os.time()
