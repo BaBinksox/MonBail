@@ -8,6 +8,7 @@
 		             description, contrats collectifs, journal de la guilde ;
 		Progression  rang d'aventurier, conditions du rang suivant, réputation, découvertes, inventaire.
 	Ouverture : touche J (lettre imprimée, toutes dispositions), croix directionnelle haut à la manette,
+	bouton tactile « Grimoire » sur mobile,
 	ou UIBus.OpenPanel("missions" | "guild" | "party" | "journal" | "progression" | "inventory")
 	(tableaux du village, Ysolde, Corvin). Le serveur vérifie tout : ce panneau ne fait que demander,
 	puis se redessine quand la tranche d'état correspondante revient.
@@ -701,4 +702,7 @@ ContextActionService:BindAction(ACTION_NAME, function(_name: string, state: Enum
 		return Enum.ContextActionResult.Sink
 	end
 	return Enum.ContextActionResult.Pass
-end, false, grimoireKey, binding.gamepad or Enum.KeyCode.DPadUp)
+end, true, grimoireKey, binding.gamepad or Enum.KeyCode.DPadUp)
+-- Bouton tactile (téléphone, tablette) : créé par ContextActionService, au-dessus du bouton de saut.
+ContextActionService:SetTitle(ACTION_NAME, binding.label)
+ContextActionService:SetPosition(ACTION_NAME, UDim2.new(1, -170, 1, -230))

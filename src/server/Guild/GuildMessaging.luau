@@ -2,7 +2,7 @@
 --[[
 	GuildMessaging
 	Notifications entre serveurs des changements de guilde (MessagingService, sujet
-	DataConfig.GUILD_MESSAGING_TOPIC). Singleton serveur.
+	DataConfig.GUILD_MESSAGING_TOPIC, préfixé TEST_ dans Studio comme les DataStores). Singleton serveur.
 
 	Une notification n'est QU'UN SIGNAL DE RELECTURE : { guildId, kind, opId, targetUserId? }. Le
 	serveur qui la reçoit relit la guilde dans le DataStore avant d'agir ; il ne fait jamais confiance
@@ -127,7 +127,7 @@ function GuildMessaging.publish(message: Message): boolean
 	}
 	task.spawn(function()
 		local isSent, errorMessage = pcall(function()
-			MessagingService:PublishAsync(DataConfig.GUILD_MESSAGING_TOPIC, payload)
+			MessagingService:PublishAsync(DataConfig.storeName(DataConfig.GUILD_MESSAGING_TOPIC), payload)
 		end)
 		if not isSent then
 			debugLog(`publication impossible ({errorMessage}) : la relecture périodique prendra le relais.`)
@@ -149,7 +149,7 @@ function GuildMessaging.start()
 	isStarted = true
 	task.spawn(function()
 		local isDone, errorMessage = pcall(function()
-			MessagingService:SubscribeAsync(DataConfig.GUILD_MESSAGING_TOPIC, onPacket)
+			MessagingService:SubscribeAsync(DataConfig.storeName(DataConfig.GUILD_MESSAGING_TOPIC), onPacket)
 		end)
 		isSubscribed = isDone
 		if not isDone then

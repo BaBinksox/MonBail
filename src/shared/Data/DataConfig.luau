@@ -1,7 +1,7 @@
 --!strict
 --[[
 	DataConfig
-	Réglages communs aux sauvegardes des NOUVEAUX systèmes (guildes, index de noms...).
+	Réglages communs aux sauvegardes des NOUVEAUX systèmes (guildes, index de noms, messagerie inter-serveurs).
 
 	Bac à sable de test : quand USE_TEST_STORES est vrai, les DataStores des nouveaux systèmes sont
 	préfixés par TEST_PREFIX. Les tests dans Studio n'écrivent donc jamais dans les guildes de

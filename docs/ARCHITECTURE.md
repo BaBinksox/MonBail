@@ -99,14 +99,19 @@ ainsi que les modules `*Remotes`.
 | Module | Rôle |
 |---|---|
 | `UI/Theme` | palette, polices, fabriques de cadres et boutons adaptatifs |
-| `State/PlayerStateClient` | reçoit StateSync et expose l'état et des signaux aux interfaces |
-| `UI/Hud` | suivi de quête, rang, notifications |
-| `UI/Grimoire` | menu principal (J) : Carte, Journal, Missions, Progression, Inventaire, Guilde, Groupe, Options |
-| `UI/MissionBoardView`, `UI/GuildView`, `UI/PartyView` | panneaux du Grimoire et du tableau de missions |
-| `Combat/ParryController` | entrée de parade, effets anticipés |
-| `Enemy/EnemyEffectsController` | télégraphes au sol, états visibles des ennemis |
-| `World/EchoRenderer`, `World/RegionAmbience`, `World/MechanismEffects` | rendu local des échos, ambiance par région, effets des mécanismes |
+| `UI/UIBus` | bus d'événements entre scripts client (OpenPanel, ShowText, ClosePanels, DialogueStateChanged) |
+| `State/PlayerState` | reçoit StateSync (StateRemotes) et expose l'état et des signaux aux interfaces |
+| `UI/HudController` | rang, suivi de quête, notifications, panneau de lecture des textes examinés, invites réservées à une magie masquées |
+| `UI/Grimoire` | menu principal (J) : Journal, Contrats (tableau des missions), Compagnons (groupe + guilde), Progression (+ inventaire). La carte reste `World/WorldMapController` (M) |
+| `Combat/ParryController` | entrée de parade (Q physique / « A » AZERTY, L1, bouton tactile), posture, étincelle, ennemis étourdis |
+| `Enemy/EnemyEffectsController` | barres de vie, télégraphes au sol recalés sur l'heure serveur, actions visibles des ennemis |
+| `World/EchoRenderer` | rendu local des échos (silhouette, sous-titres, rune touchée) |
+| `World/ArrivalController` | cinématique d'arrivée au belvédère |
 | `AvatarCreator/*` (refonte) | créateur de personnage immersif, mêmes Remotes |
+
+Les effets des mécanismes (runes allumées, braises, pont, glace, herse, dalle) sont appliqués par le
+SERVEUR sur les Parts du monde (`MechanismService`) : tous les joueurs voient le même état, sans script
+client dédié.
 
 ## 3. Touches (`Shared/Input/KeyBindings`)
 
@@ -123,7 +128,7 @@ sont résolues par lettre (`KeyboardLayout`, comme la carte).
 | Carte | lettre « M » | — | bouton du Grimoire | WorldMapController (existant) |
 | Interagir / parler | F (ProximityPrompt) | X | toucher l'invite | InteractionService / NPCInteraction |
 | **Parade** | KeyCode.Q (« A » en AZERTY) | L1 | bouton | ParryController |
-| **Grimoire** | lettre « J » | Select | bouton | Grimoire |
+| **Grimoire** | lettre « J » | croix haut | bouton | Grimoire |
 
 ## 4. Données persistantes
 

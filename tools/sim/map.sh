@@ -5,9 +5,8 @@
 # Prérequis : luau, rojo, python3 + matplotlib (voir tools/README.md). Variables : LUAU, ROJO.
 set -e
 cd "$(dirname "$0")/../.."
-S=/tmp/claude-0/-home-user/d721f83b-3ad5-5014-b617-4b6fbd5be7d5/scratchpad
-LUAU=${LUAU:-$S/luau/luau}
-ROJO=${ROJO:-$S/rojo/rojo}
+LUAU=${LUAU:-luau}
+ROJO=${ROJO:-rojo}
 ZONE=${1:-all}
 OUT=${2:-tools/sim/out}
 mkdir -p "$OUT"
