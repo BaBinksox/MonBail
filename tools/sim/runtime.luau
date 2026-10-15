@@ -232,9 +232,37 @@ return function(mock)
 	extra["Humanoid.GetAppliedDescription"] = function()
 		return Instance.new("HumanoidDescription")
 	end
+	extra["HumanoidDescription.SetAccessories"] = function(self, accessories)
+		rawget(self, "_props")._accessories = accessories
+	end
+	extra["HumanoidDescription.GetAccessories"] = function(self)
+		return rawget(self, "_props")._accessories or {}
+	end
+	-- Comme dans Roblox : reconstruit les articulations, dont le cou (Motor6D "Neck" dans la tête).
+	extra["Humanoid.BuildRigFromAttachments"] = function(self)
+		local character = self.Parent
+		local head = character and character:FindFirstChild("Head")
+		if head and head:FindFirstChild("Neck") == nil then
+			local neck = Instance.new("Motor6D")
+			neck.Name = "Neck"
+			neck.Parent = head
+		end
+	end
 	extra["Humanoid.ApplyDescription"] = function() end
 	extra["Humanoid.ApplyDescriptionAsync"] = function() end
-	extra["Humanoid.ReplaceBodyPartR15"] = function()
+	-- Comme dans Roblox : la nouvelle pièce prend la place (et le nom) de l'ancienne dans le personnage.
+	extra["Humanoid.ReplaceBodyPartR15"] = function(self, bodyPart, part)
+		local character = self.Parent
+		if character == nil or part == nil then
+			return false
+		end
+		local name = tostring(bodyPart):match("([^%.]+)$") or "Head"
+		local old = character:FindFirstChild(name)
+		if old and old ~= part then
+			old.Parent = nil
+		end
+		part.Name = name
+		part.Parent = character
 		return true
 	end
 	extra["Humanoid.LoadAnimation"] = function(self, animation)
