@@ -55,10 +55,20 @@ function RemoteFolder.new(folderName: string): RemoteFolder
 	return setmetatable(data, RemoteFolder)
 end
 
+-- Enfant `name` de la bonne classe (un homonyme d'une autre classe est ignoré).
+local function findTyped(folder: Instance, className: string, name: string): Instance?
+	for _, child in folder:GetChildren() do
+		if child.Name == name and child.ClassName == className then
+			return child
+		end
+	end
+	return nil
+end
+
 local function getOrCreate(self: RemoteFolder, className: string, name: string): Instance
 	if IS_SERVER then
-		local existing = self._folder:FindFirstChild(name)
-		if existing and existing.ClassName == className then
+		local existing = findTyped(self._folder, className, name)
+		if existing then
 			return existing
 		end
 		local remote = Instance.new(className)
@@ -66,7 +76,20 @@ local function getOrCreate(self: RemoteFolder, className: string, name: string):
 		remote.Parent = self._folder
 		return remote
 	end
-	return waitForChildWarned(self._folder, name)
+	local child = waitForChildWarned(self._folder, name)
+	if child.ClassName ~= className then
+		-- Un homonyme d'une autre classe est arrivé en premier : on attend le bon.
+		local deadline = os.clock() + CLIENT_WAIT_TIMEOUT
+		repeat
+			task.wait(0.1)
+			local typed = findTyped(self._folder, className, name)
+			if typed then
+				return typed
+			end
+		until os.clock() > deadline
+		warn(`[Net] {self._folder:GetFullName()}.{name} n'est pas un {className}`)
+	end
+	return child
 end
 
 function RemoteFolder.event(self: RemoteFolder, name: string): RemoteEvent

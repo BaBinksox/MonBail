@@ -246,4 +246,9 @@ function TimeLoopService.isRewinding(): boolean
 	return session:isRewinding()
 end
 
+-- true si la timeline à laquelle appartient `player` est en train d'être rembobinée.
+function TimeLoopService.isRewindingFor(_player: Player): boolean
+	return session:isRewinding()
+end
+
 return TimeLoopService

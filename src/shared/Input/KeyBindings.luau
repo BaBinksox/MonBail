@@ -34,7 +34,8 @@ local BINDINGS: { [string]: Binding } = {
 	Grimoire = {
 		letter = "J",
 		fallbackKeyCode = Enum.KeyCode.J,
-		gamepad = Enum.KeyCode.ButtonSelect,
+		-- Pas ButtonSelect : Roblox l'utilise déjà pour la navigation des interfaces à la manette.
+		gamepad = Enum.KeyCode.DPadUp,
 		label = "Grimoire",
 	},
 	Interact = {

@@ -48,7 +48,7 @@ Il ne décrit pas l'état du prototype de départ : l'inventaire réel est dans 
 - Communication serveur → client de l'état du joueur par **StateSync** (voir §4). Pas de RemoteEvent ad hoc
   par service pour la progression.
 - Attributs répliqués : ils servent aux états visibles. Les seuls attributs posés par le serveur sur le Player
-  sont `Tension`, `InnateMagic`, `Customizing`, `Region`, `AdventurerRank`, `GuildName`, `GuildRole` et
+  sont `Tension`, `InnateMagic`, `IsCustomizing`, `Region`, `AdventurerRank`, `GuildName`, `GuildRole` et
   `PartyId`. Un client ne peut pas modifier ce que le serveur voit.
 - UI : construite par code (ScreenGui créés par les LocalScripts). On utilise des tailles **Scale** avec
   `UISizeConstraint` / `UIAspectRatioConstraint` / `UIScale`, et les styles de `Client/UI/Theme`.
