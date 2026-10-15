@@ -299,8 +299,79 @@ return function(mock)
 	extra["*.GetServerTimeNow"] = function()
 		return BASE_TIME + now
 	end
-	extra["*.Raycast"] = function()
-		return nil
+	-- Raycast : désactivé par défaut (nil), comme avant. Avec R.realRaycast = true, rayon réel contre
+	-- les Parts du Workspace (boîtes orientées, méthode des dalles) et, si R.terrainHeight(x, z) est
+	-- fourni, contre la surface du terrain. Respecte FilterDescendantsInstances (Exclude / Include),
+	-- RespectCanCollide et CanQuery.
+	R.realRaycast = false
+	R.terrainHeight = nil
+	local function isInside(inst, list)
+		for _, ancestor in ipairs(list or {}) do
+			if inst == ancestor or inst:IsDescendantOf(ancestor) then
+				return true
+			end
+		end
+		return false
+	end
+	local function intersectBox(part, origin, direction)
+		local cf = part.CFrame
+		local inv = cf:Inverse()
+		local o = inv * origin
+		local d = inv:VectorToWorldSpace(direction)
+		local half = part.Size / 2
+		local tMin, tMax = 0, 1
+		for _, axis in ipairs({ "X", "Y", "Z" }) do
+			local oa, da, h = o[axis], d[axis], half[axis]
+			if math.abs(da) < 1e-9 then
+				if oa < -h or oa > h then
+					return nil
+				end
+			else
+				local t1, t2 = (-h - oa) / da, (h - oa) / da
+				if t1 > t2 then
+					t1, t2 = t2, t1
+				end
+				tMin = math.max(tMin, t1)
+				tMax = math.min(tMax, t2)
+				if tMin > tMax then
+					return nil
+				end
+			end
+		end
+		return tMin
+	end
+	extra["*.Raycast"] = function(self, origin, direction, raycastParams)
+		if not R.realRaycast then
+			return nil
+		end
+		local filter = raycastParams and raycastParams.FilterDescendantsInstances or {}
+		local include = raycastParams and raycastParams.FilterType == mock.Enum.RaycastFilterType.Include
+		local respect = raycastParams and raycastParams.RespectCanCollide == true
+		local bestT, bestPart = math.huge, nil
+		for _, d in ipairs(workspace:GetDescendants()) do
+			if d:IsA("BasePart") and d.CanQuery ~= false and (not respect or d.CanCollide ~= false) then
+				local filtered = isInside(d, filter)
+				if (include and filtered) or (not include and not filtered) then
+					local t = intersectBox(d, origin, direction)
+					if t and t < bestT then
+						bestT, bestPart = t, d
+					end
+				end
+			end
+		end
+		if R.terrainHeight and direction.Y < 0 and not include then
+			local h = R.terrainHeight(origin.X, origin.Z)
+			if h and origin.Y >= h then
+				local t = (origin.Y - h) / -direction.Y
+				if t <= 1 and t < bestT then
+					bestT, bestPart = t, workspace:FindFirstChildOfClass("Terrain") or workspace
+				end
+			end
+		end
+		if bestPart == nil then
+			return nil
+		end
+		return { Instance = bestPart, Position = origin + direction * bestT, Normal = mock.Vector3.new(0, 1, 0), Distance = direction.Magnitude * bestT, Material = mock.Enum.Material.Plastic }
 	end
 	extra["*.GetPartBoundsInBox"] = function()
 		return {}
@@ -349,11 +420,20 @@ return function(mock)
 		root.Size = mock.Vector3.new(2, 2, 1)
 		root.CFrame = cframe or mock.CFrame.new(0, 3, 0)
 		root.Parent = model
+		-- Silhouette R15 simplifiée : HipHeight 2, pieds 3 studs sous le centre du RootPart.
+		local offsets = {
+			Head = mock.Vector3.new(0, 2.5, 0),
+			UpperTorso = mock.Vector3.new(0, 0.6, 0),
+			RightHand = mock.Vector3.new(1.5, -0.6, 0),
+			LeftHand = mock.Vector3.new(-1.5, -0.6, 0),
+			LeftFoot = mock.Vector3.new(-0.5, -2.5, 0),
+			RightFoot = mock.Vector3.new(0.5, -2.5, 0),
+		}
 		for _, partName in ipairs({ "Head", "UpperTorso", "RightHand", "LeftHand", "LeftFoot", "RightFoot" }) do
 			local p = Instance.new("Part")
 			p.Name = partName
 			p.Size = mock.Vector3.new(1, 1, 1)
-			p.CFrame = root.CFrame
+			p.CFrame = root.CFrame * mock.CFrame.new(offsets[partName])
 			p.Parent = model
 			local att = Instance.new("Attachment")
 			att.Name = partName == "RightHand" and "RightGripAttachment" or (partName .. "Attachment")

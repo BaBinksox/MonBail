@@ -368,6 +368,30 @@ local function play(cameraCFrame: CFrame, focus: Vector3, regionName: string)
 	end)
 end
 
+-- Le serveur vient de poser le personnage debout au belvédère ; c'est ce client qui simule sa
+-- physique : on efface toute vitesse héritée et on le relève s'il était couché ou assis.
+local LYING_STATES: { [Enum.HumanoidStateType]: boolean } = {
+	[Enum.HumanoidStateType.FallingDown] = true,
+	[Enum.HumanoidStateType.Ragdoll] = true,
+	[Enum.HumanoidStateType.Physics] = true,
+	[Enum.HumanoidStateType.PlatformStanding] = true,
+	[Enum.HumanoidStateType.Seated] = true,
+}
+local function settleCharacter()
+	local humanoid = getHumanoid()
+	local root = humanoid and humanoid.RootPart
+	if humanoid == nil or root == nil then
+		return
+	end
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
+	humanoid.PlatformStand = false
+	humanoid.Sit = false
+	if LYING_STATES[humanoid:GetState()] then
+		humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+	end
+end
+
 local function onArrivalCinematic(cameraCFrame: any, focus: any, regionName: any)
 	if typeof(cameraCFrame) ~= "CFrame" or typeof(focus) ~= "Vector3" then
 		warn("[Arrival] ArrivalCinematic reçu avec des paramètres invalides : ignoré")
@@ -378,6 +402,7 @@ local function onArrivalCinematic(cameraCFrame: any, focus: any, regionName: any
 	end
 	pendingCloseToken = nil -- la fermeture en attente est servie : pas de repli
 	isPlaying = true
+	settleCharacter()
 	CreatorSession.setArrivalBusy(true)
 
 	local name = if type(regionName) == "string" then regionName else ""

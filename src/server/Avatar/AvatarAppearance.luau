@@ -14,6 +14,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local AvatarConfig = require(ReplicatedStorage.Shared.Avatar.AvatarConfig)
 
+local CharacterPlacement = require(script.Parent.Parent.Core.CharacterPlacement)
+
 type Selection = AvatarConfig.Selection
 
 -- Tête classique de Roblox : un bloc 2x1x1 arrondi par un SpecialMesh.
@@ -278,6 +280,10 @@ function AvatarAppearance.apply(character: Model, selection: Selection): boolean
 	if not isApplied then
 		warn(`[Avatar] Apparence non appliquée pour {character.Name} (ID d'asset invalide ?) : {errorMessage}`)
 	end
+	-- HipHeight calculé par la mise à l'échelle de Roblox pour ce corps : BuildRigFromAttachments
+	-- (tête classique, ci-dessous) peut le recalculer de travers, et le Humanoid se tiendrait alors
+	-- avec les jambes dans le sol. On le rétablit après l'échange de tête.
+	local expectedHipHeight = humanoid.HipHeight
 
 	-- Après ApplyDescription (qui peut remettre une tête animée), et à l'abri d'une erreur :
 	-- un visage raté ne doit pas empêcher la suite (recalage au sol, fermeture du Hub).
@@ -287,6 +293,7 @@ function AvatarAppearance.apply(character: Model, selection: Selection): boolean
 	if not isFaceApplied then
 		warn(`[Avatar] Visage non appliqué pour {character.Name} : {faceError}`)
 	end
+	CharacterPlacement.repairHipHeight(character, expectedHipHeight)
 
 	return isApplied
 end

@@ -183,7 +183,19 @@ local function measureSubject(kind: "body" | "head"): Subject?
 		}
 	end
 
+	-- Pieds réels (pas HipHeight, qui peut être faux juste après la reconstruction du rig) : le plan
+	-- plein pied cadre le corps entier, semelles comprises.
 	local feetY = rootPosition.Y - rootPart.Size.Y / 2 - humanoid.HipHeight
+	local measuredFeet = math.huge
+	for _, name in { "LeftFoot", "RightFoot", "Left Leg", "Right Leg" } do
+		local foot = character:FindFirstChild(name)
+		if foot and foot:IsA("BasePart") then
+			measuredFeet = math.min(measuredFeet, foot.Position.Y - foot.Size.Y / 2)
+		end
+	end
+	if measuredFeet < math.huge then
+		feetY = measuredFeet
+	end
 	local topY = headPosition.Y + headHeight / 2 + HAIR_ALLOWANCE
 	local height = math.max(topY - feetY, 2)
 	return {

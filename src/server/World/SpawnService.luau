@@ -20,6 +20,7 @@ local RegionConfig = require(ReplicatedStorage.Shared.World.RegionConfig)
 local SpawnRemotes = require(ReplicatedStorage.Shared.World.SpawnRemotes)
 
 local AvatarService = require(script.Parent.Parent.Avatar.AvatarService)
+local CharacterPlacement = require(script.Parent.Parent.Core.CharacterPlacement)
 local ProfileStore = require(script.Parent.Parent.Data.ProfileStore)
 local WorldAnchors = require(script.Parent.WorldAnchors)
 
@@ -38,10 +39,12 @@ local function streamAround(player: Player, position: Vector3)
 	end)
 end
 
+-- Pose le personnage debout sur le sol réel sous l'ancre (proportions, vitesse et état du Humanoid
+-- pris en compte : voir CharacterPlacement), après avoir chargé la zone chez le client.
 local function placeCharacter(player: Player, character: Model, target: CFrame)
 	streamAround(player, target.Position)
 	if character.Parent then
-		character:PivotTo(target)
+		CharacterPlacement.place(character, target)
 	end
 end
 

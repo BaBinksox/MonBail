@@ -24,6 +24,7 @@ local MagicConfig = require(ReplicatedStorage.Shared.Magic.MagicConfig)
 local Remotes = require(ReplicatedStorage.Shared.Avatar.AvatarRemotes)
 
 local AnchorService = require(script.Parent.Parent.Core.AnchorService)
+local CharacterPlacement = require(script.Parent.Parent.Core.CharacterPlacement)
 local AvatarAppearance = require(script.Parent.AvatarAppearance)
 local AvatarSerializer = require(script.Parent.AvatarSerializer)
 local ProfileStore = require(script.Parent.Parent.Data.ProfileStore)
@@ -44,7 +45,6 @@ type PlayerState = {
 	pendingSelection: Selection?,
 }
 
-local GROUND_RAY_LENGTH = 50
 local HUB_ANCHOR_REASON = "hub" -- ancrage compté : ne se mélange pas au rewind ni à l'anomalie
 
 local AvatarService = {}
@@ -82,11 +82,14 @@ end
 -- son RootPart pour que ses pieds restent posés (sinon ils s'enfoncent ou flottent).
 local function snapToGround(state: PlayerState, humanoid: Humanoid)
 	local rootPart, groundY = state.frozenRootPart, state.groundY
-	if rootPart == nil or groundY == nil or humanoid.RigType ~= Enum.HumanoidRigType.R15 then
+	local character = humanoid.Parent
+	if rootPart == nil or groundY == nil or character == nil or not character:IsA("Model") then
 		return
 	end
 
-	local standingY = groundY + humanoid.HipHeight + rootPart.Size.Y / 2
+	-- Hauteur mesurée sur les pieds (HipHeight seulement en secours) : un HipHeight recalculé de
+	-- travers après la reconstruction du rig enterrait le personnage dans la plateforme.
+	local standingY = groundY + CharacterPlacement.getRootHeight(character) + 0.05
 	rootPart.CFrame += Vector3.new(0, standingY - rootPart.Position.Y, 0)
 end
 
@@ -97,13 +100,11 @@ local function freeze(state: PlayerState, character: Model)
 		return
 	end
 
-	local raycastParams = RaycastParams.new()
-	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-	raycastParams.FilterDescendantsInstances = { character }
-	local ground = workspace:Raycast(rootPart.Position, Vector3.new(0, -GROUND_RAY_LENGTH, 0), raycastParams)
+	-- Sol praticable sous le personnage (CanCollide respecté : ni marqueur, ni décor, ni autre joueur).
+	local ground = CharacterPlacement.findGround(rootPart.Position, { character })
 
 	state.frozenRootPart = rootPart
-	state.groundY = if ground then ground.Position.Y else nil
+	state.groundY = if ground then ground.Y else nil
 
 	AnchorService.hold(rootPart, HUB_ANCHOR_REASON)
 	snapToGround(state, humanoid)
@@ -141,9 +142,11 @@ local function closeCreator(player: Player, state: PlayerState)
 	state.isCustomizing = false
 	state.isConfirmPending = false
 	player:SetAttribute(AvatarConfig.CUSTOMIZING_ATTRIBUTE, false)
-	unfreeze(state)
 	Remotes.CreatorClosed:FireClient(player)
+	-- Le personnage est emmené au belvédère ENCORE figé (SpawnService), puis libéré sur place : il ne
+	-- passe aucune image en chute libre entre la scène du créateur et son point d'arrivée.
 	AvatarService.CreatorConfirmed:Fire(player)
+	unfreeze(state)
 end
 
 -- Applique les demandes en attente une par une. Si plusieurs aperçus arrivent pendant un
