@@ -331,8 +331,16 @@ local function buildWell(context: Context, folder: Instance, random: Random)
 	local coverCFrame = CFrame.new(w.X, top + 0.4, w.Z)
 	local cover = Kit.model(context.dynamic, "WellCover", coverCFrame)
 	local slab = Kit.part(cover, coverCFrame, Vector3.new(9.2, 0.8, 9.2), Palette.stone, { name = "Slab" })
-	Kit.part(cover, coverCFrame * CFrame.new(0, 0.42, 0), Vector3.new(5, 0.06, 5), Palette.temporalCyanDim, { decor = true, name = "Seal", transparency = 0.3 })
-	Kit.part(cover, coverCFrame * CFrame.new(0, 0.43, 0) * CFrame.Angles(0, math.rad(45), 0), Vector3.new(3.4, 0.07, 3.4), Palette.stoneDark, { decor = true })
+	-- Sceau gravé dans la pierre (et non un panneau lumineux) : un anneau creusé, quatre traits vers
+	-- les runes du puits, et l'heure arrêtée au centre, à peine teintée du froid du temps.
+	local engraving = Palette.darken(Palette.stone, 0.62)
+	Kit.column(cover, coverCFrame * CFrame.new(0, 0.38, 0), 0.06, 6.4, engraving, { decor = true, name = "SealRing" })
+	Kit.column(cover, coverCFrame * CFrame.new(0, 0.39, 0), 0.06, 5.8, Palette.stone, { decor = true, name = "SealInner" })
+	for i = 0, 3 do
+		local groove = coverCFrame * CFrame.Angles(0, math.rad(i * 90), 0) * CFrame.new(0, 0.41, -3.6)
+		Kit.part(cover, groove, Vector3.new(0.18, 0.04, 1.4), engraving, { decor = true, name = "SealGroove" })
+	end
+	Kit.column(cover, coverCFrame * CFrame.new(0, 0.4, 0), 0.05, 1.4, Palette.tint(Palette.stoneDark, Color3.fromRGB(58, 74, 80)), { decor = true, name = "SealHeart" })
 	cover.PrimaryPart = slab
 	Kit.dynamic(context.dynamic, cover, "well_cover")
 	local openPoint = Kit.ringPoint(Vector3.new(w.X, top + 0.4, w.Z), COVER_OPEN_DISTANCE, COVER_OPEN_ANGLE)

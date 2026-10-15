@@ -86,7 +86,7 @@ function PropsNature.deadTree(parent: Instance, base: CFrame, height: number, ra
 	for s = 1, segments do
 		local segLength = (height + 1) / segments
 		local nextPoint = point + dir * segLength
-		Kit.rod(model, point, nextPoint, d, look, { collide = opts.collide ~= false, name = "Trunk" })
+		Kit.rod(model, point, nextPoint, d, look, { decor = true, shadow = true, name = "Trunk" })
 		table.insert(trunkPoints, nextPoint)
 		point = nextPoint
 		dir = bend(dir, random, 16)
@@ -101,6 +101,13 @@ function PropsNature.deadTree(parent: Instance, base: CFrame, height: number, ra
 		local angle = (b / branchCount) * math.pi * 2 + random:NextNumber(-0.6, 0.6)
 		local outward = Vector3.new(math.cos(angle), random:NextNumber(0.25, 0.9), math.sin(angle)).Unit
 		growBranch(model, origin, outward, height * random:NextNumber(0.3, 0.5), trunkDiameter * 0.45, random, look, 0)
+	end
+
+	-- Collision : une colonne droite au pied du tronc (le tronc penché et ses segments sont du décor :
+	-- un cylindre incliné qui sort du sol projetait le joueur qui marchait dessus).
+	if opts.collide ~= false then
+		local colliderHeight = math.min(height * 0.6, 9)
+		Kit.collider(model, base * CFrame.new(0, colliderHeight / 2 - 0.5, 0), Vector3.new(trunkDiameter * 0.9, colliderHeight + 1, trunkDiameter * 0.9), "TrunkCollider")
 	end
 
 	-- Racines qui s'agrippent au sol.
@@ -132,11 +139,17 @@ function PropsNature.rock(parent: Instance, base: CFrame, size: Vector3, random:
 		local tilt = CFrame.Angles(math.rad(random:NextNumber(-18, 18)), math.rad(random:NextNumber(0, 360)), math.rad(random:NextNumber(-18, 18)))
 		local cframe = base * CFrame.new(offset.X, pieceSize.Y * 0.32, offset.Z) * tilt
 		local shade = Palette.darken(rockLook, random:NextNumber(0.85, 1.1))
+		-- Les morceaux inclinés sont du décor : leurs arêtes à demi enterrées projetaient les joueurs.
 		if random:NextNumber() < 0.35 and i > 1 then
-			Kit.wedge(model, cframe, pieceSize, shade, { decor = small })
+			Kit.wedge(model, cframe, pieceSize, shade, { decor = true, shadow = not small })
 		else
-			Kit.part(model, cframe, pieceSize, shade, { decor = small })
+			Kit.part(model, cframe, pieceSize, shade, { decor = true, shadow = not small })
 		end
+	end
+	if not small then
+		-- Collision : un bloc droit, un peu plus petit que le rocher, enfoncé dans le sol.
+		local height = size.Y * 0.75
+		Kit.collider(model, base * CFrame.new(0, height / 2 - 0.5, 0), Vector3.new(size.X * 0.8, height + 1, size.Z * 0.8), "RockCollider")
 	end
 	return model
 end
@@ -184,7 +197,14 @@ end
 function PropsNature.log(parent: Instance, from: Vector3, to: Vector3, diameter: number, look: Look?): Model
 	local model = Kit.model(parent, "Log", CFrame.new((from + to) / 2))
 	local lift = Vector3.new(0, diameter * 0.4, 0)
-	Kit.rod(model, from + lift, to + lift, diameter, look or Palette.deadTreeDark)
+	Kit.rod(model, from + lift, to + lift, diameter, look or Palette.deadTreeDark, { decor = true, shadow = true })
+	-- Collision : bloc à dessus plat (on l'enjambe ou on monte dessus sans être éjecté).
+	local flat = Vector3.new(to.X - from.X, 0, to.Z - from.Z)
+	if flat.Magnitude > 0.1 then
+		local middle = (from + to) / 2 + Vector3.new(0, diameter * 0.4, 0)
+		local frame = CFrame.lookAt(middle, middle + flat)
+		Kit.collider(model, frame, Vector3.new(diameter * 0.85, diameter * 0.85, flat.Magnitude), "LogCollider")
+	end
 	return model
 end
 

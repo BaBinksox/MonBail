@@ -207,7 +207,7 @@ function PropsSacred.hourglass(parent: Instance, base: CFrame, height: number, o
 	local h = height
 	local stone = opts.look or Palette.stone
 	local model = Kit.model(parent, "Hourglass", base)
-	Kit.column(model, base, h * 0.08, h * 0.6, stone, { name = "Foot" })
+	Kit.column(model, base, h * 0.08, h * 0.6, stone, { decor = true, name = "Foot" })
 	Kit.column(model, base * CFrame.new(0, h * 0.92, 0), h * 0.08, h * 0.6, stone, DECOR)
 	for i = 0, 2 do
 		local degrees = 90 + i * 120

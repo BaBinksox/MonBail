@@ -299,6 +299,23 @@ local function dressWindows(parent: Instance, frame: CFrame, openings: { Opening
 	end
 end
 
+-- Barreaux de fer dans les fenêtres sans vitre (rez-de-chaussée) : on voit l'intérieur, on n'y entre
+-- pas. La collision vient du comblement intérieur de la maison (InteriorBlock), les barreaux disent
+-- pourquoi au joueur.
+local function barWindows(parent: Instance, frame: CFrame, openings: { Opening })
+	for _, o in openings do
+		if o.kind == "window" then
+			local cx, cy = (o.x0 + o.x1) / 2, (o.y0 + o.y1) / 2
+			local w, h = o.x1 - o.x0, o.y1 - o.y0
+			for i = 1, 3 do
+				local x = o.x0 + w * i / 4
+				Kit.part(parent, frame * CFrame.new(x, cy, -0.05), Vector3.new(0.16, h, 0.16), Palette.iron, { decor = true, name = "WindowBar" })
+			end
+			Kit.part(parent, frame * CFrame.new(cx, cy, -0.05), Vector3.new(w, 0.14, 0.14), Palette.iron, { decor = true, name = "WindowBar" })
+		end
+	end
+end
+
 --[[
 	Maison à colombages paramétrée. ~40 à 90 Parts selon l'état.
 	intact    : toit complet, porte fermée, fenêtres (éventuellement éclairées) ;
@@ -356,6 +373,17 @@ function PropsBuildings.house(parent: Instance, base: CFrame, random: Random, op
 	PropsBuildings.panelWall(model, leftFrame, depth - 2 * t, h1, table.clone(sideWindows), wallLook, timber, wallOptions)
 	PropsBuildings.panelWall(model, rightFrame, depth - 2 * t, h1, table.clone(sideWindows), wallLook, timber, wallOptions)
 	dressWindows(model, frontFrame, front, state, lit, random)
+	if state ~= "collapsed" then
+		-- Les maisons ne se visitent pas : intérieur comblé par un volume invisible (on ne passe ni
+		-- par une fenêtre ni par une porte arrachée), barreaux aux fenêtres sans vitre chaude.
+		Kit.collider(model, floorFrame * CFrame.new(0, h1 / 2, 0), Vector3.new(width - 2 * t - 0.05, h1, depth - 2 * t - 0.05), "InteriorBlock")
+		if not (lit and state == "intact") then
+			barWindows(model, frontFrame, front)
+		end
+		barWindows(model, backFrame, backWindows)
+		barWindows(model, leftFrame, sideWindows)
+		barWindows(model, rightFrame, sideWindows)
+	end
 
 	-- Porte.
 	local doorFrame = frontFrame * CFrame.new(doorX, 0, 0)
@@ -367,6 +395,13 @@ function PropsBuildings.house(parent: Instance, base: CFrame, random: Random, op
 	elseif state == "damaged" and random:NextNumber() < 0.6 then
 		local hinge = doorFrame * CFrame.new(-1.9, 0, -0.2) * CFrame.Angles(0, math.rad(random:NextNumber(55, 100)), 0)
 		Kit.part(model, hinge * CFrame.new(1.9, 3.5, 0) * CFrame.Angles(0, 0, math.rad(4)), Vector3.new(3.8, 6.8, 0.35), Palette.burntWood, DECOR)
+	end
+	if state == "damaged" then
+		-- Porte condamnée : planches clouées en travers de l'embrasure.
+		for i, y in { 1.6, 3.6, 5.4 } do
+			local tilt = if i == 2 then -9 else 7
+			Kit.part(model, doorFrame * CFrame.new(0, y, -0.5) * CFrame.Angles(0, 0, math.rad(tilt)), Vector3.new(4.4, 0.5, 0.18), Palette.burntWood, { decor = true, name = "Boards" })
+		end
 	end
 
 	local wallTop = plinth + h1
@@ -388,6 +423,7 @@ function PropsBuildings.house(parent: Instance, base: CFrame, random: Random, op
 		PropsBuildings.panelWall(model, upperFrame * CFrame.new(0, 0, roofDepth / 2 - t / 2) * CFrame.Angles(0, math.pi, 0), width, h2, {}, upperLook, timber, upperOptions)
 		PropsBuildings.panelWall(model, upperFrame * CFrame.new(-width / 2 + t / 2, 0, 0) * CFrame.Angles(0, math.rad(90), 0), roofDepth - 2 * t, h2, {}, upperLook, timber, upperOptions)
 		PropsBuildings.panelWall(model, upperFrame * CFrame.new(width / 2 - t / 2, 0, 0) * CFrame.Angles(0, math.rad(-90), 0), roofDepth - 2 * t, h2, {}, upperLook, timber, upperOptions)
+		Kit.collider(model, upperFrame * CFrame.new(0, h2 / 2, 0), Vector3.new(width - 2 * t - 0.05, h2, roofDepth - 2 * t - 0.05), "InteriorBlock")
 		dressWindows(model, upperFront, frontUpper, state, lit, random)
 		-- Consoles sous l'encorbellement.
 		for _, x in { -width / 2 + 1, width / 2 - 1 } do

@@ -373,6 +373,11 @@ return function(mock)
 		end
 		return { Instance = bestPart, Position = origin + direction * bestT, Normal = mock.Vector3.new(0, 1, 0), Distance = direction.Magnitude * bestT, Material = mock.Enum.Material.Plastic }
 	end
+	extra["*.RegisterCollisionGroup"] = function() end
+	extra["*.IsCollisionGroupRegistered"] = function()
+		return false
+	end
+	extra["*.CollisionGroupSetCollidable"] = function() end
 	extra["*.GetPartBoundsInBox"] = function()
 		return {}
 	end

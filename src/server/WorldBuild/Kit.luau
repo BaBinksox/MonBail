@@ -226,6 +226,17 @@ local function finishPart(part: BasePart, parent: Instance, cframe: CFrame, size
 	stats.parts += 1
 end
 
+--[[
+	Volume de collision INVISIBLE, droit et lisse (aucune inclinaison) : il remplace la collision
+	d'un décor irrégulier (rocher, tronc, cylindre couché) dont les arêtes inclinées et à demi
+	enterrées pourraient projeter un Humanoid. Le décor visible devient alors `decor = true`.
+]]
+function Kit.collider(parent: Instance, cframe: CFrame, size: Vector3, name: string?): Part
+	local part = Instance.new("Part")
+	finishPart(part, parent, cframe, size, Palette.stoneDark, { transparency = 1, collide = true, query = true, shadow = false, name = name or "Collider" })
+	return part
+end
+
 -- Bloc. `cframe` = centre du bloc (LOCAL).
 function Kit.part(parent: Instance, cframe: CFrame, size: Vector3, look: Look, options: PartOptions?): Part
 	local part = Instance.new("Part")

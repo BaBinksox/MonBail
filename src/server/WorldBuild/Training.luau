@@ -73,11 +73,11 @@ local function buildArena(context: Context, folder: Instance, random: Random)
 	local floorTop = a.Y + 0.3
 	-- Dallage de basalte, anneau gravé (cyan éteint : l'anomalie du temps s'y réveille), rosace.
 	Kit.column(model, CFrame.new(a.X, a.Y - 0.6, a.Z), 0.9, r * 2 - 2, Palette.basalt, { name = "Floor" })
-	Kit.column(model, CFrame.new(a.X, floorTop - 0.01, a.Z), 0.05, r * 1.2, Palette.temporalCyanDim, { decor = true, transparency = 0.5, name = "TimeRing" })
-	Kit.column(model, CFrame.new(a.X, floorTop, a.Z), 0.06, r * 1.2 - 1.2, Palette.basalt, { decor = true, name = "TimeRingInner" })
+	Kit.column(model, CFrame.new(a.X, floorTop + 0.02, a.Z), 0.05, r * 1.2, Palette.temporalInlay, { decor = true, name = "TimeRing" })
+	Kit.column(model, CFrame.new(a.X, floorTop + 0.03, a.Z), 0.06, r * 1.2 - 1.2, Palette.basalt, { decor = true, name = "TimeRingInner" })
 	for i = 0, 7 do
 		local cf = Kit.radial(Vector3.new(a.X, floorTop + 0.02, a.Z), r * 0.32, i * 45)
-		Kit.part(model, cf, Vector3.new(r * 0.5, 0.04, 0.5), Palette.temporalCyanDim, { decor = true, transparency = 0.4, name = "Spoke" })
+		Kit.part(model, cf + Vector3.new(0, 0.04, 0), Vector3.new(r * 0.5, 0.04, 0.5), Palette.temporalInlay, { decor = true, name = "Spoke" })
 	end
 	-- Piliers brisés en anneau (l'entrée, à l'ouest, reste dégagée).
 	for i = 0, ARENA_PILLARS - 1 do

@@ -170,6 +170,61 @@ local function applyDynamic(dynamicId: string, state: DynamicState, isActive: bo
 	end
 end
 
+--[[
+	Un objet qui redevient solide ou revient à sa place (voile, mur, dalle, herse, bloc) ne doit
+	jamais se refermer SUR un joueur : la dépénétration du moteur l'éjecterait comme une attaque.
+	On regarde s'il y a un personnage dans la boîte de l'objet, à sa position actuelle et à sa
+	position de retour (agrandie vers le haut : quelqu'un debout dessus compte aussi).
+]]
+local OCCUPANCY_MARGIN = Vector3.new(1, 4, 1)
+local CLOSE_RETRY_DELAY = 1
+local CLOSE_MAX_WAIT = 30
+
+local function boxOf(instance: Instance): (CFrame?, Vector3?)
+	if instance:IsA("BasePart") then
+		return instance.CFrame, instance.Size
+	elseif instance:IsA("Model") then
+		return instance:GetBoundingBox()
+	end
+	return nil, nil
+end
+
+local function isBoxOccupied(cframe: CFrame, size: Vector3): boolean
+	local characters = {}
+	for _, player in Players:GetPlayers() do
+		if player.Character then
+			table.insert(characters, player.Character)
+		end
+	end
+	if #characters == 0 then
+		return false
+	end
+	local params = OverlapParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = characters
+	return #workspace:GetPartBoundsInBox(cframe * CFrame.new(0, OCCUPANCY_MARGIN.Y / 2, 0), size + OCCUPANCY_MARGIN, params) > 0
+end
+
+local function isClosingBlocked(dynamicId: string, state: DynamicState): boolean
+	local rule = MechanismConfig.DYNAMICS[dynamicId]
+	if rule == nil or (rule.states ~= "toggle_collide" and rule.states ~= "slide") then
+		return false
+	end
+	local cframe, size = boxOf(state.instance)
+	if cframe == nil or size == nil then
+		return false
+	end
+	if isBoxOccupied(cframe, size) then
+		return true
+	end
+	local closed = state.closedPivot
+	if rule.states == "slide" and closed and state.instance:IsA("PVInstance") then
+		local atClosed = closed * state.instance:GetPivot():Inverse() * cframe
+		return isBoxOccupied(atClosed, size)
+	end
+	return false
+end
+
 -- Active l'objet dynamique `dynamicId` pendant `duration` s (prolonge une activation en cours).
 local function activateDynamic(dynamicId: string, duration: number)
 	local state = getDynamic(dynamicId)
@@ -180,11 +235,38 @@ local function activateDynamic(dynamicId: string, duration: number)
 	state.token += 1
 	local token = state.token
 	if not state.isActive then
+		local rule = MechanismConfig.DYNAMICS[dynamicId]
+		local target: CFrame? = nil
+		if rule and rule.states == "slide" and state.instance:IsA("PVInstance") then
+			local cframe, size = boxOf(state.instance)
+			local openCFrame = WorldAnchors.getCFrame(`{dynamicId}_open`)
+			if cframe and size and openCFrame then
+				target = openCFrame * state.instance:GetPivot():Inverse() * cframe
+			end
+		elseif rule and rule.states == "appear" then
+			target = boxOf(state.instance)
+		end
+		if target then
+			-- Un objet qui devient solide (pont, glace) ou glisse vers sa place (bloc, dalle) attend
+			-- quelques instants qu'aucun joueur ne s'y trouve, puis apparaît quand même au-dessus.
+			local _, size = boxOf(state.instance)
+			local waited = 0
+			while size and waited < 3 and isBoxOccupied(target, size) do
+				task.wait(0.25)
+				waited += 0.25
+			end
+		end
 		applyDynamic(dynamicId, state, true)
 	end
 	state.instance:SetAttribute(MechanismConfig.STATE_ATTRIBUTE, true)
 	state.instance:SetAttribute(MechanismConfig.STATE_UNTIL_ATTRIBUTE, workspace:GetServerTimeNow() + duration)
 	task.delay(duration, function()
+		-- Ne se referme pas sur un joueur : on attend que la place soit libre (borné).
+		local waited = 0
+		while state.token == token and state.isActive and waited < CLOSE_MAX_WAIT and isClosingBlocked(dynamicId, state) do
+			task.wait(CLOSE_RETRY_DELAY)
+			waited += CLOSE_RETRY_DELAY
+		end
 		if state.token == token and state.isActive then
 			applyDynamic(dynamicId, state, false)
 			state.instance:SetAttribute(MechanismConfig.STATE_ATTRIBUTE, false)

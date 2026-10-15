@@ -33,7 +33,7 @@ local ENEMY_SPAWNS: { [string]: EnemySpawn } = {
 }
 
 return table.freeze({
-	BUILD_VERSION = 2, -- 2 : toutes les zones (village, chapelle, crypte, entraînement, forêt, rives)
+	BUILD_VERSION = 3, -- 3 : colliders droits (rochers, troncs), maisons fermées, sceau du puits en pierre
 	SEED = 317, -- 3 h 17 : l'heure où tout s'est arrêté
 	BUILD_AT_RUNTIME_IF_MISSING = true,
 

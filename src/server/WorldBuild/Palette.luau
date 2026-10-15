@@ -102,6 +102,7 @@ local Palette = {
 	coldFlame = look(196, 210, 232, M.Neon), -- flammes froides de la crypte (blanc acier, PAS le cyan du temps)
 	temporalCyan = look(120, 230, 255, M.Neon), -- LE TEMPS : runes actives, horloges, ancres
 	temporalCyanDim = look(52, 112, 128, M.Neon), -- runes éteintes
+	temporalInlay = look(64, 96, 104, M.Slate), -- incrustation de pierre teintée (sols, cercles) : pas de lueur
 	curseViolet = look(140, 70, 210, M.ForceField), -- voile maudit
 	curseGlyph = look(150, 84, 220, M.Neon), -- glyphes de la malédiction (socle du voile)
 	stainedBlue = look(54, 74, 130, M.Glass), -- vitraux

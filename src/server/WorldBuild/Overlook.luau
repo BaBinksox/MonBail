@@ -189,8 +189,8 @@ local function buildSanctuary(context: Context, folder: Instance, random: Random
 		local center = c + Vector3.new(math.cos(a) * 6.8, -0.2, math.sin(a) * 6.8)
 		Kit.part(model, Kit.facing(center, c) * CFrame.Angles(0, 0, 0), Vector3.new(3.3, 1, 4.4), Palette.darken(Palette.stone, random:NextNumber(0.85, 1.05)))
 	end
-	Kit.column(model, CFrame.new(c + Vector3.new(0, 0.28, 0)), 0.06, 9.6, Palette.temporalCyanDim, { decor = true, transparency = 0.45, name = "TimeRing" })
-	Kit.column(model, CFrame.new(c + Vector3.new(0, 0.3, 0)), 0.06, 8.6, Palette.basalt, { decor = true, name = "TimeRingInner" })
+	Kit.column(model, CFrame.new(c + Vector3.new(0, 0.3, 0)), 0.05, 9.6, Palette.temporalInlay, { decor = true, name = "TimeRing" })
+	Kit.column(model, CFrame.new(c + Vector3.new(0, 0.31, 0)), 0.06, 8.6, Palette.basalt, { decor = true, name = "TimeRingInner" })
 
 	-- Menhirs (aucun au sud : la caméra y est placée).
 	for _, degrees in { 0, 40, -40, 80, -80, 120, -120 } do

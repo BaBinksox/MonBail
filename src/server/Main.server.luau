@@ -21,6 +21,7 @@ end
 
 -- 1. Données et progression (avant tout service qui lit un profil)
 local ProfileStore = require(Server.Data.ProfileStore)
+local CollisionGroups = require(Server.Core.CollisionGroups)
 local StateSync = require(Server.State.StateSync)
 local RewardService = require(Server.Progression.RewardService)
 local ProgressionService = require(Server.Progression.ProgressionService)
@@ -55,6 +56,7 @@ local MissionService = require(Server.Mission.MissionService)
 local PartyService = require(Server.Party.PartyService)
 local GuildService = require(Server.Guild.GuildService)
 
+startService("CollisionGroups", CollisionGroups) -- avant toute apparition : personnages et PNJ ne se poussent pas
 startService("ProfileStore", ProfileStore) -- en premier : AvatarService charge les profils dès l'arrivée des joueurs
 startService("StateSync", StateSync)
 startService("RewardService", RewardService)
