@@ -469,7 +469,7 @@ local function playEruption(caster: Model?, origin: Vector3, targets: { Model },
 	resumeAnimations()
 	tween(core, CORE_COLLAPSE_DURATION, { Size = Vector3.one * 0.1, Transparency = 1 })
 
-	spawnEruption(origin, findGroundPosition(origin, involvedCharacters), radius, palette)
+	spawnEruption(origin, findGroundPosition(origin, involvedCharacters :: { any }), radius, palette)
 
 	if intensity > 0 then
 		-- L'écran est brûlé par la couleur claire de la magie, puis revient à la normale.
@@ -501,7 +501,7 @@ local ULTIMATE_PLAYERS: { [string]: UltimatePlayer } = {}
 
 -- Joue l'ultime de `magic` (une entrée de MagicConfig.MAGICS). YIELD pendant l'arrêt sur image.
 function CombatEffects.playUltimate(caster: Model?, origin: Vector3, targets: { Model }, magic: any)
-	local play = ULTIMATE_PLAYERS[magic.id] or playEruption
+	local play: UltimatePlayer = ULTIMATE_PLAYERS[magic.id] or playEruption :: any
 	play(caster, origin, targets, magic)
 end
 

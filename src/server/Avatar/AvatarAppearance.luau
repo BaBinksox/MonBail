@@ -281,7 +281,9 @@ function AvatarAppearance.apply(character: Model, selection: Selection): boolean
 
 	-- Après ApplyDescription (qui peut remettre une tête animée), et à l'abri d'une erreur :
 	-- un visage raté ne doit pas empêcher la suite (recalage au sol, fermeture du Hub).
-	local isFaceApplied, faceError = pcall(applyFaceLayers, character, humanoid, selection)
+	local isFaceApplied, faceError = pcall(function()
+		applyFaceLayers(character, humanoid, selection)
+	end)
 	if not isFaceApplied then
 		warn(`[Avatar] Visage non appliqué pour {character.Name} : {faceError}`)
 	end

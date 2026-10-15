@@ -347,8 +347,10 @@ local function applyAppearance(model: Model, def: EnemyDef)
 	for _, emitterDef in appearance.emitters do
 		addEmitter(model, emitterDef)
 	end
-	for _, lightDef in appearance.lights or {} do
-		addLight(model, lightDef)
+	if appearance.lights then
+		for _, lightDef in appearance.lights do
+			addLight(model, lightDef)
+		end
 	end
 
 	-- Mise à l'échelle globale en dernier : décorations, soudures et HipHeight suivent.

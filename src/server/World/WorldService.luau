@@ -92,7 +92,11 @@ end
 	le monde ne redevient normal que lorsque TOUS ceux qui l'ont demandée l'ont relâchée.
 ]]
 function WorldService.setAnomaly(source: any, isActive: boolean)
-	anomalySources[source] = if isActive then true else nil
+	if isActive then
+		anomalySources[source] = true
+	else
+		anomalySources[source] = nil
+	end
 
 	local mood = if next(anomalySources) ~= nil then Config.MOODS.Anomaly else Config.MOODS.Normal
 	workspace:SetAttribute(Config.MOOD_ATTRIBUTE, mood)

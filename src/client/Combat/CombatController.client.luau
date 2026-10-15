@@ -199,7 +199,9 @@ local function onAttackInput()
 
 		-- pcall : une erreur pendant un coup ne doit pas laisser isAttacking bloqué à true.
 		local comboIndex = getNextComboIndex()
-		local isCompleted, errorMessage = pcall(performAttack, character, humanoid, rootPart, sword, comboIndex)
+		local isCompleted, errorMessage = pcall(function()
+			performAttack(character, humanoid, rootPart, sword, comboIndex)
+		end)
 		if not isCompleted then
 			humanoid.AutoRotate = true -- le soft-lock n'a peut-être pas pu rendre la rotation
 			warn(`[Combat] Coup interrompu : {errorMessage}`)

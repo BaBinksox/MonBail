@@ -603,7 +603,9 @@ local function thinkAll(now: number, dt: number)
 		if brain == nil then
 			continue
 		end
-		local isDone, message = pcall(thinkEnemy, brain, now, dt)
+		local isDone, message = pcall(function()
+			thinkEnemy(brain, now, dt)
+		end)
 		if not isDone and now - (lastErrorClock[brain] or -math.huge) >= ERROR_REPORT_INTERVAL then
 			lastErrorClock[brain] = now
 			warn(`[Enemy] Erreur d'IA ({brain.enemyId}) : {message}`)

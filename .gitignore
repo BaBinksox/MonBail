@@ -1,2 +1,3 @@
 sourcemap.json
 *.zip
+tools/sim/bundle_out.luau

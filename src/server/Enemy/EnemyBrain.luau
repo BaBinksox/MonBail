@@ -386,7 +386,10 @@ local function loadTrack(enemy: Enemy, animationId: string, isLooped: boolean): 
 	end
 	local cached = enemy.tracks[animationId]
 	if cached ~= nil then
-		return if cached then cached else nil
+		if cached == false then
+			return nil -- échec déjà constaté : sans animation
+		end
+		return cached :: AnimationTrack
 	end
 
 	local humanoid = enemy.humanoid
@@ -564,7 +567,7 @@ local function followPath(enemy: Enemy, destination: Vector3)
 	while nav.index <= #waypoints and flat(waypoints[nav.index].Position - position).Magnitude < AI.WAYPOINT_REACHED do
 		nav.index += 1
 	end
-	local waypoint = waypoints[nav.index]
+	local waypoint: PathWaypoint? = waypoints[nav.index]
 	if waypoint == nil then
 		enemy.humanoid:MoveTo(destination)
 		return
@@ -983,8 +986,8 @@ function EnemyBrain.shutdown(enemy: Enemy)
 		enemy.walkTrack:Stop(0)
 	end
 	for _, track in enemy.tracks do
-		if track then
-			track:Stop(0)
+		if typeof(track) == "Instance" then
+			(track :: AnimationTrack):Stop(0)
 		end
 	end
 	if enemy.align then
@@ -992,7 +995,9 @@ function EnemyBrain.shutdown(enemy: Enemy)
 	end
 	local cleanup = enemy.behavior.cleanup
 	if cleanup then
-		local isCleaned, message = pcall(cleanup, enemy)
+		local isCleaned, message = pcall(function()
+			cleanup(enemy)
+		end)
 		if not isCleaned then
 			warn(`[Enemy] Nettoyage du comportement {enemy.behavior.name} impossible : {message}`)
 		end

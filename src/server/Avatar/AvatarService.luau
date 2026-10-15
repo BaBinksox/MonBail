@@ -19,6 +19,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local AvatarConfig = require(ReplicatedStorage.Shared.Avatar.AvatarConfig)
+local Signal = require(ReplicatedStorage.Shared.Util.Signal)
 local MagicConfig = require(ReplicatedStorage.Shared.Magic.MagicConfig)
 local Remotes = require(ReplicatedStorage.Shared.Avatar.AvatarRemotes)
 
@@ -47,6 +48,14 @@ local GROUND_RAY_LENGTH = 50
 local HUB_ANCHOR_REASON = "hub" -- ancrage compté : ne se mélange pas au rewind ni à l'anomalie
 
 local AvatarService = {}
+
+-- CreatorConfirmed(player) : le joueur vient de valider son personnage et le Hub se ferme
+-- (SpawnService l'emmène alors au belvédère pour la cinématique d'arrivée).
+AvatarService.CreatorConfirmed = Signal.new()
+
+-- Appelé juste avant de figer un personnage pour ouvrir le Hub : permet de le placer d'abord sur la
+-- scène du créateur (SpawnService). Le gel calcule le sol sous la NOUVELLE position.
+local stagePlacer: ((player: Player, character: Model) -> ())? = nil
 
 local states: { [Player]: PlayerState } = {}
 local isStarted = false
@@ -115,6 +124,15 @@ end
 local function openCreator(player: Player, state: PlayerState, character: Model)
 	state.isCustomizing = true
 	player:SetAttribute(AvatarConfig.CUSTOMIZING_ATTRIBUTE, true)
+	if stagePlacer then
+		local placer = stagePlacer
+		local isPlaced, message = pcall(function()
+			placer(player, character)
+		end)
+		if not isPlaced then
+			warn(`[Avatar] Placement sur la scène du créateur impossible : {message}`)
+		end
+	end
 	freeze(state, character)
 	Remotes.OpenCreator:FireClient(player)
 end
@@ -125,6 +143,7 @@ local function closeCreator(player: Player, state: PlayerState)
 	player:SetAttribute(AvatarConfig.CUSTOMIZING_ATTRIBUTE, false)
 	unfreeze(state)
 	Remotes.CreatorClosed:FireClient(player)
+	AvatarService.CreatorConfirmed:Fire(player)
 end
 
 -- Applique les demandes en attente une par une. Si plusieurs aperçus arrivent pendant un
@@ -275,6 +294,17 @@ function AvatarService.start()
 	for _, player in Players:GetPlayers() do
 		task.spawn(onPlayerAdded, player) -- en parallèle : chaque chargement de profil est un yield
 	end
+end
+
+-- Enregistre la fonction qui place un personnage sur la scène du créateur (voir stagePlacer).
+function AvatarService.setStagePlacer(placer: (player: Player, character: Model) -> ())
+	stagePlacer = placer
+end
+
+-- true si le joueur a un personnage validé (sauvegardé ou créé pendant cette session).
+function AvatarService.hasCharacter(player: Player): boolean
+	local state = states[player]
+	return state ~= nil and state.savedSelection ~= nil
 end
 
 -- true tant que le joueur est dans le Hub (figé, hors combat).

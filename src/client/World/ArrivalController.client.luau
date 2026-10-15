@@ -381,7 +381,9 @@ local function onArrivalCinematic(cameraCFrame: any, focus: any, regionName: any
 	CreatorSession.setArrivalBusy(true)
 
 	local name = if type(regionName) == "string" then regionName else ""
-	local isDone, problem = pcall(play, cameraCFrame, focus, name)
+	local isDone, problem = pcall(function()
+		play(cameraCFrame, focus, name)
+	end)
 	if not isDone then
 		warn(`[Arrival] Cinématique d'arrivée interrompue : {problem}`)
 	end
