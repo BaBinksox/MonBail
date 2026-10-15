@@ -331,6 +331,19 @@ local UDimT = opaque("UDim")
 M.UDim = UDimT
 local UDim2mt = { __type = "UDim2" }
 UDim2mt.__index = UDim2mt
+UDim2mt.__add = function(a, b)
+	return setmetatable({ X = { Scale = a.X.Scale + b.X.Scale, Offset = a.X.Offset + b.X.Offset }, Y = { Scale = a.Y.Scale + b.Y.Scale, Offset = a.Y.Offset + b.Y.Offset } }, UDim2mt)
+end
+UDim2mt.__sub = function(a, b)
+	return setmetatable({ X = { Scale = a.X.Scale - b.X.Scale, Offset = a.X.Offset - b.X.Offset }, Y = { Scale = a.Y.Scale - b.Y.Scale, Offset = a.Y.Offset - b.Y.Offset } }, UDim2mt)
+end
+UDim2mt.__eq = function(a, b)
+	return a.X.Scale == b.X.Scale and a.X.Offset == b.X.Offset and a.Y.Scale == b.Y.Scale and a.Y.Offset == b.Y.Offset
+end
+function UDim2mt.Lerp(a, b, t)
+	local function l(x, y) return x + (y - x) * t end
+	return setmetatable({ X = { Scale = l(a.X.Scale, b.X.Scale), Offset = l(a.X.Offset, b.X.Offset) }, Y = { Scale = l(a.Y.Scale, b.Y.Scale), Offset = l(a.Y.Offset, b.Y.Offset) } }, UDim2mt)
+end
 M.UDim2 = {
 	new = function(xs, xo, ys, yo) return setmetatable({ X = { Scale = xs or 0, Offset = xo or 0 }, Y = { Scale = ys or 0, Offset = yo or 0 } }, UDim2mt) end,
 	fromScale = function(x, y) return setmetatable({ X = { Scale = x, Offset = 0 }, Y = { Scale = y, Offset = 0 } }, UDim2mt) end,
@@ -395,6 +408,24 @@ local DEFAULTS = {
 	Motor6D = { C0 = cf(0, 0, 0), C1 = cf(0, 0, 0) },
 	Weld = { C0 = cf(0, 0, 0), C1 = cf(0, 0, 0) },
 }
+-- Interfaces : aucune mise en page réelle, des tailles absolues fixes suffisent aux calculs.
+for _, cls in ipairs({ "Frame", "TextLabel", "TextButton", "ImageLabel", "ImageButton", "ScrollingFrame", "TextBox", "ViewportFrame", "CanvasGroup", "VideoFrame" }) do
+	DEFAULTS[cls] = {
+		AbsoluteSize = v2(200, 50), AbsolutePosition = v2(0, 0), AbsoluteRotation = 0, Visible = true,
+		BackgroundTransparency = 0, Transparency = 0, TextTransparency = 0, ImageTransparency = 0,
+		Text = (cls == "TextLabel" or cls == "TextButton" or cls == "TextBox") and "" or nil,
+		TextSize = 14, Rotation = 0, ZIndex = 1, LayoutOrder = 0, Active = false, Selectable = false,
+		CanvasPosition = v2(0, 0), AbsoluteCanvasSize = v2(200, 50), AbsoluteWindowSize = v2(200, 50),
+		TextBounds = v2(100, 14), GroupTransparency = 0,
+	}
+end
+for _, cls in ipairs({ "ScreenGui", "BillboardGui", "SurfaceGui" }) do
+	DEFAULTS[cls] = { AbsoluteSize = v2(1920, 1080), AbsolutePosition = v2(0, 0), Enabled = true, DisplayOrder = 0 }
+end
+DEFAULTS.UIListLayout = { AbsoluteContentSize = v2(200, 50) }
+DEFAULTS.UIGridLayout = { AbsoluteContentSize = v2(200, 50), AbsoluteCellSize = v2(50, 50) }
+DEFAULTS.UIScale = { Scale = 1 }
+DEFAULTS.Sound = { Volume = 0.5, Playing = false, IsLoaded = true, TimeLength = 10, TimePosition = 0, Looped = false }
 local BASEPART = { Part = true, WedgePart = true, CornerWedgePart = true, TrussPart = true, SpawnLocation = true, Seat = true, MeshPart = true, BasePart = true }
 local ISA = {
 	BasePart = BASEPART,
@@ -623,6 +654,8 @@ Imt.__index = function(self, k)
 	local props = rawget(self, "_props")
 	local v = props[k]
 	if v ~= nil then return v end
+	if k == "Position" and props.CFrame ~= nil and isA(self, "BasePart") then return props.CFrame.Position end
+	if k == "AssemblyLinearVelocity" or k == "AssemblyAngularVelocity" then return v3() end
 	local m = methods[k]
 	if m then return m end
 	-- enfant par nom (avant les signaux devinés : un module "GameEvents" n'est pas un signal)
@@ -630,7 +663,7 @@ Imt.__index = function(self, k)
 		if ch.Name == k then return ch end
 	end
 	-- signaux
-	if type(k) == "string" and (k:match("^%u") and (k:find("Changed") or k:find("Added") or k:find("Removed") or k:find("Removing") or k:find("Triggered") or k:find("Touched") or k:find("Activated") or k:find("Died") or k:find("Event") or k:find("Clicked") or k:find("Ended") or k:find("Began") or k:find("Destroying") or k:find("Running") or k:find("Invoke") or k:find("Loaded"))) then
+	if type(k) == "string" and (k:match("^%u") and (k:find("Changed") or k:find("Added") or k:find("Removed") or k:find("Removing") or k:find("Triggered") or k:find("Touched") or k:find("Activated") or k:find("Died") or k:find("Event") or k:find("Clicked") or k:find("Ended") or k:find("Began") or k:find("Destroying") or k:find("Running") or k:find("Invoke") or k:find("Loaded") or k:find("^Mouse") or k:find("^Selection") or k:find("Focus") or k:find("^Input") or k:find("^Touch") or k:find("Gained") or k:find("Lost") or k:find("Fired") or k:find("Reached") or k:find("Completed") or k:find("Unequipped") or k:find("Equipped"))) then
 		local s = M.newSignal()
 		props[k] = s
 		return s

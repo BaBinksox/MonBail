@@ -512,11 +512,11 @@ return function(mock)
 
 	-- Joueurs
 	local nextUserId = 1000
-	function R.addPlayer(name)
+	function R.addPlayer(name, userId)
 		nextUserId += 1
 		local player = Instance.new("Player")
 		player.Name = name
-		player.UserId = nextUserId
+		player.UserId = userId or nextUserId
 		player.DisplayName = name
 		player.Parent = Players
 		Players.PlayerAdded:Fire(player)
