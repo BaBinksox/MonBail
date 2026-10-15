@@ -37,16 +37,21 @@
 local DataStoreService = game:GetService("DataStoreService")
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Signal = require(ReplicatedStorage.Shared.Util.Signal)
+local ProfileSchema = require(script.Parent.ProfileSchema)
 
 -- Changer ce nom repart d'une base vide (utile pour remettre tous les joueurs à zéro).
 local STORE_NAME = "PlayerProfiles_v4"
 
 -- Version du schéma du profil. Pour la faire évoluer : l'incrémenter ET ajouter la migration
 -- correspondante dans MIGRATIONS (sinon le chargement échoue volontairement, en lecture seule).
-local PROFILE_VERSION = 1
+-- La forme du profil, ses valeurs par défaut et ses migrations sont dans ProfileSchema.
+local PROFILE_VERSION = ProfileSchema.VERSION
 
 -- Champs du profil écrits dans le DataStore. Les autres champs de l'enregistrement ne sont jamais touchés.
-local PROFILE_FIELDS = { "version", "avatar" }
+local PROFILE_FIELDS = ProfileSchema.FIELDS
 
 -- Champs techniques de l'enregistrement (hors profil).
 local LOCK_FIELD = "_session"
@@ -66,10 +71,7 @@ local CLOSE_TIMEOUT = 25 -- secondes laissées aux sauvegardes à la fermeture (
 -- Identifiant de CE serveur. game.JobId est vide dans Studio, donc inutilisable pour distinguer deux tests.
 local SERVER_ID = HttpService:GenerateGUID(false)
 
-export type Profile = {
-	version: number,
-	avatar: any?, -- écrit et relu par AvatarSerializer
-}
+export type Profile = ProfileSchema.Profile
 
 -- Pourquoi un profil n'est pas sauvegardable (nil = il l'est).
 type ReadOnlyReason = "loadFailed" | "locked" | "newerVersion" | "corrupt" | "lockLost" | "closing"
@@ -97,13 +99,21 @@ type AcquireOutcome = "acquired" | "locked" | "newerVersion" | "corrupt" | "erro
 -- elle copie vers le nouveau champ et laisse l'ancien (une copie complète est de toute façon faite
 -- dans `_backups` avant de migrer).
 local MIGRATIONS: { [number]: (record: { [string]: any }) -> () } = {
-	-- Exemple pour une future version 2 :
-	-- [1] = function(record)
-	-- 	record.stats = record.stats or { level = 1 }
-	-- end,
+	[1] = ProfileSchema.migrateV1toV2, -- ajoute la progression RPG (quêtes, rang, inventaire...) sans toucher à l'avatar
 }
 
 local ProfileStore = {}
+
+-- Signaux pour les autres services (voir Shared/Util/Signal) :
+--   ProfileLoaded(player, profile)     le profil est chargé et rattaché au joueur (sauvegardable ou non) ;
+--   ProfileRefreshed(player, profile)  un profil en lecture seule vient de redevenir sauvegardable et ses
+--                                      données ont été relues (les services doivent rafraîchir leur état) ;
+--   ProfileReleasing(player, profile)  le joueur part : DERNIÈRE occasion d'écrire dans le profil avant la
+--                                      sauvegarde finale. Les écouteurs doivent écrire SANS yield (ils sont
+--                                      appelés immédiatement, la sauvegarde part juste après).
+ProfileStore.ProfileLoaded = Signal.new()
+ProfileStore.ProfileRefreshed = Signal.new()
+ProfileStore.ProfileReleasing = Signal.new()
 
 local sessions: { [Player]: Session } = {} -- profils chargés
 local loadingSessions: { [Player]: Session } = {} -- chargements en cours
@@ -120,10 +130,7 @@ local activeReleases = 0
 --------------------------------------------------------------------------------
 
 local function newProfile(): Profile
-	return {
-		version = PROFILE_VERSION,
-		avatar = nil,
-	}
+	return ProfileSchema.new()
 end
 
 local function getKey(player: Player): string
@@ -286,10 +293,10 @@ local function migrate(record: { [string]: any })
 	end
 end
 
--- Recopie dans le profil EN PLACE (les autres services gardent une référence à cette table).
+-- Recopie dans le profil EN PLACE (les autres services gardent une référence à cette table ; ils ne
+-- doivent pas, en revanche, garder de référence aux sous-tables : elles sont remplacées ici).
 local function applyRecord(profile: Profile, record: { [string]: any })
-	profile.version = if type(record.version) == "number" then record.version else PROFILE_VERSION
-	profile.avatar = deepCopy(record.avatar)
+	ProfileSchema.applyRecord(profile, record)
 end
 
 --------------------------------------------------------------------------------
@@ -442,6 +449,7 @@ local function retryAcquire(session: Session)
 			applyRecord(session.profile, record)
 		end
 		print(`[Data] Profil de {session.player.Name} de nouveau sauvegardable.`)
+		ProfileStore.ProfileRefreshed:Fire(session.player, session.profile)
 	end
 	unlockWrites(session)
 end
@@ -566,6 +574,7 @@ function ProfileStore.load(player: Player): Profile
 	if isInGame(player) and not isClosing then
 		session.nextAutosaveAt = os.clock() + AUTOSAVE_INTERVAL * (0.5 + math.random() * 0.5) -- étalé dans le temps
 		sessions[player] = session
+		ProfileStore.ProfileLoaded:Fire(player, session.profile)
 	else
 		-- Parti pendant le chargement (ou serveur en fermeture) : on rend le verrou tout de suite,
 		-- sinon il bloquerait sa prochaine connexion pendant LOCK_EXPIRY secondes.
@@ -609,8 +618,29 @@ function ProfileStore.release(player: Player)
 	if session == nil then
 		return
 	end
+	-- Les services écrivent leurs dernières données (sans yield) avant la sauvegarde finale.
+	ProfileStore.ProfileReleasing:Fire(player, session.profile)
 	sessions[player] = nil
 	releaseSession(session)
+end
+
+-- Attend que le profil de `player` soit chargé. YIELD. Retourne nil si le joueur part ou si
+-- `timeout` secondes (30 par défaut) s'écoulent avant.
+function ProfileStore.waitForProfile(player: Player, timeout: number?): Profile?
+	local deadline = os.clock() + (timeout or 30)
+	while sessions[player] == nil and isInGame(player) and os.clock() < deadline do
+		task.wait(0.1)
+	end
+	local session = sessions[player]
+	return session and session.profile
+end
+
+-- true si le profil de `player` est chargé ET sera réellement écrit (verrou détenu). Sert à prévenir
+-- le joueur ("sauvegarde désactivée") et à refuser les actions qui n'auraient de sens que sauvegardées
+-- (création de guilde...).
+function ProfileStore.isSaveable(player: Player): boolean
+	local session = sessions[player]
+	return session ~= nil and session.ownsLock and not session.isReleased
 end
 
 -- À appeler une seule fois au démarrage du serveur.
