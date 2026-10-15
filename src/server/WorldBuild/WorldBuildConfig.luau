@@ -22,18 +22,18 @@ local ENEMY_SPAWNS: { [string]: EnemySpawn } = {
 	enemy_training_dummy_2 = { enemyId = "training_dummy", group = "training_yard" },
 	enemy_training_dummy_3 = { enemyId = "training_dummy", group = "training_yard" },
 	boss_training = { enemyId = "training_boss", group = "boss_arena" },
-	enemy_crypt_guardian = { enemyId = "ash_warden", group = "crypt_hall" },
-	enemy_forest_1 = { enemyId = "ash_stalker", group = "forest_gate" },
-	enemy_forest_2 = { enemyId = "ash_stalker", group = "forest_fork" },
+	enemy_crypt_guardian = { enemyId = "ash_watcher", group = "crypt_hall" },
+	enemy_forest_1 = { enemyId = "ash_prowler", group = "forest_gate" },
+	enemy_forest_2 = { enemyId = "ash_prowler", group = "forest_fork" },
 	enemy_forest_3 = { enemyId = "stone_guardian", group = "forest_north" },
 	enemy_forest_4 = { enemyId = "whisper", group = "forest_statue" },
-	enemy_forest_5 = { enemyId = "ash_stalker", group = "forest_ravine" },
+	enemy_forest_5 = { enemyId = "ash_prowler", group = "forest_ravine" },
 	enemy_forest_6 = { enemyId = "whisper", group = "forest_pond" },
 	enemy_forest_7 = { enemyId = "stone_guardian", group = "forest_west" },
 }
 
 return table.freeze({
-	BUILD_VERSION = 1,
+	BUILD_VERSION = 2, -- 2 : toutes les zones (village, chapelle, crypte, entraînement, forêt, rives)
 	SEED = 317, -- 3 h 17 : l'heure où tout s'est arrêté
 	BUILD_AT_RUNTIME_IF_MISSING = true,
 

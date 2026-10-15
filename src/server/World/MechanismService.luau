@@ -107,10 +107,33 @@ local function slideTo(instance: Instance, target: CFrame)
 	end
 end
 
+local EMBERS_LIT_COLOR = Color3.fromRGB(255, 128, 44)
+local EMBERS_COLD_COLOR = Color3.fromRGB(38, 30, 27)
+
 local function setLights(instance: Instance, isOn: boolean)
 	for _, descendant in instance:GetDescendants() do
 		if descendant:IsA("Light") or descendant:IsA("Fire") or descendant:IsA("ParticleEmitter") or descendant:IsA("Smoke") then
 			(descendant :: any).Enabled = isOn
+		elseif descendant:IsA("BasePart") and descendant.Name == "Embers" then
+			-- Braises du brasero (voir PropsVillage.brazier) : vives allumé, noires éteint.
+			descendant.Color = if isOn then EMBERS_LIT_COLOR else EMBERS_COLD_COLOR
+		end
+	end
+end
+
+-- Rune du puits allumée ou éteinte : attribut RuneLit (lisible par les clients) et glyphes recolorés
+-- côté serveur (Parts "Rune" du même Model, voir PropsSacred.runeStone), visible par tous.
+local RUNE_LIT_COLOR = Color3.fromRGB(120, 230, 255)
+local RUNE_DIM_COLOR = Color3.fromRGB(52, 112, 128)
+local function setRuneLit(part: BasePart, isLit: boolean)
+	part:SetAttribute("RuneLit", isLit)
+	local model = part.Parent
+	if model == nil or not model:IsA("Model") then
+		return
+	end
+	for _, child in model:GetChildren() do
+		if child:IsA("BasePart") and child.Name == "Rune" then
+			child.Color = if isLit then RUNE_LIT_COLOR else RUNE_DIM_COLOR
 		end
 	end
 end
@@ -267,14 +290,14 @@ local function interactRune(player: Player, mechanismId: string, mechanism: Mech
 			for _, id in mechanism.runes do
 				local part = WorldAnchors.getInteractable(id)
 				if part then
-					part:SetAttribute("RuneLit", false)
+					setRuneLit(part, false)
 				end
 			end
 		end
 		return false, "Les runes s'éteignent d'un coup. Ce n'était pas le bon ordre."
 	end
 	if runePart then
-		runePart:SetAttribute("RuneLit", true)
+		setRuneLit(runePart, true)
 	end
 	table.insert(progress.sequence, runeIndex)
 	if #progress.sequence < #sequence then
@@ -295,7 +318,7 @@ local function interactRune(player: Player, mechanismId: string, mechanism: Mech
 			for _, id in mechanism.runes do
 				local part = WorldAnchors.getInteractable(id)
 				if part then
-					part:SetAttribute("RuneLit", false)
+					setRuneLit(part, false)
 				end
 			end
 		end

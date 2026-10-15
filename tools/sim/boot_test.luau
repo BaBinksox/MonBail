@@ -35,6 +35,29 @@ for _, w in ipairs(runtime.warnings) do
 	end
 end
 check("tous les services démarrent (aucun échec de start())", mainWarnings == 0, mainWarnings .. " service(s) en échec")
+check("aucun avertissement au démarrage (carte complète)", #runtime.warnings == 0, #runtime.warnings .. " avertissement(s)")
+local CollectionService = mock.game:GetService("CollectionService")
+local Definitions = env.require("ReplicatedStorage/Shared/Enemy/EnemyDefinitions")
+local expectedEnemies = 0
+for _ in pairs(Definitions.SPAWNS) do
+	expectedEnemies += 1
+end
+local enemies = #CollectionService:GetTagged(Definitions.TAG)
+check("ennemis apparus sur leurs ancres", enemies == expectedEnemies, enemies .. " / " .. expectedEnemies)
+local NpcConfig = env.require("ReplicatedStorage/Shared/NPC/NpcConfig")
+local villagers = #CollectionService:GetTagged("Villager")
+local expectedNpcs = 0
+for _ in pairs(NpcConfig.NPCS or {}) do
+	expectedNpcs += 1
+end
+check("villageois apparus sur leurs marqueurs", villagers > 0 and (expectedNpcs == 0 or villagers == expectedNpcs), villagers .. " / " .. expectedNpcs)
+local prompts = 0
+for _, inst in ipairs(CollectionService:GetTagged("Interactable")) do
+	if inst:FindFirstChildOfClass("ProximityPrompt") then
+		prompts += 1
+	end
+end
+check("ProximityPrompt posé sur chaque interactable", prompts == #CollectionService:GetTagged("Interactable"), prompts .. " / " .. #CollectionService:GetTagged("Interactable"))
 
 print("== Un joueur rejoint")
 local player = runtime.addPlayer("Testeur")
