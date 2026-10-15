@@ -23,6 +23,7 @@ local RunService = game:GetService("RunService")
 
 local MagicConfig = require(ReplicatedStorage.Shared.Magic.MagicConfig)
 local MechanismConfig = require(ReplicatedStorage.Shared.World.MechanismConfig)
+local WorldRemotes = require(ReplicatedStorage.Shared.World.WorldRemotes)
 
 local GameEvents = require(script.Parent.Parent.Core.GameEvents)
 local TimeLoopService = require(script.Parent.Parent.TimeLoop.TimeLoopService)
@@ -257,6 +258,10 @@ local function activateDynamic(dynamicId: string, duration: number)
 			end
 		end
 		applyDynamic(dynamicId, state, true)
+		local instance = state.instance
+		if instance:IsA("PVInstance") then
+			WorldRemotes.MechanismPulse:FireAllClients(instance:GetPivot().Position)
+		end
 	end
 	state.instance:SetAttribute(MechanismConfig.STATE_ATTRIBUTE, true)
 	state.instance:SetAttribute(MechanismConfig.STATE_UNTIL_ATTRIBUTE, workspace:GetServerTimeNow() + duration)

@@ -86,6 +86,19 @@ local REWIND_CHOIR = {
 	minVolumeRatio = 0.4, -- ...sans descendre sous ce ratio
 }
 
+--[[
+	Petits sons de retour (catégorie Effets), courts et doux. Vides = silence.
+	>>> Chercher des sons de 0,5 à 2 s, sans attaque brutale :
+		mechanism   « soft chime », « magic sparkle soft », « stone click resonant »
+		secret      « mystery reveal soft », « harp glissando short »
+		regionEnter « soft whoosh airy » (facultatif : le titre suffit souvent)
+]]
+local FEEDBACK_SOUNDS = {
+	mechanism = { id = "", volume = 0.35 },
+	secret = { id = "", volume = 0.3 },
+	regionEnter = { id = "", volume = 0.2 },
+}
+
 -- Catégories de volume (multipliées par les réglages du joueur : musique, ambiance, effets).
 local CATEGORIES = table.freeze({
 	music = "Music",
@@ -97,6 +110,7 @@ return table.freeze({
 	TRACKS = TRACKS,
 	REGION_MUSIC = REGION_MUSIC,
 	REWIND_CHOIR = REWIND_CHOIR,
+	FEEDBACK_SOUNDS = FEEDBACK_SOUNDS,
 	CATEGORIES = CATEGORIES,
 	-- Volume maximal de chaque catégorie (réglage du joueur à 100 %).
 	CATEGORY_MAX_VOLUME = table.freeze({ Music = 1, Ambience = 1, Sfx = 1 }),

@@ -301,7 +301,13 @@ local function onNotified(kind: string, payload: any)
 			toast("Récompense", text, colors.goldBright)
 		end
 	elseif kind == "discovery" then
-		toast(`Découverte : {payload.name or ""}`, if payload.xp then `+{payload.xp} XP` else nil, colors.cyan)
+		if payload.kind == "secret" then
+			-- Un secret : discret, sans fanfare (un carillon doux si AudioConfig en fournit un).
+			toast("Un secret se dévoile…", `{payload.name or ""}{if payload.xp then `  ·  +{payload.xp} XP` else ""}`, colors.cyan)
+			UIBus.Feedback:Fire("secret")
+		else
+			toast(`Découverte : {payload.name or ""}`, if payload.xp then `+{payload.xp} XP` else nil, colors.cyan)
+		end
 	elseif kind == "promotion" then
 		toast(`Rang {payload.rank} — {payload.name or ""}`, payload.perk, colors.amber)
 	elseif kind == "quest" then

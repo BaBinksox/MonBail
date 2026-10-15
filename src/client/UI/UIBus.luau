@@ -14,6 +14,9 @@
 			Affiche un texte à lire (inscription examinée, porte verrouillée...).
 		DialogueStateChanged(isOpen: boolean)
 			Un dialogue s'ouvre ou se ferme (les contrôles de combat se mettent en retrait).
+		Feedback(kind: string)
+			Petit retour sonore discret : "secret", "mechanism", "regionEnter" (WorldFeedback,
+			sons réglés dans AudioConfig.FEEDBACK_SOUNDS).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -25,4 +28,5 @@ return table.freeze({
 	ClosePanels = Signal.new(),
 	ShowText = Signal.new(),
 	DialogueStateChanged = Signal.new(),
+	Feedback = Signal.new(),
 })

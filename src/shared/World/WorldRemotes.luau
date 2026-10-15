@@ -5,7 +5,9 @@
 	Le serveur les crée au premier require ; le client attend leur réplication.
 
 	Sens des événements :
-		Omen  serveur -> clients  (text: string)   un présage à afficher chez tous les joueurs
+		Omen            serveur -> clients  (text: string)        un présage à afficher chez tous les joueurs
+		MechanismPulse  serveur -> clients  (position: Vector3)   un mécanisme vient de répondre : petite
+		                lueur et carillon discret à cet endroit (retour d'un bon geste)
 
 	(La météo et l'humeur du monde ne passent par aucun remote : ce sont des attributs du Workspace.)
 ]]
@@ -40,4 +42,5 @@ end
 
 return table.freeze({
 	Omen = getRemote("Omen"),
+	MechanismPulse = getRemote("MechanismPulse"),
 })
