@@ -47,6 +47,36 @@ return function()
 		runtime.advance(seconds)
 	end
 
+	-- Appelle `fn(...)` dans une coroutine (elle peut attendre le DataStore) et fait avancer le temps
+	-- jusqu'à sa fin (30 s simulées au plus). Retourne ses résultats, ou nil si elle n'a pas fini.
+	function H.call(fn, ...)
+		local args = table.pack(...)
+		local done, results = false, nil
+		mock.task.spawn(function()
+			results = table.pack(fn(table.unpack(args, 1, args.n)))
+			done = true
+		end)
+		local waited = 0
+		while not done and waited < 30 do
+			runtime.advance(0.1)
+			waited += 0.1
+		end
+		if not done or results == nil then
+			return nil
+		end
+		return table.unpack(results, 1, results.n)
+	end
+
+	function H.party(player, action, params)
+		return H.call(H.shared("Party/PartyRemotes").PartyRequest.OnServerInvoke, player, action, params or {})
+	end
+	function H.guild(player, action, params)
+		return H.call(H.shared("Guild/GuildRemotes").GuildRequest.OnServerInvoke, player, action, params or {})
+	end
+	function H.mission(player, action, missionId)
+		return H.call(H.shared("Mission/MissionRemotes").MissionRequest.OnServerInvoke, player, action, missionId)
+	end
+
 	function H.boot()
 		mock.task.spawn(function()
 			env.run(S .. "Main")
@@ -134,10 +164,10 @@ return function()
 		local npcRoot = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
 		H.teleport(player, npcRoot.Position + mock.Vector3.new(3, 0, 0), npcRoot.Position)
 		local DialogueRemotes = H.shared("NPC/DialogueRemotes")
-		local data = DialogueRemotes.GetDialogue.OnServerInvoke(player, model)
+		local data = H.call(DialogueRemotes.GetDialogue.OnServerInvoke, player, model)
 		runtime.advance(0.8)
 		if acceptQuest and data then
-			local result = DialogueRemotes.ChooseOption.OnServerInvoke(player, model, "quest_accept:" .. acceptQuest)
+			local result = H.call(DialogueRemotes.ChooseOption.OnServerInvoke, player, model, "quest_accept:" .. acceptQuest)
 			runtime.advance(0.8)
 			return data, result
 		end

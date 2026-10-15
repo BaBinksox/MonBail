@@ -520,11 +520,37 @@ function methods.IsAncestorOf(self, other) return methods.IsDescendantOf(other, 
 function methods.ClearAllChildren(self)
 	for _, ch in ipairs(methods.GetChildren(self)) do methods.Destroy(ch) end
 end
+-- Signaux de tags (CollectionService) : créés à la demande, déclenchés à l'ajout / au retrait d'un
+-- tag d'une instance du DataModel, et à la destruction d'une instance taggée.
+local tagSignals = { added = {}, removed = {} }
+local function tagSignal(kind, t)
+	local list = tagSignals[kind]
+	if list[t] == nil then
+		list[t] = M.newSignal()
+	end
+	return list[t]
+end
+M.tagSignal = tagSignal
+local function isInGame(inst)
+	local node = inst
+	while node do
+		if rawget(node, "ClassName") == "DataModel" then return true end
+		node = rawget(node, "_props").Parent
+	end
+	return false
+end
 function methods.Destroy(self)
 	rawset(self, "_destroyed", true)
 	for _, ch in ipairs(methods.GetChildren(self)) do methods.Destroy(ch) end
+	local wasInGame = isInGame(self)
 	self.Parent = nil
+	local set = tags[self]
 	tags[self] = nil
+	if set and wasInGame then
+		for t in pairs(set) do
+			if tagSignals.removed[t] then tagSignals.removed[t]:Fire(self) end
+		end
+	end
 end
 function methods.Remove(self) self.Parent = nil end
 function methods.Clone(self)
@@ -552,8 +578,18 @@ function methods.GetAttributes(self)
 end
 function methods.GetAttributeChangedSignal() return M.newSignal() end
 function methods.GetPropertyChangedSignal() return M.newSignal() end
-function methods.AddTag(self, t) tags[self] = tags[self] or {} tags[self][t] = true end
-function methods.RemoveTag(self, t) if tags[self] then tags[self][t] = nil end end
+function methods.AddTag(self, t)
+	tags[self] = tags[self] or {}
+	local had = tags[self][t]
+	tags[self][t] = true
+	if not had and isInGame(self) and tagSignals.added[t] then tagSignals.added[t]:Fire(self) end
+end
+function methods.RemoveTag(self, t)
+	if tags[self] and tags[self][t] then
+		tags[self][t] = nil
+		if isInGame(self) and tagSignals.removed[t] then tagSignals.removed[t]:Fire(self) end
+	end
+end
 function methods.HasTag(self, t) return tags[self] ~= nil and tags[self][t] == true end
 function methods.GetTags(self)
 	local out = {}
@@ -788,8 +824,8 @@ local CollectionService = {
 		return out
 	end,
 	GetTags = function(_, inst) return methods.GetTags(inst) end,
-	GetInstanceAddedSignal = function() return M.newSignal() end,
-	GetInstanceRemovedSignal = function() return M.newSignal() end,
+	GetInstanceAddedSignal = function(_, t) return tagSignal("added", t) end,
+	GetInstanceRemovedSignal = function(_, t) return tagSignal("removed", t) end,
 }
 local RunService = {
 	IsServer = function() return true end,

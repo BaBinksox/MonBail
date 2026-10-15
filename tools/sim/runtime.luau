@@ -526,6 +526,15 @@ return function(mock)
 		task.wait(1 / 30)
 		return 1 / 30
 	end
+	-- Battement de cœur du moteur : Heartbeat est déclenché 30 fois par seconde de temps simulé
+	-- (IA des ennemis, enregistrement des instantanés du Time-Loop, hitbox...).
+	R.heartbeatRate = 1 / 30
+	task.spawn(function()
+		while true do
+			local dt = task.wait(R.heartbeatRate)
+			RunService.Heartbeat:Fire(dt)
+		end
+	end)
 	-- Les modules attendent les vrais services via game:GetService : on les branche.
 	local origGetService = game.GetService
 	rawget(game, "_props").GetService = function(self, name)
