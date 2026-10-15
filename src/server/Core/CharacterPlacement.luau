@@ -70,7 +70,7 @@ local function bottomOf(part: BasePart): number
 	return lowest
 end
 
-function CharacterPlacement.findGround(position: Vector3, ignore: { Instance }?): Vector3?
+function CharacterPlacement.findGround(position: Vector3, ignore: { any }?): Vector3?
 	local exclude: { Instance } = {}
 	for _, player in Players:GetPlayers() do
 		if player.Character then
