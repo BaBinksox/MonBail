@@ -107,6 +107,7 @@ ainsi que les modules `*Remotes`.
 | `Enemy/EnemyEffectsController` | barres de vie, télégraphes au sol recalés sur l'heure serveur, actions visibles des ennemis |
 | `World/EchoRenderer` | rendu local des échos (silhouette, sous-titres, rune touchée) |
 | `World/ArrivalController` | cinématique d'arrivée au belvédère |
+| `World/WorldAtmosphere` | heure, météo, anomalie, et ambiance de la région du joueur (crypte, forêt, lac) |
 | `AvatarCreator/*` (refonte) | créateur de personnage immersif, mêmes Remotes |
 
 Les effets des mécanismes (runes allumées, braises, pont, glace, herse, dalle) sont appliqués par le

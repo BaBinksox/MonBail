@@ -8,6 +8,8 @@
 		- la lumière : cycle jour / nuit interpolé (LightingPresets), teinté par la météo en cours ;
 		- l'anomalie : quand un boss charge son attaque fatale, tout bascule en moins d'une demi-seconde
 		  vers un ciel de minuit rouge sang, puis revient lentement une fois le danger passé ;
+		- l'ambiance de la région où se trouve le joueur (attribut "Region" posé par RegionService) :
+		  crypte sombre et froide, forêt noyée de brume, rives du lac bleutées (REGION_AMBIENCE) ;
 		- le vent (Workspace.GlobalWind), qui agite herbe, nuages et particules ;
 		- les particules d'ambiance autour du joueur (AmbientParticles) ;
 		- le son : bourdon de l'anomalie, vent ;
@@ -29,6 +31,7 @@ local sharedFolder = ReplicatedStorage:WaitForChild("Shared")
 local worldFolder = sharedFolder:WaitForChild("World")
 local AvatarConfig = require(sharedFolder:WaitForChild("Avatar"):WaitForChild("AvatarConfig") :: ModuleScript)
 local Config = require(worldFolder:WaitForChild("WorldConfig") :: ModuleScript)
+local RegionConfig = require(worldFolder:WaitForChild("RegionConfig") :: ModuleScript)
 local Remotes = require(worldFolder:WaitForChild("WorldRemotes") :: ModuleScript)
 
 local AmbientParticles = require(script.Parent:WaitForChild("AmbientParticles") :: ModuleScript)
@@ -42,6 +45,19 @@ local MAX_FOG_DENSITY = 0.9
 local FULL_WIND_SPEED = 30 -- studs/s : vent auquel le son du vent est à plein volume
 
 local localPlayer = Players.LocalPlayer
+
+-- Retouches par ambiance de région (RegionConfig.REGIONS[].ambience), appliquées par-dessus l'heure
+-- et la météo : fog / haze ajoutés, brightness et outdoor multiplient, saturation s'ajoute, tint teinte.
+type RegionAmbience = { fog: number, haze: number, brightness: number, outdoor: number, saturation: number, tint: Color3 }
+local NEUTRAL_AMBIENCE: RegionAmbience = { fog = 0, haze = 0, brightness = 1, outdoor = 1, saturation = 0, tint = Color3.new(1, 1, 1) }
+local REGION_AMBIENCE: { [string]: RegionAmbience } = {
+	overlook = { fog = -0.04, haze = -0.3, brightness = 1.05, outdoor = 1, saturation = 0, tint = Color3.new(1, 1, 1) },
+	village = NEUTRAL_AMBIENCE,
+	crypt = { fog = 0.25, haze = 1, brightness = 0.35, outdoor = 0.3, saturation = -0.3, tint = Color3.fromRGB(205, 215, 235) },
+	forest = { fog = 0.2, haze = 1.2, brightness = 0.8, outdoor = 0.8, saturation = -0.15, tint = Color3.fromRGB(225, 232, 220) },
+	lake = { fog = 0.12, haze = 0.8, brightness = 0.9, outdoor = 0.9, saturation = -0.1, tint = Color3.fromRGB(215, 225, 240) },
+}
+local REGION_SMOOTHING_TIME = 2.5 -- secondes (ordre de grandeur) pour passer d'une ambiance à l'autre
 
 --------------------------------------------------------------------------------
 -- Instances de rendu
@@ -121,6 +137,13 @@ local weather = {
 }
 
 local moodAlpha = if isAnomalyActive() then 1 else 0 -- 0 = monde normal, 1 = anomalie
+
+local function getTargetAmbience(): RegionAmbience
+	local regionId = localPlayer:GetAttribute("Region")
+	local region = if type(regionId) == "string" then RegionConfig.getRegion(regionId) else nil
+	return if region then REGION_AMBIENCE[region.ambience] or NEUTRAL_AMBIENCE else NEUTRAL_AMBIENCE
+end
+local ambience: RegionAmbience = table.clone(getTargetAmbience())
 local timeSinceApply = math.huge -- force une première mise à jour immédiate
 
 --------------------------------------------------------------------------------
@@ -156,6 +179,24 @@ local function apply(elapsed: number)
 	preset.Atmosphere.Density = math.min(preset.Atmosphere.Density + weather.fog, MAX_FOG_DENSITY)
 	preset.Atmosphere.Haze += weather.haze
 	preset.Clouds.Cover = weather.cloudCover
+
+	-- 2 bis. L'ambiance de la région glisse vers celle où se trouve le joueur.
+	local targetAmbience = getTargetAmbience()
+	local regionRate = 1 - math.exp(-math.min(elapsed, 5) / REGION_SMOOTHING_TIME)
+	ambience.fog += (targetAmbience.fog - ambience.fog) * regionRate
+	ambience.haze += (targetAmbience.haze - ambience.haze) * regionRate
+	ambience.brightness += (targetAmbience.brightness - ambience.brightness) * regionRate
+	ambience.outdoor += (targetAmbience.outdoor - ambience.outdoor) * regionRate
+	ambience.saturation += (targetAmbience.saturation - ambience.saturation) * regionRate
+	ambience.tint = ambience.tint:Lerp(targetAmbience.tint, regionRate)
+	preset.Atmosphere.Density = math.clamp(preset.Atmosphere.Density + ambience.fog, 0, MAX_FOG_DENSITY)
+	preset.Atmosphere.Haze = math.max(0, preset.Atmosphere.Haze + ambience.haze)
+	preset.Lighting.Brightness *= ambience.brightness
+	local outdoor: Color3 = preset.Lighting.OutdoorAmbient
+	preset.Lighting.OutdoorAmbient = Color3.new(outdoor.R * ambience.outdoor, outdoor.G * ambience.outdoor, outdoor.B * ambience.outdoor)
+	preset.ColorCorrection.Saturation += ambience.saturation
+	local tint: Color3 = preset.ColorCorrection.TintColor
+	preset.ColorCorrection.TintColor = Color3.new(tint.R * ambience.tint.R, tint.G * ambience.tint.G, tint.B * ambience.tint.B)
 
 	-- 3. L'anomalie écrase le tout, à proportion de moodAlpha.
 	if moodAlpha > 0 then
