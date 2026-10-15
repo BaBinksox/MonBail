@@ -32,6 +32,7 @@ local CombatConfig = require(ReplicatedStorage.Shared.Combat.CombatConfig)
 local TimeLoopConfig = require(ReplicatedStorage.Shared.TimeLoop.TimeLoopConfig)
 
 local AvatarService = require(script.Parent.Parent.Avatar.AvatarService)
+local RaceService = require(script.Parent.Parent.Avatar.RaceService)
 local GameEvents = require(script.Parent.Parent.Core.GameEvents)
 local MovementService = require(script.Parent.Parent.Movement.MovementService)
 local ParryService = require(script.Parent.ParryService)
@@ -317,7 +318,8 @@ function DamageService.damagePlayer(player: Player, amount: number, source: Dama
 		return "dodged", 0
 	end
 	local before = humanoid.Health
-	humanoid:TakeDamage(amount) -- respecte le ForceField d'apparition
+	-- Peuple du joueur (RaceConfig) : un petit pourcentage en plus ou en moins.
+	humanoid:TakeDamage(amount * RaceService.getDamageTakenMultiplier(player)) -- respecte le ForceField d'apparition
 	return "hit", before - humanoid.Health
 end
 

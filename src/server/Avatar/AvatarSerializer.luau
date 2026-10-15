@@ -17,6 +17,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local AvatarConfig = require(ReplicatedStorage.Shared.Avatar.AvatarConfig)
 local MagicConfig = require(ReplicatedStorage.Shared.Magic.MagicConfig)
+local RaceConfig = require(ReplicatedStorage.Shared.Avatar.RaceConfig)
 
 type Selection = AvatarConfig.Selection
 type ScaleRange = AvatarConfig.ScaleRange
@@ -31,6 +32,8 @@ export type SavedAvatar = {
 	magic: string,
 	height: number,
 	width: number,
+	race: string, -- ajouté en v3 du profil ; absent = RaceConfig.DEFAULT_RACE_ID
+	skin: string, -- ajouté en v3 ; absent = "native" (teint de l'avatar Roblox, comme avant)
 }
 
 local AvatarSerializer = {}
@@ -81,6 +84,8 @@ function AvatarSerializer.sanitizeSelection(raw: any): Selection?
 	local magicIndex = sanitizeIndex(raw.magicIndex, #MagicConfig.MAGICS)
 	local heightScale = sanitizeScale(raw.heightScale, AvatarConfig.HEIGHT_SCALE)
 	local widthScale = sanitizeScale(raw.widthScale, AvatarConfig.WIDTH_SCALE)
+	local raceIndex = sanitizeIndex(raw.raceIndex, #RaceConfig.RACES)
+	local skinIndex = sanitizeIndex(raw.skinIndex, #AvatarConfig.SKIN_TONES)
 	if
 		baseIndex == nil
 		or faceIndex == nil
@@ -90,6 +95,8 @@ function AvatarSerializer.sanitizeSelection(raw: any): Selection?
 		or magicIndex == nil
 		or heightScale == nil
 		or widthScale == nil
+		or raceIndex == nil
+		or skinIndex == nil
 	then
 		return nil
 	end
@@ -103,6 +110,8 @@ function AvatarSerializer.sanitizeSelection(raw: any): Selection?
 		magicIndex = magicIndex,
 		heightScale = heightScale,
 		widthScale = widthScale,
+		raceIndex = raceIndex,
+		skinIndex = skinIndex,
 	}
 end
 
@@ -117,6 +126,8 @@ function AvatarSerializer.toSaved(selection: Selection): SavedAvatar
 		magic = MagicConfig.MAGICS[selection.magicIndex].id,
 		height = selection.heightScale,
 		width = selection.widthScale,
+		race = RaceConfig.RACES[selection.raceIndex].id,
+		skin = AvatarConfig.SKIN_TONES[selection.skinIndex].id,
 	}
 end
 
@@ -136,6 +147,9 @@ function AvatarSerializer.fromSaved(saved: any): Selection?
 		magicIndex = findIndexById(MagicConfig.MAGICS, saved.magic),
 		heightScale = sanitizeScale(saved.height, AvatarConfig.HEIGHT_SCALE) or AvatarConfig.HEIGHT_SCALE.default,
 		widthScale = sanitizeScale(saved.width, AvatarConfig.WIDTH_SCALE) or AvatarConfig.WIDTH_SCALE.default,
+		-- Personnages créés avant les peuples et les teints : humain, teint de l'avatar (inchangés).
+		raceIndex = RaceConfig.indexOf(saved.race or RaceConfig.DEFAULT_RACE_ID),
+		skinIndex = findIndexById(AvatarConfig.SKIN_TONES, saved.skin or "native"),
 	}
 end
 

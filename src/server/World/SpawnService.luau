@@ -20,6 +20,7 @@ local RegionConfig = require(ReplicatedStorage.Shared.World.RegionConfig)
 local SpawnRemotes = require(ReplicatedStorage.Shared.World.SpawnRemotes)
 
 local AvatarService = require(script.Parent.Parent.Avatar.AvatarService)
+local RaceService = require(script.Parent.Parent.Avatar.RaceService)
 local CharacterPlacement = require(script.Parent.Parent.Core.CharacterPlacement)
 local ProfileStore = require(script.Parent.Parent.Data.ProfileStore)
 local WorldAnchors = require(script.Parent.WorldAnchors)
@@ -61,7 +62,11 @@ end
 -- Belvédère + plan d'arrivée (première création, ou première apparition de la session).
 local function arriveAtOverlook(player: Player, withCinematic: boolean)
 	local character = player.Character
-	local spawn = WorldAnchors.getCFrame("spawn_village")
+	-- Point d'arrivée du peuple (RaceConfig) s'il existe VRAIMENT sur la carte, sinon le Belvédère.
+	local anchorId = RaceService.getStartAnchorId(player, function(id: string): boolean
+		return WorldAnchors.getCFrame(id) ~= nil
+	end)
+	local spawn = WorldAnchors.getCFrame(anchorId) or WorldAnchors.getCFrame("spawn_village")
 	if character == nil or spawn == nil then
 		return
 	end

@@ -70,7 +70,11 @@ export type MagicCard = {
 	stroke: UIStroke,
 	magic: Magic,
 	isHovered: boolean,
+	isLocked: boolean, -- la Roulette du Destin a scellé une autre magie
 }
+
+-- État de la Roulette du Destin (page Destin).
+export type DestinyState = "idle" | "confirm" | "spinning" | "sealed" | "error"
 
 -- Ligne du récapitulatif : cliquer ramène à l'étape.
 export type SummaryRow = {
@@ -91,6 +95,7 @@ local HEADER_HEIGHT_COMPACT = 62
 local FOOTER_HEIGHT = 50
 local SELECTOR_HEIGHT = 58
 local CONFIRM_BOX_HEIGHT = 124
+local DESCRIPTION_HEIGHT = 150 -- texte d'une option (peuples : récit, avantage, inconvénient)
 local CONTROLS_BAND = 64 -- bande des boutons de rotation, sous le personnage (px virtuels)
 local TILE_ASPECT = 0.82 -- largeur / hauteur d'une vignette (le nom tient sous l'image)
 local TILE_GAP = 8
@@ -140,6 +145,13 @@ type ViewData = {
 
 	destinyPage: Frame,
 	magicCards: { MagicCard },
+	spinButton: Button,
+	spinConfirmButton: Button,
+	spinCancelButton: Button,
+	spinStatus: TextLabel,
+	spinConfirmRow: Frame,
+	optionDescription: TextLabel,
+	optionDescriptionScroller: ScrollingFrame,
 
 	summaryPage: Frame,
 	summaryRows: { SummaryRow },
@@ -288,7 +300,10 @@ local function drawThumbnail(thumbnail: Catalog.Thumbnail, parent: Frame, skinDi
 		local face = newImage("Face", image, disc)
 		face.Size = UDim2.fromScale(0.94, 0.94)
 		table.insert(skinDiscs, disc)
-	elseif kind == "medallion" then
+	elseif kind == "swatch" and thumbnail.color then
+		local disc = newDisc(parent, thumbnail.color, 0)
+		addStroke(disc, COLORS.gold, 0.25, 1.5)
+	elseif kind == "medallion" or kind == "swatch" then
 		local disc = newDisc(parent, COLORS.sunken, 0.2)
 		addStroke(disc, COLORS.gold, 0.2, 1.5)
 		Theme.title({
@@ -351,13 +366,14 @@ end
 
 local function refreshCard(card: MagicCard, isSelected: boolean)
 	local palette = card.magic.palette
+	local isHovered = card.isHovered and not card.isLocked
 	Theme.tween(card.stroke, {
-		Transparency = if isSelected then 0 elseif card.isHovered then 0.2 else 0.65,
+		Transparency = if isSelected then 0 elseif card.isLocked then 0.9 elseif isHovered then 0.2 else 0.65,
 		Thickness = if isSelected then 2 else 1,
 	}, Theme.durations.fast)
 	Theme.tween(card.button, {
-		BackgroundColor3 = if isSelected then palette.main elseif card.isHovered then COLORS.surfaceHover else COLORS.surface,
-		BackgroundTransparency = if isSelected then 0.8 elseif card.isHovered then 0.12 else 0.3,
+		BackgroundColor3 = if isSelected then palette.main elseif isHovered then COLORS.surfaceHover else COLORS.surface,
+		BackgroundTransparency = if isSelected then 0.72 elseif card.isLocked then 0.7 elseif isHovered then 0.08 else 0.18,
 	}, Theme.durations.fast)
 end
 
@@ -430,9 +446,31 @@ local function createMagicCard(magic: Magic, index: number, parent: Instance): M
 		layoutOrder = 3,
 		parent = texts,
 	})
+	Theme.label({
+		name = "Advantage",
+		text = `✦ {magic.advantage}`,
+		textSize = 14,
+		color = COLORS.success,
+		wrap = true,
+		autoSize = "Y",
+		size = UDim2.new(1, 0, 0, 0),
+		layoutOrder = 4,
+		parent = texts,
+	})
+	Theme.label({
+		name = "Drawback",
+		text = `✧ {magic.drawback}`,
+		textSize = 14,
+		color = COLORS.danger,
+		wrap = true,
+		autoSize = "Y",
+		size = UDim2.new(1, 0, 0, 0),
+		layoutOrder = 5,
+		parent = texts,
+	})
 
 	button.Parent = parent
-	return { button = button, stroke = stroke, magic = magic, isHovered = false }
+	return { button = button, stroke = stroke, magic = magic, isHovered = false, isLocked = false }
 end
 
 --------------------------------------------------------------------------------
@@ -658,15 +696,42 @@ function AvatarCreatorView.new(steps: { Step }, magics: { Magic }): View
 		parent = selector,
 	})
 
+	-- Texte de l'option (peuples) : récit, avantage, inconvénient. Défile s'il est long.
+	local optionDescriptionScroller = Theme.scroller({
+		name = "Description",
+		position = UDim2.fromOffset(0, SELECTOR_HEIGHT + 4),
+		size = UDim2.new(1, 0, 0, DESCRIPTION_HEIGHT),
+		visible = false,
+		parent = optionsPage,
+	})
+	local optionDescription = Theme.label({
+		name = "Text",
+		textSize = 15,
+		wrap = true,
+		rich = true,
+		autoSize = "Y",
+		alignY = Enum.TextYAlignment.Top,
+		size = UDim2.new(1, -8, 0, 0),
+		parent = optionDescriptionScroller,
+	})
+	optionDescription.LineHeight = 1.08
+
 	local skinDiscs: { Frame } = {}
 	local grids: { [number]: OptionGrid } = {}
 	for stepIndex, step in steps do
 		local list = step.list
 		if list then
+			local hasDescription = false
+			for _, entry in list.options do
+				if entry.description then
+					hasDescription = true
+				end
+			end
+			local gridTop = SELECTOR_HEIGHT + 8 + (if hasDescription then DESCRIPTION_HEIGHT + 8 else 0)
 			local scroller = Theme.scroller({
 				name = "Grid_" .. step.id,
-				position = UDim2.fromOffset(0, SELECTOR_HEIGHT + 8),
-				size = UDim2.new(1, 0, 1, -(SELECTOR_HEIGHT + 8)),
+				position = UDim2.fromOffset(0, gridTop),
+				size = UDim2.new(1, 0, 1, -gridTop),
 				visible = false,
 				parent = optionsPage,
 			})
@@ -744,6 +809,62 @@ function AvatarCreatorView.new(steps: { Step }, magics: { Magic }): View
 	local destinyScroller = Theme.scroller({ name = "Magics", parent = destinyPage })
 	addUniformPadding(destinyScroller, 4)
 	addListLayout(destinyScroller, 10)
+
+	-- Roulette du Destin : règles, bouton, confirmation, verdict. Toujours gratuite.
+	local roulette = Theme.panel({ name = "Roulette", style = "raised", padding = 10, size = UDim2.new(1, -8, 0, 0), layoutOrder = 0, parent = destinyScroller })
+	roulette.AutomaticSize = Enum.AutomaticSize.Y
+	addListLayout(roulette, 6)
+	Theme.caption({ text = "ROULETTE DU DESTIN", color = COLORS.goldBright, size = UDim2.new(1, 0, 0, 16), layoutOrder = 1, parent = roulette })
+	Theme.label({
+		name = "Rules",
+		text = MagicConfig.DESTINY_RULES,
+		textSize = 14,
+		color = COLORS.textMuted,
+		wrap = true,
+		autoSize = "Y",
+		size = UDim2.new(1, 0, 0, 0),
+		layoutOrder = 2,
+		parent = roulette,
+	})
+	local spinButton = Theme.button({
+		name = "Spin",
+		text = "Laisser le destin choisir",
+		glyph = "✶",
+		size = UDim2.new(1, 0, 0, 40),
+		layoutOrder = 3,
+		parent = roulette,
+	})
+	local spinConfirmRow = newFrame("ConfirmRow", roulette)
+	spinConfirmRow.Size = UDim2.new(1, 0, 0, 40)
+	spinConfirmRow.LayoutOrder = 4
+	spinConfirmRow.Visible = false
+	local spinConfirmButton = Theme.button({
+		name = "SpinConfirm",
+		text = "Tourner la roue",
+		variant = "primary",
+		size = UDim2.new(0.5, -4, 1, 0),
+		parent = spinConfirmRow,
+	})
+	local spinCancelButton = Theme.button({
+		name = "SpinCancel",
+		text = "Je choisirai moi-même",
+		anchor = Vector2.new(1, 0),
+		position = UDim2.fromScale(1, 0),
+		size = UDim2.new(0.5, -4, 1, 0),
+		parent = spinConfirmRow,
+	})
+	local spinStatus = Theme.label({
+		name = "Status",
+		text = "Ou choisissez vous-même une magie ci-dessous.",
+		textSize = 15,
+		wrap = true,
+		rich = true,
+		autoSize = "Y",
+		size = UDim2.new(1, 0, 0, 0),
+		layoutOrder = 5,
+		parent = roulette,
+	})
+
 	local magicCards: { MagicCard } = {}
 	for index, magic in magics do
 		magicCards[index] = createMagicCard(magic, index, destinyScroller)
@@ -966,6 +1087,13 @@ function AvatarCreatorView.new(steps: { Step }, magics: { Magic }): View
 		resetProportions = resetProportions,
 		destinyPage = destinyPage,
 		magicCards = magicCards,
+		spinButton = spinButton,
+		spinConfirmButton = spinConfirmButton,
+		spinCancelButton = spinCancelButton,
+		spinStatus = spinStatus,
+		spinConfirmRow = spinConfirmRow,
+		optionDescription = optionDescription,
+		optionDescriptionScroller = optionDescriptionScroller,
 		summaryPage = summaryPage,
 		summaryRows = summaryRows,
 		powerButton = powerButton,
@@ -1332,9 +1460,12 @@ function AvatarCreatorView.showPage(self: View, step: Step, stepIndex: number)
 end
 
 -- Option courante d'une étape "liste" : nom, compteur "3 / 22", vignette mise en avant.
-function AvatarCreatorView.setOption(self: View, stepIndex: number, optionIndex: number, name: string, count: number)
+function AvatarCreatorView.setOption(self: View, stepIndex: number, optionIndex: number, name: string, count: number, description: string?)
 	self.optionName.Text = name
 	self.optionCounter.Text = `{optionIndex} / {count}`
+	self.optionDescriptionScroller.Visible = description ~= nil
+	self.optionDescription.Text = description or ""
+	self.optionDescriptionScroller.CanvasPosition = Vector2.zero
 	local grid = self.grids[stepIndex]
 	if grid then
 		for index, tile in grid.tiles do
@@ -1356,6 +1487,30 @@ function AvatarCreatorView.setMagic(self: View, magicIndex: number)
 	self._selectedMagic = magicIndex
 	for index, card in self.magicCards do
 		refreshCard(card, index == magicIndex)
+	end
+end
+
+-- Roulette du Destin. `sealedIndex` : magie scellée (état "sealed") ; les autres cartes s'éteignent.
+function AvatarCreatorView.setDestinyState(self: View, state: DestinyState, sealedIndex: number?, message: string?)
+	self.spinButton.instance.Visible = state == "idle" or state == "error"
+	self.spinButton:setEnabled(state == "idle" or state == "error")
+	self.spinConfirmRow.Visible = state == "confirm"
+	local sealedMagic = if sealedIndex then self.magicCards[sealedIndex] else nil
+	if state == "idle" then
+		self.spinStatus.Text = "Ou choisissez vous-même une magie ci-dessous."
+	elseif state == "confirm" then
+		self.spinStatus.Text = "Tourner la roue ? Son verdict sera <b>définitif</b> pour ce personnage, et remplacera votre choix."
+	elseif state == "spinning" then
+		self.spinStatus.Text = "La roue tourne…"
+	elseif state == "sealed" and sealedMagic then
+		self.spinStatus.Text = `Le destin a parlé : <b>{sealedMagic.magic.name}</b>. Ce pouvoir est le vôtre.`
+	elseif state == "error" then
+		self.spinStatus.Text = message or "La roue reste muette. Réessayez dans un instant."
+	end
+	for index, card in self.magicCards do
+		card.isLocked = state == "sealed" and index ~= sealedIndex
+		card.button.Selectable = not card.isLocked
+		refreshCard(card, index == self._selectedMagic)
 	end
 end
 

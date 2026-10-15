@@ -9,6 +9,10 @@
 		PreviewAvatar  client  -> serveur   (selection: Selection)  aperçu en direct, sans valider
 		ApplyAvatar    client  -> serveur   (selection: Selection)  choix final
 		CreatorClosed  serveur -> 1 client  ()                      choix appliqué, le joueur est libéré
+		RequestDestinySpin  client -> serveur   ()                  tourner la Roulette du Destin
+		DestinyRevealed     serveur -> 1 client (magicId: string?, reason: string?)
+		                    verdict de la roue (tiré par le serveur, une fois par personnage), renvoyé
+		                    aussi à l'ouverture du créateur si la roue a déjà parlé ; nil + raison = refus
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -44,4 +48,6 @@ return table.freeze({
 	PreviewAvatar = getRemote("PreviewAvatar"),
 	ApplyAvatar = getRemote("ApplyAvatar"),
 	CreatorClosed = getRemote("CreatorClosed"),
+	RequestDestinySpin = getRemote("RequestDestinySpin"),
+	DestinyRevealed = getRemote("DestinyRevealed"),
 })

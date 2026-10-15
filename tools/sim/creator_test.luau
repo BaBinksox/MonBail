@@ -67,7 +67,50 @@ print("== Parcours des étapes au clavier (Entrée)")
 local handled = C.pressKey(Enum.KeyCode.Right) -- change une option de la 1re étape
 check("raccourcis du créateur actifs (Droite)", handled)
 runtime.advance(1)
-for _ = 1, 12 do
+check("1re étape : peuple et origine (avantage / inconvénient affichés)", C.findText("Inconvénient", nil) ~= nil or C.findText("✧", nil) ~= nil)
+local Catalog = env.require(CLIENT .. "AvatarCreator/AvatarCreatorCatalog")
+local destinyStep = Catalog.findStep("destiny")
+for _ = 1, destinyStep - 1 do
+	C.pressKey(Enum.KeyCode.Return)
+	runtime.advance(1.2)
+end
+flushErrors("navigation jusqu'au Destin sans erreur")
+
+print("== Roulette du Destin (interface)")
+check("panneau « Roulette du Destin » et règles affichés", C.findText("ROULETTE DU DESTIN") ~= nil and C.findText("chances égales") ~= nil)
+local spin = C.findButton("Laisser le destin choisir")
+check("bouton de la roue présent", spin ~= nil)
+if spin then
+	C.click(spin)
+	runtime.advance(0.3)
+end
+check("confirmation avant de tourner (verdict définitif)", C.findText("définitif") ~= nil)
+local confirmSpin = C.findButton("Tourner la roue")
+if confirmSpin then
+	C.click(confirmSpin)
+	C.click(confirmSpin) -- double clic : une seule demande
+end
+runtime.advance(9)
+check("une seule demande de tirage envoyée", countSent("RequestDestinySpin", "FireServer") == 1, countSent("RequestDestinySpin", "FireServer"))
+local ProfileStoreEarly = env.require("ServerScriptService/Server/Data/ProfileStore")
+local roll = ProfileStoreEarly.get(player).creation.destinyRoll
+check("le serveur a tiré et enregistré le verdict", type(roll) == "string", tostring(roll))
+check("verdict annoncé (« Le destin a parlé »)", C.findText("Le destin a parlé") ~= nil)
+local MagicConfig = env.require("ReplicatedStorage/Shared/Magic/MagicConfig")
+for _, magic in ipairs(MagicConfig.MAGICS) do
+	if magic.id ~= roll then
+		local card = C.findText(magic.name)
+		while card and rawget(card, "ClassName") ~= "TextButton" do
+			card = rawget(card, "_props").Parent
+		end
+		if card then
+			C.click(card) -- une autre carte : refusée, la magie est scellée
+		end
+		break
+	end
+end
+runtime.advance(0.5)
+for _ = 1, 4 do
 	C.pressKey(Enum.KeyCode.Return)
 	runtime.advance(1.2)
 end
@@ -98,6 +141,8 @@ end
 check("CreatorClosed envoyé une seule fois", appliedCount == 1, appliedCount)
 check("apparence enregistrée dans le profil", profile ~= nil and profile.avatar ~= nil)
 check("magie publiée sur le joueur", player:GetAttribute("InnateMagic") ~= nil, tostring(player:GetAttribute("InnateMagic")))
+check("magie publiée = verdict de la roue", player:GetAttribute("InnateMagic") == roll, tostring(player:GetAttribute("InnateMagic")))
+check("peuple publié sur le joueur", player:GetAttribute("Race") ~= nil)
 check("le joueur n'est plus « en création »", player:GetAttribute("IsCustomizing") == false)
 check("cinématique d'arrivée envoyée (ArrivalCinematic)", countSent("ArrivalCinematic") == 1, countSent("ArrivalCinematic"))
 check("ApplyAvatar envoyé UNE seule fois malgré double clic + Entrée", countSent("ApplyAvatar", "FireServer") == 1, countSent("ApplyAvatar", "FireServer"))

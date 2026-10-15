@@ -1,7 +1,7 @@
 --!strict
 --[[
 	ProfileSchema
-	Forme du profil joueur (version 2), valeurs par défaut, migration v1 -> v2 et nettoyage des données
+	Forme du profil joueur (version 3), valeurs par défaut, migrations v1 -> v2 -> v3 et nettoyage des données
 	lues dans le DataStore. Utilisé par ProfileStore ; les services passent par PlayerData.
 
 	Version 1 (prototype) : { version = 1, avatar = {...} }
@@ -18,6 +18,10 @@
 		ledger       { [rewardKey] = date }  (récompenses déjà versées : jamais deux fois)
 		settings     { music, ambience, sfx, uiScale, reducedEffects }
 		stats        { kills = { [enemyId] = n }, deaths }
+	Version 3 : peuples, teints et Roulette du Destin, toujours sans rien enlever :
+		avatar.race  "human" pour les personnages existants ; avatar.skin  "native" (teint inchangé)
+		creation     { destinyRoll, rolledAt }  verdict de la Roulette du Destin, tiré par le serveur
+		             et conservé : il ne change pas à la reconnexion (voir AvatarService)
 
 	Règles de prudence :
 		- la migration n'ENLÈVE rien : elle complète ce qui manque ;
@@ -73,6 +77,11 @@ export type Stats = {
 	deaths: number,
 }
 
+export type Creation = {
+	destinyRoll: string?, -- id de la magie tirée par la Roulette du Destin (nil = pas tournée)
+	rolledAt: number?,
+}
+
 export type Profile = {
 	version: number,
 	avatar: any?, -- écrit et relu par AvatarSerializer (inchangé depuis la v1)
@@ -86,9 +95,10 @@ export type Profile = {
 	ledger: { [string]: number },
 	settings: Settings,
 	stats: Stats,
+	creation: Creation,
 }
 
-local VERSION = 2
+local VERSION = 3
 
 -- Champs du profil écrits dans le DataStore par ProfileStore (les autres champs de l'enregistrement
 -- ne sont jamais touchés).
@@ -105,6 +115,7 @@ local FIELDS = {
 	"ledger",
 	"settings",
 	"stats",
+	"creation",
 }
 
 local DEFAULT_RANK = "E"
@@ -137,6 +148,7 @@ function ProfileSchema.new(): Profile
 		ledger = {},
 		settings = newSettings(),
 		stats = { kills = {}, deaths = 0 },
+		creation = {},
 	}
 end
 
@@ -248,6 +260,14 @@ local function asStats(value: any): Stats
 	return { kills = asNumberMap(raw.kills), deaths = math.max(0, asNumber(raw.deaths, 0)) }
 end
 
+local function asCreation(value: any): Creation
+	local raw = if type(value) == "table" then value else {}
+	return {
+		destinyRoll = if type(raw.destinyRoll) == "string" then raw.destinyRoll else nil,
+		rolledAt = if type(raw.rolledAt) == "number" then raw.rolledAt else nil,
+	}
+end
+
 -- Recopie un enregistrement du DataStore dans `profile`, EN PLACE (les services gardent une
 -- référence à cette table). Chaque champ est nettoyé indépendamment.
 function ProfileSchema.applyRecord(profile: Profile, record: { [string]: any })
@@ -263,6 +283,7 @@ function ProfileSchema.applyRecord(profile: Profile, record: { [string]: any })
 	profile.ledger = asNumberMap(record.ledger)
 	profile.settings = asSettings(record.settings)
 	profile.stats = asStats(record.stats)
+	profile.creation = asCreation(record.creation)
 end
 
 --------------------------------------------------------------------------------
@@ -277,6 +298,23 @@ function ProfileSchema.migrateV1toV2(record: { [string]: any })
 		if field ~= "version" and field ~= "avatar" and record[field] == nil then
 			record[field] = deepCopy((defaults :: any)[field])
 		end
+	end
+end
+
+-- v2 -> v3 : peuple et teint des personnages existants (humain, teint de l'avatar Roblox : leur
+-- apparence ne change pas), et le champ `creation`. Ne supprime ni ne modifie rien d'existant.
+function ProfileSchema.migrateV2toV3(record: { [string]: any })
+	local avatar = record.avatar
+	if type(avatar) == "table" then
+		if avatar.race == nil then
+			avatar.race = "human"
+		end
+		if avatar.skin == nil then
+			avatar.skin = "native"
+		end
+	end
+	if record.creation == nil then
+		record.creation = {}
 	end
 end
 

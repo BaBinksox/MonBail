@@ -72,6 +72,11 @@ local CLOSE_FADE_IN = 1.2 -- réouverture de secours (voir scheduleReopenSafety)
 local REOPEN_SAFETY_DELAY = 8 -- s après la fermeture : filet si ni la cinématique ni son repli n'ont rouvert l'écran
 
 
+local SPIN_FAST_DELAY = 0.06 -- secondes entre deux cartes quand la roue tourne vite
+local SPIN_SLOW_EXTRA = 0.45 -- délai ajouté en fin de course (la roue ralentit)
+local SPIN_LAPS = 2 -- tours complets avant de s'arrêter sur le verdict
+local SPIN_TIMEOUT = 8 -- secondes sans réponse du serveur : la roue s'arrête sans verdict
+
 local PREVIEW_DELAY = 0.12 -- anti-rebond des aperçus
 local PREVIEW_MIN_INTERVAL = 0.25 -- au plus un aperçu par quart de seconde pendant un défilement rapide
 
@@ -114,6 +119,13 @@ local phase: Phase = "closed"
 local sessionToken = 0 -- change à chaque ouverture et à chaque fermeture
 local currentStep = 1
 local isConfirmBoxOpen = false
+-- Roulette du Destin : le verdict vient du serveur ; une fois connu, la magie est scellée.
+local destinySealedIndex: number? = nil
+local destinyState: View.DestinyState = "idle"
+local spinToken = 0
+local spinResult: number? = nil
+local sessionTokenAtSpin = 0
+local spinFailure: string? = nil
 local confirmArmedAt = 0 -- os.clock() à partir duquel la validation est possible
 local focusedSlider = 1 -- 1 = taille, 2 = carrure (curseur piloté par Gauche / Droite)
 local previewThread: thread? = nil
@@ -205,17 +217,18 @@ local function stopMusic()
 	MusicDirector.set("override", nil)
 end
 
--- Monde froid et délavé (la profondeur de champ est gérée par AvatarCreatorCamera).
+-- Monde froid (la profondeur de champ est gérée par AvatarCreatorCamera).
 local function enableAmbience()
 	if #ambienceEffects > 0 then
 		return -- déjà en place (réouverture pendant le fondu de fermeture)
 	end
 	local colorCorrection = Instance.new("ColorCorrectionEffect")
 	colorCorrection.Name = "AvatarCreatorColor"
-	colorCorrection.Saturation = -0.45
-	colorCorrection.Contrast = 0.15
-	colorCorrection.Brightness = -0.04
-	colorCorrection.TintColor = Color3.fromRGB(188, 200, 232)
+	-- Désaturé sans délaver la peau : les teints restent distincts et les marques lisibles.
+	colorCorrection.Saturation = -0.2
+	colorCorrection.Contrast = 0.12
+	colorCorrection.Brightness = -0.03
+	colorCorrection.TintColor = Color3.fromRGB(220, 226, 240)
 	colorCorrection.Parent = Lighting
 	ambienceEffects = { colorCorrection }
 end
@@ -285,7 +298,14 @@ local function refreshOption(stepIndex: number)
 		return
 	end
 	local index = list.get(selection)
-	view:setOption(stepIndex, index, list.options[index].name, #list.options)
+	local entry = list.options[index]
+	view:setOption(stepIndex, index, entry.name, #list.options, entry.description)
+	if STEPS[stepIndex].id == "skin" then
+		local tone = AvatarConfig.SKIN_TONES[selection.skinIndex]
+		if tone and tone.color then
+			view:setSkinColor(tone.color) -- vignettes des visages et marques au nouveau teint
+		end
+	end
 end
 
 local function setFocusedSlider(index: number)
@@ -376,6 +396,7 @@ local function renderStepContent()
 		setFocusedSlider(focusedSlider)
 	elseif step.kind == "destiny" then
 		view:setMagic(selection.magicIndex)
+		view:setDestinyState(destinyState, destinySealedIndex, spinFailure)
 	elseif step.kind == "summary" then
 		refreshSummary()
 	end
@@ -521,9 +542,92 @@ local function chooseMagic(index: number)
 	if phase ~= "editing" or MagicConfig.MAGICS[index] == nil then
 		return
 	end
+	if destinySealedIndex or destinyState == "spinning" then
+		return -- la roue a parlé (ou parle) : la magie n'est plus au choix
+	end
 	selection.magicIndex = index
 	view:setMagic(index)
 	refreshAccent()
+end
+
+-- Roulette du Destin -----------------------------------------------------------------
+
+local function setDestinyState(state: View.DestinyState, message: string?)
+	destinyState = state
+	spinFailure = message
+	view:setDestinyState(state, destinySealedIndex, message)
+end
+
+local function sealDestiny(index: number)
+	destinySealedIndex = index
+	selection.magicIndex = index
+	view:setMagic(index)
+	setDestinyState("sealed")
+	refreshAccent()
+end
+
+-- Les cartes s'allument tour à tour, vite tant que le serveur n'a pas répondu, puis la roue ralentit
+-- et s'arrête EXACTEMENT sur le verdict du serveur (le client ne tire rien lui-même).
+local function animateSpin(token: number)
+	local count = #MagicConfig.MAGICS
+	local index = selection.magicIndex
+	local started = os.clock()
+	while spinResult == nil and spinFailure == nil and os.clock() - started < SPIN_TIMEOUT do
+		index = index % count + 1
+		view:setMagic(index)
+		task.wait(SPIN_FAST_DELAY)
+		if token ~= spinToken or not isCurrent(sessionTokenAtSpin) then
+			return
+		end
+	end
+	local result = spinResult
+	if result == nil then
+		view:setMagic(selection.magicIndex)
+		setDestinyState("error", if spinFailure == "closed" then "La roue ne tourne plus : le choix est déjà parti." else nil)
+		return
+	end
+	local steps = count * SPIN_LAPS + (result - index) % count
+	for step = 1, steps do
+		index = index % count + 1
+		view:setMagic(index)
+		local progress = step / steps
+		task.wait(SPIN_FAST_DELAY + progress * progress * SPIN_SLOW_EXTRA)
+		if token ~= spinToken or not isCurrent(sessionTokenAtSpin) then
+			return
+		end
+	end
+	sealDestiny(result)
+end
+
+local function startSpin()
+	if phase ~= "editing" or destinySealedIndex or destinyState ~= "confirm" then
+		return
+	end
+	spinToken += 1
+	sessionTokenAtSpin = sessionToken
+	spinResult = nil
+	spinFailure = nil
+	setDestinyState("spinning")
+	Remotes.RequestDestinySpin:FireServer()
+	task.spawn(animateSpin, spinToken)
+end
+
+-- Verdict du serveur (réponse à la roue, ou rappel d'un verdict déjà rendu à l'ouverture).
+local function onDestinyRevealed(magicId: any, reason: any)
+	local index: number? = nil
+	for magicIndex, magic in MagicConfig.MAGICS do
+		if magic.id == magicId then
+			index = magicIndex
+		end
+	end
+	if destinyState == "spinning" then
+		spinResult = index
+		spinFailure = if index == nil then (if type(reason) == "string" then reason else "unknown") else nil
+		return -- l'animation s'arrêtera d'elle-même sur ce résultat
+	end
+	if index then
+		sealDestiny(index)
+	end
 end
 
 -- Flèches, LB / RB, boutons ‹ ›.
@@ -674,6 +778,10 @@ local function open()
 
 	selection = Catalog.defaultSelection()
 	isConfirmBoxOpen = false
+	destinySealedIndex = nil -- le serveur renvoie le verdict s'il existe déjà (DestinyRevealed)
+	destinyState = "idle"
+	spinFailure = nil
+	spinToken += 1
 	focusedSlider = 1
 	goToStep(1, true)
 
@@ -816,6 +924,18 @@ for index, card in view.magicCards do
 	end)
 end
 
+view.spinButton:onActivated(function()
+	if phase == "editing" and destinySealedIndex == nil and (destinyState == "idle" or destinyState == "error") then
+		setDestinyState("confirm")
+	end
+end)
+view.spinCancelButton:onActivated(function()
+	if destinyState == "confirm" then
+		setDestinyState("idle")
+	end
+end)
+view.spinConfirmButton:onActivated(startSpin)
+
 for _, row in view.summaryRows do
 	row.button:onActivated(function()
 		if phase == "editing" then
@@ -849,6 +969,7 @@ end)
 --------------------------------------------------------------------------------
 
 Remotes.OpenCreator.OnClientEvent:Connect(open)
+Remotes.DestinyRevealed.OnClientEvent:Connect(onDestinyRevealed)
 Remotes.CreatorClosed.OnClientEvent:Connect(close)
 
 -- Scène du créateur (SpawnService). Requis à part : si le serveur ne crée jamais ces Remotes, le

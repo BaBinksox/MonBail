@@ -81,14 +81,19 @@ local MIN_WINDOW_SIZE = 0.1
 local DEFAULT_WINDOW: Window = { x = 0.2, y = 0.05, width = 0.45, height = 0.85 }
 
 -- Éclairage de studio (lumières locales : seul ce client les voit).
-local KEY_COLOR = Color3.fromRGB(255, 228, 196)
-local FILL_COLOR = Color3.fromRGB(160, 182, 230)
-local RIM_COLOR = Color3.fromRGB(140, 186, 255)
-local KEY_BRIGHTNESS = 1.4
-local FILL_BRIGHTNESS = 0.45
-local RIM_BRIGHTNESS = 2
-local RIM_ACCENT_BRIGHTNESS = 3.2
-local LIGHT_RANGE = 14
+-- Réglé pour que le visage ne soit jamais « brûlé » : clé chaude mais modérée et de côté (elle
+-- dessine le relief, donc les cicatrices), débouchage froid et faible, contre-jour qui détache la
+-- silhouette sans éclairer le visage de face. Les lumières restent à LIGHT_MIN_SPREAD studs au
+-- moins du personnage : en plan serré, une lumière collée au visage le surexposait.
+local KEY_COLOR = Color3.fromRGB(255, 236, 214)
+local FILL_COLOR = Color3.fromRGB(176, 190, 222)
+local RIM_COLOR = Color3.fromRGB(150, 190, 255)
+local KEY_BRIGHTNESS = 0.85
+local FILL_BRIGHTNESS = 0.3
+local RIM_BRIGHTNESS = 1.4
+local RIM_ACCENT_BRIGHTNESS = 2.4
+local LIGHT_RANGE = 16
+local LIGHT_MIN_SPREAD = 4.5
 local ACCENT_FADE = 0.6
 
 local localPlayer = Players.LocalPlayer
@@ -338,7 +343,7 @@ end
 -- Les lumières tournent avec la vue : la clé reste devant à gauche, le contre-jour derrière.
 local function placeLights(rig: LightRig, center: Vector3, toCamera: Vector3, height: number)
 	local right = (-toCamera):Cross(Vector3.yAxis).Unit
-	local spread = math.max(height, 2)
+	local spread = math.max(height, LIGHT_MIN_SPREAD)
 	rig.keyPart.CFrame = CFrame.new(center + toCamera * spread * 0.8 - right * spread * 0.6 + Vector3.yAxis * spread * 0.45)
 	rig.fillPart.CFrame = CFrame.new(center + toCamera * spread * 0.8 + right * spread * 0.7)
 	rig.rimPart.CFrame = CFrame.new(center - toCamera * spread * 0.6 + Vector3.yAxis * spread * 0.5)

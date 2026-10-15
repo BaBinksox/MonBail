@@ -31,6 +31,7 @@ local SpatialHitbox = require(ReplicatedStorage.Shared.Combat.SpatialHitbox)
 local TimeLoopConfig = require(ReplicatedStorage.Shared.TimeLoop.TimeLoopConfig)
 
 local AvatarService = require(script.Parent.Parent.Avatar.AvatarService)
+local RaceService = require(script.Parent.Parent.Avatar.RaceService)
 local DamageService = require(script.Parent.DamageService)
 local SwordFactory = require(script.Parent.SwordFactory)
 local TimeLoopService = require(script.Parent.Parent.TimeLoop.TimeLoopService)
@@ -345,7 +346,7 @@ local function onHitReported(player: Player, target: any)
 	if step.knockback > 0 and targetHumanoid.Health > 0 then
 		applyKnockback(attackerRoot, targetRoot, step.knockback)
 	end
-	setTension(player, getTension(player) + Config.TENSION_PER_HIT)
+	setTension(player, getTension(player) + Config.TENSION_PER_HIT * RaceService.getTensionGainMultiplier(player))
 	Remotes.HitConfirmed:FireAllClients(attacker, target, applied)
 
 	if Config.DEBUG_LOGS then

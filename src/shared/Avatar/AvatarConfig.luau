@@ -62,9 +62,18 @@ export type HairOption = {
 export type OutfitOption = {
 	id: string,
 	name: string,
+	style: string, -- famille : "vagabond", "chevalier", "mage", "noble"... (classement, récapitulatif)
 	shirtId: number, -- vêtement classique (Shirt)
 	pantsId: number, -- vêtement classique (Pants)
 	backAccessoryId: number, -- accessoire de type Back (cape), 0 = aucun
+}
+
+-- Teint : couleur appliquée à la tête ET à tout le corps visible (6 parties de BodyColors).
+-- `color = nil` : on garde le teint de l'avatar Roblox du joueur (comportement d'avant).
+export type SkinToneOption = {
+	id: string,
+	name: string,
+	color: Color3?,
 }
 
 export type ScaleRange = {
@@ -84,6 +93,8 @@ export type Selection = {
 	heightScale: number,
 	widthScale: number,
 	magicIndex: number, -- index dans MagicConfig.MAGICS
+	raceIndex: number, -- index dans RaceConfig.RACES
+	skinIndex: number, -- index dans SKIN_TONES
 }
 
 -- Image que TU as importée (ou une image du catalogue) : on donne l'ID de l'IMAGE.
@@ -186,10 +197,18 @@ local HAIR_OPTIONS: { HairOption } = {
 	{ id = "bat_queen", name = "Reine des chauves-souris", assetId = 1074737868 }, -- "Queen of Bats Hair"
 }
 
+--[[
+	Tenues. Les trois ci-dessous sont celles déjà présentes dans le projet (placeholders du catalogue).
+	>>> AJOUTER UNE TENUE : une ligne de plus, avec des ID VÉRIFIÉS en jeu (Toolbox > Marketplace >
+	    Shirts / Pants / Back accessories, puis Play : la vignette du créateur et le personnage doivent
+	    s'afficher). Familles souhaitées et encore à pourvoir : voir OUTFIT_WISHLIST plus bas.
+	Aucun ID n'est inventé : une famille sans ID vérifié reste dans la liste de souhaits.
+]]
 local OUTFIT_OPTIONS: { OutfitOption } = {
 	{
 		id = "midnight_traveler",
 		name = "Voyageur de minuit",
+		style = "voyageur",
 		shirtId = 3267725621,
 		pantsId = 3267727546,
 		backAccessoryId = 878915975, -- "Cape of Midnight's Wisdom"
@@ -197,6 +216,7 @@ local OUTFIT_OPTIONS: { OutfitOption } = {
 	{
 		id = "black_iron_knight",
 		name = "Chevalier de fer noir",
+		style = "chevalier",
 		shirtId = 8991866831,
 		pantsId = 8991863926,
 		backAccessoryId = 2163546691, -- "Black Iron Cape"
@@ -204,10 +224,44 @@ local OUTFIT_OPTIONS: { OutfitOption } = {
 	{
 		id = "oathbreaker",
 		name = "Parjure",
+		style = "noble déchu",
 		shirtId = 560184638,
 		pantsId = 560182503,
 		backAccessoryId = 1772350677, -- "Sinister Cape"
 	},
+}
+
+-- Familles de tenues médiévales voulues, à remplir avec des ID vérifiés (voir OUTFIT_OPTIONS).
+local OUTFIT_WISHLIST: { { style: string, look: string } } = {
+	{ style = "vagabond", look = "Haillons, ceinture de corde, capuchon élimé." },
+	{ style = "aventurier", look = "Tunique de cuir, brassards, sacoche, cape courte." },
+	{ style = "mage", look = "Robe longue brodée, ceinture à grimoire, capuche." },
+	{ style = "noble", look = "Pourpoint, chemise à jabot, manteau doublé." },
+	{ style = "chevalier", look = "Cotte de mailles, tabard, épaulières (complète le Chevalier de fer noir)." },
+	{ style = "garde", look = "Gambison, tabard aux couleurs du village, cape." },
+	{ style = "guérisseur / érudit", look = "Robe sobre, tablier à fioles ou étole." },
+	{ style = "manteau de voyage", look = "Grand manteau à capuche, bottes hautes." },
+	{ style = "elfique", look = "Tunique ajustée vert sombre, motifs de feuilles." },
+	{ style = "naine", look = "Tablier de forge, cuir épais, fourrure." },
+	{ style = "ombre", look = "Habits sombres déchirés, voile ou écharpe." },
+}
+
+-- Teints : du plus clair au plus foncé, puis deux teints surnaturels (Enfants de l'Ombre, mais
+-- accessibles à tous). Le premier garde le teint de l'avatar Roblox : c'est celui des personnages
+-- créés avant cette option (leur apparence ne change pas).
+local SKIN_TONES: { SkinToneOption } = {
+	{ id = "native", name = "Teint de votre avatar", color = nil },
+	{ id = "porcelain", name = "Porcelaine", color = Color3.fromRGB(246, 222, 206) },
+	{ id = "fair", name = "Clair", color = Color3.fromRGB(234, 196, 168) },
+	{ id = "rosy", name = "Rosé", color = Color3.fromRGB(226, 180, 158) },
+	{ id = "olive", name = "Olivâtre", color = Color3.fromRGB(198, 160, 118) },
+	{ id = "golden", name = "Doré", color = Color3.fromRGB(204, 150, 104) },
+	{ id = "tan", name = "Hâlé", color = Color3.fromRGB(176, 124, 86) },
+	{ id = "bronze", name = "Bronze", color = Color3.fromRGB(146, 98, 66) },
+	{ id = "umber", name = "Brun", color = Color3.fromRGB(112, 74, 50) },
+	{ id = "deep", name = "Ébène", color = Color3.fromRGB(78, 52, 38) },
+	{ id = "ashen", name = "Cendre", color = Color3.fromRGB(158, 156, 162) },
+	{ id = "dusk", name = "Crépuscule", color = Color3.fromRGB(118, 122, 150) },
 }
 
 local HEIGHT_SCALE: ScaleRange = { min = 0.9, max = 1.15, step = 0.05, default = 1 }
@@ -236,6 +290,8 @@ return table.freeze({
 	MARK_OPTIONS = MARK_OPTIONS,
 	HAIR_OPTIONS = HAIR_OPTIONS,
 	OUTFIT_OPTIONS = OUTFIT_OPTIONS,
+	OUTFIT_WISHLIST = OUTFIT_WISHLIST,
+	SKIN_TONES = SKIN_TONES,
 	HEIGHT_SCALE = HEIGHT_SCALE, -- HumanoidDescription.HeightScale (BodyHeightScale)
 	WIDTH_SCALE = WIDTH_SCALE, -- HumanoidDescription.WidthScale (BodyWidthScale)
 })

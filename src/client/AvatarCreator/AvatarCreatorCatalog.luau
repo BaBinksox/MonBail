@@ -12,7 +12,7 @@
 		- visages et marques : l'image déjà référencée par l'option, posée sur une pastille couleur peau ;
 		- corps : médaillon dessiné (initiale), faute d'image dédiée dans la configuration.
 
-	Ajouter une catégorie (ex. couleur de peau, le jour où AvatarConfig en aura une) :
+	Ajouter une catégorie (c'est ainsi qu'ont été ajoutés le peuple et le teint) :
 		1. la liste dans AvatarConfig + le champ dans Selection (côté serveur : AvatarSerializer et
 		   AvatarAppearance) ;
 		2. une entrée dans STEPS ci-dessous (kind = "list", avec get / set et une vignette).
@@ -21,6 +21,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local AvatarConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Avatar"):WaitForChild("AvatarConfig"))
+local RaceConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Avatar"):WaitForChild("RaceConfig"))
 
 type Selection = AvatarConfig.Selection
 
@@ -34,18 +35,21 @@ export type StepKind = "list" | "proportions" | "destiny" | "summary"
 --   "face"      : image transparente posée sur une pastille couleur peau (visage, marque)
 --   "medallion" : médaillon dessiné portant `text` (une initiale)
 --   "none"      : pastille vide (option "aucune")
-export type ThumbnailKind = "image" | "face" | "medallion" | "none"
+--   "swatch"    : pastille de couleur `color` (teint) ; sans couleur, médaillon portant `text`
+export type ThumbnailKind = "image" | "face" | "medallion" | "none" | "swatch"
 
 export type Thumbnail = {
 	kind: ThumbnailKind,
 	image: string?,
 	inset: string?,
 	text: string?,
+	color: Color3?,
 }
 
 export type OptionEntry = {
 	name: string,
 	thumbnail: Thumbnail,
+	description: string?, -- texte riche affiché sous le nom (peuples : récit, avantage, inconvénient)
 }
 
 -- Étape "liste" : une option à choisir parmi `options`, rangée dans un champ du Selection.
@@ -86,6 +90,40 @@ local function initial(name: string): string
 		return utf8.char(codepoint)
 	end
 	return string.sub(name, 1, 1)
+end
+
+-- Texte riche d'un peuple : épithète, récit, avantage (vert), inconvénient (rouge), origine.
+local function describeRace(race: RaceConfig.Race): string
+	local origin = if race.originAvailable
+		then `Origine : {race.originName}.`
+		else `Origine : {race.originName} — terres pas encore accessibles : vous commencerez au Belvédère.`
+	return table.concat({
+		`<i>{race.epithet}</i>`,
+		race.lore,
+		`<font color="#92CE78">✦ {race.advantage}</font>`,
+		`<font color="#DE584C">✧ {race.drawback}</font>`,
+		`<font color="#B0A89C">{origin}</font>`,
+	}, "\n")
+end
+
+local function buildRaceOptions(): { OptionEntry }
+	local entries: { OptionEntry } = {}
+	for index, race in RaceConfig.RACES do
+		entries[index] = {
+			name = race.name,
+			thumbnail = { kind = "medallion", text = initial(race.name) },
+			description = describeRace(race),
+		}
+	end
+	return entries
+end
+
+local function buildSkinOptions(): { OptionEntry }
+	local entries: { OptionEntry } = {}
+	for index, tone in AvatarConfig.SKIN_TONES do
+		entries[index] = { name = tone.name, thumbnail = { kind = "swatch", color = tone.color, text = "★" } }
+	end
+	return entries
 end
 
 local function buildBaseOptions(): { OptionEntry }
@@ -144,9 +182,27 @@ end
 
 local STEPS: { Step } = {
 	{
+		id = "race",
+		kind = "list",
+		numeral = "",
+		label = "Origine",
+		title = "Peuple et origine",
+		subtitle = "D'où venez-vous, avant que le temps ne s'arrête ?",
+		shot = "body",
+		list = {
+			options = buildRaceOptions(),
+			get = function(selection: Selection): number
+				return selection.raceIndex
+			end,
+			set = function(selection: Selection, index: number)
+				selection.raceIndex = index
+			end,
+		},
+	},
+	{
 		id = "base",
 		kind = "list",
-		numeral = "I",
+		numeral = "",
 		label = "Corps",
 		title = "Corps",
 		subtitle = "L'enveloppe qui vous fut rendue.",
@@ -162,9 +218,27 @@ local STEPS: { Step } = {
 		},
 	},
 	{
+		id = "skin",
+		kind = "list",
+		numeral = "",
+		label = "Teint",
+		title = "Teint",
+		subtitle = "La couleur de votre peau, du visage aux mains.",
+		shot = "face",
+		list = {
+			options = buildSkinOptions(),
+			get = function(selection: Selection): number
+				return selection.skinIndex
+			end,
+			set = function(selection: Selection, index: number)
+				selection.skinIndex = index
+			end,
+		},
+	},
+	{
 		id = "face",
 		kind = "list",
-		numeral = "II",
+		numeral = "",
 		label = "Visage",
 		title = "Visage",
 		subtitle = "Le dernier visage dont vous vous souvenez.",
@@ -182,7 +256,7 @@ local STEPS: { Step } = {
 	{
 		id = "mark",
 		kind = "list",
-		numeral = "III",
+		numeral = "",
 		label = "Marques",
 		title = "Cicatrices et tatouages",
 		subtitle = "Ce que la vie, ou la mort, a gravé sur vous.",
@@ -200,7 +274,7 @@ local STEPS: { Step } = {
 	{
 		id = "hair",
 		kind = "list",
-		numeral = "IV",
+		numeral = "",
 		label = "Chevelure",
 		title = "Chevelure",
 		subtitle = "Ce que le vent n'a pas emporté.",
@@ -218,7 +292,7 @@ local STEPS: { Step } = {
 	{
 		id = "outfit",
 		kind = "list",
-		numeral = "V",
+		numeral = "",
 		label = "Tenue",
 		title = "Tenue",
 		subtitle = "Les habits de votre dernier voyage.",
@@ -236,7 +310,7 @@ local STEPS: { Step } = {
 	{
 		id = "proportions",
 		kind = "proportions",
-		numeral = "VI",
+		numeral = "",
 		label = "Proportions",
 		title = "Proportions",
 		subtitle = "Votre stature, telle que le monde s'en souvient.",
@@ -245,7 +319,7 @@ local STEPS: { Step } = {
 	{
 		id = "destiny",
 		kind = "destiny",
-		numeral = "VII",
+		numeral = "",
 		label = "Destin",
 		title = "Le Choix du Destin",
 		subtitle = "Une seule magie coule dans vos veines.",
@@ -254,13 +328,19 @@ local STEPS: { Step } = {
 	{
 		id = "summary",
 		kind = "summary",
-		numeral = "VIII",
+		numeral = "",
 		label = "Récapitulatif",
 		title = "Récapitulatif",
 		subtitle = "Relisez-vous avant de rouvrir les yeux.",
 		shot = "summary",
 	},
 }
+
+-- Chiffres romains des onglets, calculés dans l'ordre (ajouter une étape ne demande rien d'autre).
+local ROMAN = { "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII" }
+for index, step in STEPS do
+	step.numeral = ROMAN[index] or tostring(index)
+end
 
 --------------------------------------------------------------------------------
 -- API publique
@@ -320,6 +400,8 @@ function AvatarCreatorCatalog.defaultSelection(): Selection
 		heightScale = AvatarConfig.HEIGHT_SCALE.default,
 		widthScale = AvatarConfig.WIDTH_SCALE.default,
 		magicIndex = 1,
+		raceIndex = RaceConfig.indexOf(RaceConfig.DEFAULT_RACE_ID),
+		skinIndex = 1,
 	}
 end
 

@@ -84,9 +84,13 @@ return function()
 		runtime.runUntil(5)
 	end
 
-	-- Choix de création valide (index 1 partout, magie `magicIndex`).
-	function H.selection(magicIndex)
-		return { baseIndex = 1, faceIndex = 1, markIndex = 1, hairIndex = 1, outfitIndex = 1, heightScale = 1, widthScale = 1, magicIndex = magicIndex or 1 }
+	-- Choix de création valide (index 1 partout, magie `magicIndex`, peuple et teint facultatifs).
+	function H.selection(magicIndex, raceIndex, skinIndex)
+		return {
+			baseIndex = 1, faceIndex = 1, markIndex = 1, hairIndex = 1, outfitIndex = 1,
+			heightScale = 1, widthScale = 1, magicIndex = magicIndex or 1,
+			raceIndex = raceIndex or 1, skinIndex = skinIndex or 1,
+		}
 	end
 
 	-- Joueur qui rejoint, avec un personnage ; s'il est nouveau, il valide la création (ApplyAvatar).

@@ -5,14 +5,17 @@
 	il ne sait rien du Hub, des joueurs ni de la sauvegarde.
 
 	Trois étapes, dans apply() :
-		1. corps, cheveux, tenue, taille : un HumanoidDescription (API officielle) ;
+		1. corps, teint, cheveux, tenue, taille (choix x facteurs du peuple) : un HumanoidDescription ;
 		2. tête classique : remplace la tête animée de Roblox, sur laquelle un Decal s'affiche déformé ;
-		3. visage (Decal) et marque (cicatrice, tatouage : image sur un SurfaceGui, placée librement).
+		3. visage (Decal), marque (cicatrice, tatouage : image sur un SurfaceGui, placée librement) et
+		   détails du peuple (oreilles effilées des elfes, voile d'ombre des Enfants de l'Ombre), sans
+		   aucun asset externe.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local AvatarConfig = require(ReplicatedStorage.Shared.Avatar.AvatarConfig)
+local RaceConfig = require(ReplicatedStorage.Shared.Avatar.RaceConfig)
 
 local CharacterPlacement = require(script.Parent.Parent.Core.CharacterPlacement)
 
@@ -33,6 +36,23 @@ local CLASSIC_HEAD_ATTACHMENTS: { [string]: Vector3 } = {
 local MARK_CANVAS_NAME = "FaceCanvas"
 local MARK_CANVAS_THICKNESS = 0.05 -- studs
 local MARK_CANVAS_PIXELS = 420 -- résolution du SurfaceGui (celle des images de marque)
+local DARK_SKIN_LUMINANCE = 0.42 -- en dessous, la marque reçoit un peu de lumière propre
+
+-- Détails du peuple.
+local EAR_NAME = "RaceEar"
+local EAR_SIZE = Vector3.new(0.14, 0.56, 0.26)
+local EAR_OFFSET = Vector3.new(0.6, 0.08, 0.1) -- depuis le centre de la tête (X : vers l'extérieur)
+local EAR_TILT = 24 -- degrés : la pointe part vers l'extérieur
+local EAR_SWEEP = -14 -- degrés : et un peu vers l'arrière
+local VEIL_NAME = "ShadowVeil"
+-- Texture livrée avec Roblox (pas un asset du catalogue) : fumée douce.
+local VEIL_TEXTURE = "rbxasset://textures/particles/smoke_main.dds"
+
+local BODY_COLOR_FIELDS = { "HeadColor", "TorsoColor", "LeftArmColor", "RightArmColor", "LeftLegColor", "RightLegColor" }
+
+-- Teint d'origine (avatar Roblox) de chaque personnage, relevé avant toute retouche : choisir
+-- « Teint de votre avatar » après avoir essayé d'autres teints le rétablit fidèlement.
+local nativeColors: { [Model]: { [string]: Color3 } } = setmetatable({}, { __mode = "k" }) :: any
 
 local AvatarAppearance = {}
 
@@ -45,8 +65,27 @@ local function buildDescription(humanoid: Humanoid, selection: Selection): Human
 	local hair = AvatarConfig.HAIR_OPTIONS[selection.hairIndex]
 	local outfit = AvatarConfig.OUTFIT_OPTIONS[selection.outfitIndex]
 
-	-- On part de l'apparence actuelle pour conserver la couleur de peau du joueur.
+	local race = RaceConfig.RACES[selection.raceIndex] or RaceConfig.RACES[1]
+	local tone = AvatarConfig.SKIN_TONES[selection.skinIndex]
+
+	-- On part de l'apparence actuelle (couleur de peau du joueur, notamment).
 	local description = humanoid:GetAppliedDescription()
+	local character = humanoid.Parent
+	if character and character:IsA("Model") and nativeColors[character] == nil then
+		local colors: { [string]: Color3 } = {}
+		for _, field in BODY_COLOR_FIELDS do
+			colors[field] = (description :: any)[field]
+		end
+		nativeColors[character] = colors
+	end
+	-- Teint : la tête et tout le corps visible, d'une seule couleur (cohérent quel que soit le corps).
+	local native = if character and character:IsA("Model") then nativeColors[character] else nil
+	for _, field in BODY_COLOR_FIELDS do
+		local color = if tone and tone.color then tone.color elseif native then native[field] else nil
+		if color then
+			(description :: any)[field] = color
+		end
+	end
 
 	-- Les accessoires de l'avatar Roblox (chapeaux, vêtements 3D, ailes...) jurent avec l'univers :
 	-- on les retire tous, puis on ne repose que ceux du jeu.
@@ -69,8 +108,8 @@ local function buildDescription(humanoid: Humanoid, selection: Selection): Human
 	description.BackAccessory = if outfit.backAccessoryId > 0 then tostring(outfit.backAccessoryId) else ""
 	description.Shirt = outfit.shirtId
 	description.Pants = outfit.pantsId
-	description.HeightScale = selection.heightScale
-	description.WidthScale = selection.widthScale
+	description.HeightScale = math.clamp(selection.heightScale * race.heightFactor, RaceConfig.MIN_HEIGHT_SCALE, RaceConfig.MAX_HEIGHT_SCALE)
+	description.WidthScale = math.clamp(selection.widthScale * race.widthFactor, RaceConfig.MIN_WIDTH_SCALE, RaceConfig.MAX_WIDTH_SCALE)
 
 	return description
 end
@@ -228,7 +267,16 @@ local function addMark(head: BasePart, mark: AvatarConfig.MarkOption)
 	surface.Face = Enum.NormalId.Front
 	surface.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
 	surface.CanvasSize = Vector2.new(MARK_CANVAS_PIXELS, MARK_CANVAS_PIXELS)
-	surface.LightInfluence = 1 -- éclairée comme le reste du visage, pas comme une interface
+	-- Éclairée comme le reste du visage... sauf sur une peau foncée, où une marque sombre se perdrait :
+	-- elle reçoit alors un peu de lumière propre, juste assez pour rester lisible.
+	local skin = head.Color
+	local luminance = 0.2126 * skin.R + 0.7152 * skin.G + 0.0722 * skin.B
+	if luminance < DARK_SKIN_LUMINANCE then
+		surface.LightInfluence = 0.55
+		surface.Brightness = 1.6
+	else
+		surface.LightInfluence = 1
+	end
 	surface.Parent = canvas
 
 	local image = Instance.new("ImageLabel")
@@ -244,22 +292,91 @@ local function addMark(head: BasePart, mark: AvatarConfig.MarkOption)
 	canvas.Parent = head
 end
 
--- Pose le visage puis la marque. Tout ce qui restait d'un choix précédent est d'abord détruit,
--- pour ne jamais superposer deux visages ou deux marques.
+-- Oreille effilée : un ellipsoïde fin, soudé au côté de la tête, de la couleur de la peau.
+local function addEar(head: BasePart, side: number)
+	local offset = CFrame.new(EAR_OFFSET.X * side, EAR_OFFSET.Y, EAR_OFFSET.Z)
+		* CFrame.Angles(math.rad(EAR_SWEEP), 0, math.rad(-EAR_TILT * side))
+	local ear = Instance.new("Part")
+	ear.Name = EAR_NAME
+	ear.Size = EAR_SIZE
+	ear.Color = head.Color
+	ear.Material = head.Material
+	ear.CanCollide = false
+	ear.CanQuery = false
+	ear.CanTouch = false
+	ear.Massless = true
+	ear.CastShadow = false
+	ear.CFrame = head.CFrame * offset
+	local mesh = Instance.new("SpecialMesh")
+	mesh.MeshType = Enum.MeshType.Sphere
+	mesh.Parent = ear
+	local weld = Instance.new("Weld")
+	weld.Part0 = head
+	weld.Part1 = ear
+	weld.C0 = offset
+	weld.Parent = ear
+	ear.Parent = head
+end
+
+-- Voile d'ombre : quelques volutes sombres, lentes et rares (jamais un écran de fumée).
+local function addShadowVeil(character: Model)
+	local torso = character:FindFirstChild("UpperTorso") or character:FindFirstChild("HumanoidRootPart")
+	if torso == nil or not torso:IsA("BasePart") then
+		return
+	end
+	local veil = Instance.new("ParticleEmitter")
+	veil.Name = VEIL_NAME
+	veil.Texture = VEIL_TEXTURE
+	veil.Color = ColorSequence.new(Color3.fromRGB(46, 30, 70), Color3.fromRGB(14, 10, 22))
+	veil.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(0.3, 0.78),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	veil.Size = NumberSequence.new(1.2, 2.6)
+	veil.Lifetime = NumberRange.new(1.4, 2.2)
+	veil.Rate = 4
+	veil.Speed = NumberRange.new(0.3, 0.8)
+	veil.SpreadAngle = Vector2.new(180, 180)
+	veil.LightEmission = 0
+	veil.LightInfluence = 1
+	veil.Parent = torso
+end
+
+-- Pose le visage, la marque et les détails du peuple. Tout ce qui restait d'un choix précédent est
+-- d'abord détruit, pour ne jamais superposer deux visages, deux marques ou deux paires d'oreilles.
 local function applyFaceLayers(character: Model, humanoid: Humanoid, selection: Selection)
+	for _, descendant in character:GetDescendants() do
+		if descendant.Name == VEIL_NAME and descendant:IsA("ParticleEmitter") then
+			descendant:Destroy()
+		end
+	end
+	local race = RaceConfig.RACES[selection.raceIndex] or RaceConfig.RACES[1]
+	if race.shadowVeil then
+		addShadowVeil(character)
+	end
+
 	local head = ensureClassicHead(character, humanoid)
 	if head == nil then
 		return
 	end
+	local tone = AvatarConfig.SKIN_TONES[selection.skinIndex]
+	if tone and tone.color then
+		head.Color = tone.color -- la tête classique garde sinon la couleur de l'ancienne tête
+	end
 
 	for _, child in head:GetChildren() do
-		if child:IsA("Decal") or child.Name == MARK_CANVAS_NAME then
+		if child:IsA("Decal") or child.Name == MARK_CANVAS_NAME or child.Name == EAR_NAME then
 			child:Destroy()
 		end
 	end
 
 	addFace(head, AvatarConfig.FACE_OPTIONS[selection.faceIndex].texture)
 	addMark(head, AvatarConfig.MARK_OPTIONS[selection.markIndex])
+	if race.pointedEars then
+		addEar(head, 1)
+		addEar(head, -1)
+	end
 end
 
 --------------------------------------------------------------------------------

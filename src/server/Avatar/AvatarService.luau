@@ -13,6 +13,12 @@
 		      directement, à chaque apparition. Il ne voit jamais le Hub.
 		   b. nouveau joueur : son personnage est figé et le Hub s'ouvre. À la validation,
 		      le choix est appliqué, sauvegardé, et le joueur est libéré.
+
+	Roulette du Destin (RequestDestinySpin) : c'est le SERVEUR qui tire la magie, à chances égales.
+	Le verdict est écrit dans le profil (creation.destinyRoll) AVANT toute attente : des demandes
+	rapprochées, une reconnexion ou un nouvel essai renvoient toujours le même. Il scelle la magie
+	du personnage : à la validation, la magie envoyée par le client est remplacée par le verdict.
+	Jamais payant (MagicConfig.DESTINY_RULES).
 ]]
 
 local Players = game:GetService("Players")
@@ -27,7 +33,10 @@ local AnchorService = require(script.Parent.Parent.Core.AnchorService)
 local CharacterPlacement = require(script.Parent.Parent.Core.CharacterPlacement)
 local AvatarAppearance = require(script.Parent.AvatarAppearance)
 local AvatarSerializer = require(script.Parent.AvatarSerializer)
+local RaceService = require(script.Parent.RaceService)
 local ProfileStore = require(script.Parent.Parent.Data.ProfileStore)
+local RateLimiter = require(script.Parent.Parent.Net.RateLimiter)
+local RaceConfig = require(ReplicatedStorage.Shared.Avatar.RaceConfig)
 
 type Selection = AvatarConfig.Selection
 
@@ -46,6 +55,9 @@ type PlayerState = {
 }
 
 local HUB_ANCHOR_REASON = "hub" -- ancrage compté : ne se mélange pas au rewind ni à l'anomalie
+
+local destinyLimiter = RateLimiter.new(0.5, 3) -- la roue ne tourne qu'une fois ; le reste est ignoré
+local destinyRandom = Random.new()
 
 local AvatarService = {}
 
@@ -72,6 +84,28 @@ end
 -- Publie la Magie Innée du joueur : CombatService la lit pour son ultime, le client pour son interface.
 local function publishMagic(player: Player, selection: Selection)
 	player:SetAttribute(MagicConfig.ATTRIBUTE, MagicConfig.MAGICS[selection.magicIndex].id)
+end
+
+-- Publie le peuple : RaceService en tire la vie, la vitesse, les dégâts reçus et la Tension.
+local function publishRace(player: Player, selection: Selection)
+	local race = RaceConfig.RACES[selection.raceIndex] or RaceConfig.RACES[1]
+	RaceService.setRace(player, race.id)
+end
+
+-- Verdict de la Roulette du Destin déjà enregistré pour ce joueur (index dans MAGICS), ou nil.
+local function getDestinyIndex(player: Player): number?
+	local profile = ProfileStore.get(player)
+	local creation = profile and (profile :: any).creation
+	local rollId = creation and creation.destinyRoll
+	if type(rollId) ~= "string" then
+		return nil
+	end
+	for index, magic in MagicConfig.MAGICS do
+		if magic.id == rollId then
+			return index
+		end
+	end
+	return nil -- magie retirée du jeu depuis : la roue n'a plus de verdict valable
 end
 
 --------------------------------------------------------------------------------
@@ -136,6 +170,11 @@ local function openCreator(player: Player, state: PlayerState, character: Model)
 	end
 	freeze(state, character)
 	Remotes.OpenCreator:FireClient(player)
+	local destinyIndex = getDestinyIndex(player)
+	if destinyIndex then
+		-- La roue a déjà parlé (session précédente) : le créateur s'ouvre avec la magie scellée.
+		Remotes.DestinyRevealed:FireClient(player, MagicConfig.MAGICS[destinyIndex].id, nil)
+	end
 end
 
 local function closeCreator(player: Player, state: PlayerState)
@@ -171,6 +210,9 @@ local function processApplyQueue(player: Player, state: PlayerState)
 		if humanoid then
 			snapToGround(state, humanoid)
 		end
+		if not state.isCustomizing or state.isConfirmPending then
+			RaceService.apply(player) -- vie et vitesse du peuple (pas pendant les simples aperçus)
+		end
 	end
 
 	state.isApplying = false
@@ -202,8 +244,15 @@ local function onApplyRequested(player: Player, rawSelection: any)
 		return
 	end
 
+	-- La Roulette du Destin a parlé : son verdict scelle la magie, quoi que le client envoie.
+	local destinyIndex = getDestinyIndex(player)
+	if destinyIndex then
+		selection.magicIndex = destinyIndex
+	end
+
 	state.savedSelection = selection
 	publishMagic(player, selection)
+	publishRace(player, selection)
 
 	local profile = ProfileStore.get(player)
 	if profile then
@@ -215,6 +264,40 @@ local function onApplyRequested(player: Player, rawSelection: any)
 	state.pendingSelection = selection
 	state.isConfirmPending = true
 	processApplyQueue(player, state)
+end
+
+-- Roulette du Destin : le serveur tire, enregistre, puis répond. Toujours le même verdict ensuite.
+local function onDestinySpinRequested(player: Player)
+	local state = states[player]
+	if state == nil or not destinyLimiter:allow(player) then
+		return
+	end
+	if not state.isCustomizing or state.isConfirmPending then
+		Remotes.DestinyRevealed:FireClient(player, nil, "closed")
+		return
+	end
+	local existing = getDestinyIndex(player)
+	if existing then
+		Remotes.DestinyRevealed:FireClient(player, MagicConfig.MAGICS[existing].id, nil)
+		return
+	end
+	local profile = ProfileStore.get(player)
+	if profile == nil then
+		Remotes.DestinyRevealed:FireClient(player, nil, "unavailable")
+		return
+	end
+	-- Tirage à chances égales, enregistré tout de suite (aucun yield entre le tirage et l'écriture).
+	local magic = MagicConfig.MAGICS[destinyRandom:NextInteger(1, #MagicConfig.MAGICS)]
+	local creation = (profile :: any).creation
+	if type(creation) ~= "table" then
+		creation = {}
+		;(profile :: any).creation = creation
+	end
+	creation.destinyRoll = magic.id
+	creation.rolledAt = os.time()
+	ProfileStore.markDirty(player)
+	task.spawn(ProfileStore.save, player)
+	Remotes.DestinyRevealed:FireClient(player, magic.id, nil)
 end
 
 --------------------------------------------------------------------------------
@@ -262,6 +345,7 @@ local function onPlayerAdded(player: Player)
 	if savedSelection and not AvatarConfig.DEBUG_ALWAYS_OPEN_CREATOR then
 		state.savedSelection = savedSelection
 		publishMagic(player, savedSelection)
+		publishRace(player, savedSelection)
 		player:SetAttribute(AvatarConfig.CUSTOMIZING_ATTRIBUTE, false)
 	end
 
@@ -291,6 +375,7 @@ function AvatarService.start()
 
 	Remotes.PreviewAvatar.OnServerEvent:Connect(onPreviewRequested)
 	Remotes.ApplyAvatar.OnServerEvent:Connect(onApplyRequested)
+	Remotes.RequestDestinySpin.OnServerEvent:Connect(onDestinySpinRequested)
 
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	Players.PlayerRemoving:Connect(onPlayerRemoving)

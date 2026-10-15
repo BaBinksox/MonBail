@@ -100,6 +100,7 @@ type AcquireOutcome = "acquired" | "locked" | "newerVersion" | "corrupt" | "erro
 -- dans `_backups` avant de migrer).
 local MIGRATIONS: { [number]: (record: { [string]: any }) -> () } = {
 	[1] = ProfileSchema.migrateV1toV2, -- ajoute la progression RPG (quêtes, rang, inventaire...) sans toucher à l'avatar
+	[2] = ProfileSchema.migrateV2toV3, -- peuple et teint par défaut des personnages existants, verdict du Destin
 }
 
 local ProfileStore = {}

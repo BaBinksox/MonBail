@@ -27,6 +27,8 @@ export type Magic = {
 	name: string,
 	ultimateName: string,
 	description: string,
+	advantage: string, -- point fort, en une phrase (carte du Destin)
+	drawback: string, -- point faible, en une phrase
 	radius: number, -- studs autour du lanceur
 	damage: number,
 	palette: Palette,
@@ -38,6 +40,8 @@ local MAGICS: { Magic } = {
 		name = "Antimatière",
 		ultimateName = "Éruption d'Antimatière",
 		description = "Le vide qui dévore. L'explosion aspire les survivants jusqu'à vous, à portée de lame.",
+		advantage = "Regroupe les survivants à portée de lame : idéal pour enchaîner.",
+		drawback = "Dégâts moyens ; les ennemis attirés vous entourent.",
 		radius = 30,
 		damage = 60,
 		palette = {
@@ -51,6 +55,8 @@ local MAGICS: { Magic } = {
 		name = "Pyromancie",
 		ultimateName = "Brasier du Parjure",
 		description = "Une colère qui ne s'éteint pas. Zone resserrée ; les survivants continuent de brûler.",
+		advantage = "Les survivants continuent de brûler après l'explosion.",
+		drawback = "Zone resserrée : il faut être au cœur de la mêlée.",
 		radius = 26,
 		damage = 70,
 		palette = {
@@ -64,6 +70,8 @@ local MAGICS: { Magic } = {
 		name = "Foudre",
 		ultimateName = "Jugement Céleste",
 		description = "Le ciel répond à votre appel. Frappe très loin, moins fort, et paralyse un instant.",
+		advantage = "La plus grande portée ; paralyse un instant.",
+		drawback = "Les dégâts directs les plus faibles.",
 		radius = 34,
 		damage = 50,
 		palette = {
@@ -77,6 +85,8 @@ local MAGICS: { Magic } = {
 		name = "Glace",
 		ultimateName = "Hiver Éternel",
 		description = "Un froid venu d'avant le monde. Ceux qu'il touche avancent comme dans un rêve.",
+		advantage = "Ralentit tout ce qu'elle touche : le temps de souffler ou de fuir.",
+		drawback = "Peu de dégâts sur la durée ; le froid ne tue pas seul.",
 		radius = 30,
 		damage = 55,
 		palette = {
@@ -90,6 +100,8 @@ local MAGICS: { Magic } = {
 		name = "Ombre",
 		ultimateName = "Marée d'Ombres",
 		description = "Ce qui rampe sous vos pas vous obéit. Courte portée, dégâts dévastateurs, et leur vie devient la vôtre.",
+		advantage = "Les dégâts les plus lourds, et vous soigne de ce que vous prenez.",
+		drawback = "La plus courte portée : il faut aller au contact.",
 		radius = 24,
 		damage = 80,
 		palette = {
@@ -103,6 +115,8 @@ local MAGICS: { Magic } = {
 		name = "Gravité",
 		ultimateName = "Effondrement Stellaire",
 		description = "Le poids du monde vous obéit. Les survivants sont arrachés au sol puis écrasés, et restent cloués un instant.",
+		advantage = "Soulève puis écrase : dégâts en deux temps et ennemis cloués au sol.",
+		drawback = "Effet lent à se déclencher ; les ennemis isolés en profitent peu.",
 		radius = 28,
 		damage = 52, -- + 12 à l'écrasement (UltimateBehaviors)
 		palette = {
@@ -124,8 +138,19 @@ local function getById(id: any): Magic
 	return MAGICS[1]
 end
 
+--[[
+	Roulette du Destin (créateur de personnage) — règles affichées au joueur :
+		- jamais payante, jamais de nouvelle chance contre de l'argent ou un objet ;
+		- c'est le SERVEUR qui tire, chaque magie a exactement la même chance (1 sur #MAGICS) ;
+		- une seule roue par personnage : le résultat est enregistré tout de suite et reste le même
+		  si l'on ferme le jeu, se reconnecte ou insiste ; il SCELLE la magie de ce personnage ;
+		- ne pas tourner la roue = choisir soi-même sa magie, librement.
+]]
+local DESTINY_RULES = "Le destin tire au sort parmi les magies, à chances égales. Une seule roue par personnage : son verdict est définitif et remplace votre choix. Gratuit, toujours."
+
 return table.freeze({
 	ATTRIBUTE = "InnateMagic", -- attribut (string = id de la magie) posé par le serveur sur le Player
+	DESTINY_RULES = DESTINY_RULES,
 	MAGICS = MAGICS,
 	getById = getById,
 })
