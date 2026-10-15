@@ -12,7 +12,7 @@
 			"party", "info", "error". Purement informatif : l'état fait foi.
 		RequestFullState client  -> serveur  () -> { [slice]: data }   (RemoteFunction)
 			Au démarrage du client (et après un rechargement), toutes les tranches d'un coup.
-		UpdateSettings   client  -> serveur  (settings: { music: number?, sfx: number?, uiScale: number?, reducedEffects: boolean? })
+		UpdateSettings   client  -> serveur  (settings: { music: number?, ambience: number?, sfx: number?, uiScale: number?, reducedEffects: boolean? })
 			Le serveur borne chaque valeur et l'écrit dans le profil.
 ]]
 

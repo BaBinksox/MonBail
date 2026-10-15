@@ -16,7 +16,7 @@
 		inventory    { [itemId] = quantité }
 		guild        { guildId, joinedAt }   (pointeur : la vérité est l'enregistrement de la guilde)
 		ledger       { [rewardKey] = date }  (récompenses déjà versées : jamais deux fois)
-		settings     { music, sfx, uiScale, reducedEffects }
+		settings     { music, ambience, sfx, uiScale, reducedEffects }
 		stats        { kills = { [enemyId] = n }, deaths }
 
 	Règles de prudence :
@@ -62,6 +62,7 @@ export type GuildRef = {
 
 export type Settings = {
 	music: number,
+	ambience: number, -- volume des ambiances (vent, bourdon) ; absent des anciens profils -> 1
 	sfx: number,
 	uiScale: number,
 	reducedEffects: boolean,
@@ -119,7 +120,7 @@ local function newProgression(): Progression
 end
 
 local function newSettings(): Settings
-	return { music = 1, sfx = 1, uiScale = 1, reducedEffects = false }
+	return { music = 1, ambience = 1, sfx = 1, uiScale = 1, reducedEffects = false }
 end
 
 function ProfileSchema.new(): Profile
@@ -235,6 +236,7 @@ local function asSettings(value: any): Settings
 	local defaults = newSettings()
 	return {
 		music = math.clamp(asNumber(raw.music, defaults.music), 0, 1),
+		ambience = math.clamp(asNumber(raw.ambience, defaults.ambience), 0, 1),
 		sfx = math.clamp(asNumber(raw.sfx, defaults.sfx), 0, 1),
 		uiScale = math.clamp(asNumber(raw.uiScale, defaults.uiScale), 0.75, 1.5),
 		reducedEffects = if type(raw.reducedEffects) == "boolean" then raw.reducedEffects else defaults.reducedEffects,

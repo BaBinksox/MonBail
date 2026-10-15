@@ -218,12 +218,7 @@ return table.freeze({
 	-- Les interfaces de jeu (jauge de Tension...) le lisent pour se masquer.
 	CUSTOMIZING_ATTRIBUTE = "IsCustomizing",
 
-	-- >>> MUSIQUE DU HUB : mets ici l'ID de ton son, au format "rbxassetid://123456" ("" = silence).
-	-- Placeholder : "Nursery Crime 60" (APM Music, sous licence Roblox, utilisable dans tous les jeux),
-	-- une comptine à la boîte à musique volontairement dérangeante.
-	-- Autres pistes du même catalogue : 1837786350 "Music Box Of Death 30", 1840004224 "Twinkle (a 30)".
-	HUB_MUSIC_ID = "rbxassetid://1839911004",
-	HUB_MUSIC_VOLUME = 0.4,
+	-- Musique du créateur : voir AudioConfig.TRACKS.creator (Shared/Audio/AudioConfig).
 
 	-- true = ignore la sauvegarde et rouvre le Hub à chaque connexion (pour le tester).
 	-- Rien n'est effacé : repasser à false retrouve le personnage sauvegardé, ou le remplace

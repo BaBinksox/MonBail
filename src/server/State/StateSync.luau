@@ -145,6 +145,9 @@ function StateSync.start()
 			if type(raw.music) == "number" and raw.music == raw.music then
 				settings.music = math.clamp(raw.music, 0, 1)
 			end
+			if type(raw.ambience) == "number" and raw.ambience == raw.ambience then
+				settings.ambience = math.clamp(raw.ambience, 0, 1)
+			end
 			if type(raw.sfx) == "number" and raw.sfx == raw.sfx then
 				settings.sfx = math.clamp(raw.sfx, 0, 1)
 			end

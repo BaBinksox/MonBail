@@ -1029,6 +1029,12 @@ end
 
 local soundCache: { [string]: Sound } = {}
 
+-- Chargé à la demande : Theme reste utilisable sans le reste du client (aperçus, tests).
+local function getAudioMixer(): any
+	local audioFolder = ((script.Parent :: Instance).Parent :: Instance):WaitForChild("Audio")
+	return require(audioFolder:WaitForChild("AudioMixer") :: ModuleScript)
+end
+
 function Theme.playSound(name: string)
 	local soundId = SOUNDS[name]
 	if soundId == nil or soundId == "" then
@@ -1040,6 +1046,7 @@ function Theme.playSound(name: string)
 		newSound.Name = "ThemeSound_" .. name
 		newSound.SoundId = soundId
 		newSound.Volume = 0.5
+		getAudioMixer().assign(newSound, "Sfx")
 		newSound.Parent = SoundService
 		soundCache[name] = newSound
 		sound = newSound

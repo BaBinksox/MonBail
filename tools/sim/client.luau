@@ -83,8 +83,17 @@ return function(mock, R, player)
 	clientExtra["UnreliableRemoteEvent.FireClient"] = clientExtra["RemoteEvent.FireClient"]
 	clientExtra["UnreliableRemoteEvent.FireAllClients"] = clientExtra["RemoteEvent.FireAllClients"]
 	clientExtra["UnreliableRemoteEvent.FireServer"] = clientExtra["RemoteEvent.FireServer"]
-	clientExtra["Sound.Play"] = function(self) rawget(self, "_props").Playing = true end
-	clientExtra["Sound.Stop"] = function(self) rawget(self, "_props").Playing = false end
+	clientExtra["Sound.Play"] = function(self)
+		local props = rawget(self, "_props")
+		props.Playing = true
+		props.IsPlaying = true
+		props.PlayCount = (props.PlayCount or 0) + 1
+	end
+	clientExtra["Sound.Stop"] = function(self)
+		local props = rawget(self, "_props")
+		props.Playing = false
+		props.IsPlaying = false
+	end
 	clientExtra["Sound.Pause"] = clientExtra["Sound.Stop"]
 	clientExtra["Sound.Resume"] = clientExtra["Sound.Play"]
 	clientExtra["ParticleEmitter.Emit"] = function() end

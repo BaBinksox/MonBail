@@ -35,6 +35,7 @@ local RegionConfig = require(worldFolder:WaitForChild("RegionConfig") :: ModuleS
 local Remotes = require(worldFolder:WaitForChild("WorldRemotes") :: ModuleScript)
 
 local AmbientParticles = require(script.Parent:WaitForChild("AmbientParticles") :: ModuleScript)
+local AudioMixer = require(script.Parent.Parent:WaitForChild("Audio"):WaitForChild("AudioMixer") :: ModuleScript)
 local LightingPresets = require(script.Parent:WaitForChild("LightingPresets") :: ModuleScript)
 
 local APPLY_INTERVAL = 0.5 -- secondes entre deux mises à jour de la lumière en temps normal
@@ -86,6 +87,7 @@ local function newLoopingSound(name: string, soundId: string): Sound
 	sound.SoundId = soundId
 	sound.Looped = true
 	sound.Volume = 0
+	AudioMixer.assign(sound, "Ambience") -- réglage « Ambiance » du joueur
 	sound.Parent = SoundService
 	return sound
 end

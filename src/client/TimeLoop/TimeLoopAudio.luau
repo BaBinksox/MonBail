@@ -1,40 +1,36 @@
 --!strict
 --[[
 	TimeLoopAudio
-	Le son du rembobinage : un chœur qui se déforme. Local à ce client.
+	Le chœur du rembobinage : un souffle de voix féminines, court et discret. Local à ce client.
+	Joué quand le SERVEUR confirme le rembobinage (TimeLoopRemotes.RewindStarted, voir
+	TimeLoopController), jamais sur la simple pression de la touche R.
 
-	Trois traitements, pour que l'effet reste angoissant sans devenir pénible à force d'être entendu :
-		- déformation : un PitchShiftSoundEffect fait glisser la hauteur du son vers le grave
-		  pendant toute la durée du rewind ;
-		- variation   : chaque écoute part d'un autre endroit du morceau, à une hauteur et une
-		  vitesse légèrement différentes ;
-		- lassitude   : des rewinds rapprochés sont joués de moins en moins fort, et chaque écoute
-		  se termine par un fondu de sortie (fadeOut).
+	Réglages : AudioConfig.REWIND_CHOIR (ID, volume, durée, fondus). Le son est rangé dans la
+	catégorie « Effets » (AudioMixer) : le réglage de volume du joueur s'applique, 0 le coupe.
+		- jamais deux chœurs superposés : un seul Sound, et un rembobinage moins de `minInterval`
+		  secondes après le précédent ne le relance pas ;
+		- court : il s'efface au bout de `maxDuration` secondes, même si le rembobinage dure ;
+		- lassitude : des rembobinages rapprochés le jouent de moins en moins fort ;
+		- légère retombée de hauteur pendant le rembobinage (`endOctave`).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
 
-local sharedFolder = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("TimeLoop")
-local Config = require(sharedFolder:WaitForChild("TimeLoopConfig") :: ModuleScript)
+local AudioConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Audio"):WaitForChild("AudioConfig") :: ModuleScript)
+local AudioMixer = require(script.Parent.Parent:WaitForChild("Audio"):WaitForChild("AudioMixer") :: ModuleScript)
 
-local FADE_IN = 0.15 -- secondes : le chœur surgit presque d'un coup
-local START_OCTAVE_MIN = 0.95 -- hauteur de départ, tirée au hasard dans cette plage
-local START_OCTAVE_MAX = 1.12
-local SPEED_MIN = 0.92 -- vitesse de lecture, tirée au hasard dans cette plage
-local SPEED_MAX = 1.06
-local MAX_START_RATIO = 0.5 -- le son démarre quelque part dans cette première partie du morceau
-
-local random = Random.new()
+local CHOIR = AudioConfig.REWIND_CHOIR
 
 local TimeLoopAudio = {}
 
--- Créés depuis un LocalScript : ce son ne se joue que sur ce client.
+-- Créé depuis un LocalScript : ce son ne se joue que sur ce client.
 local sound = Instance.new("Sound")
-sound.Name = "TimeLoopRewindSound"
-sound.SoundId = Config.REWIND_SOUND_ID
+sound.Name = "TimeLoopRewindChoir"
+sound.SoundId = CHOIR.id
 sound.Volume = 0
+AudioMixer.assign(sound, "Sfx")
 sound.Parent = SoundService
 
 local pitchShift = Instance.new("PitchShiftSoundEffect")
@@ -44,54 +40,59 @@ pitchShift.Parent = sound
 local volumeTween: Tween? = nil
 local pitchTween: Tween? = nil
 local lastPlayClock = -math.huge
-local fatigueRatio = 1 -- 1 = volume plein ; baisse à chaque rewind rapproché
+local fatigueRatio = 1 -- 1 = volume plein ; baisse à chaque rembobinage rapproché
+local playToken = 0
 
-local function tween(instance: Instance, duration: number, style: Enum.EasingStyle, goal: { [string]: any }): Tween
-	local newTween = TweenService:Create(instance, TweenInfo.new(duration, style, Enum.EasingDirection.Out), goal)
+local function tween(instance: Instance, duration: number, goal: { [string]: any }): Tween
+	local newTween = TweenService:Create(instance, TweenInfo.new(math.max(duration, 0.05), Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), goal)
 	newTween:Play()
 	return newTween
 end
 
-local function cancelTweens()
+local function nextVolume(now: number): number
+	if now - lastPlayClock <= CHOIR.fatigueWindow then
+		fatigueRatio = math.max(fatigueRatio * CHOIR.fatigueFactor, CHOIR.minVolumeRatio)
+	else
+		fatigueRatio = 1
+	end
+	return CHOIR.volume * fatigueRatio
+end
+
+-- Lance le chœur pour un rembobinage de `duration` secondes.
+function TimeLoopAudio.playRewind(duration: number)
+	if CHOIR.id == "" then
+		return
+	end
+	local now = os.clock()
+	if sound.IsPlaying and now - lastPlayClock < CHOIR.minInterval then
+		return -- le chœur précédent est encore là : pas de doublon
+	end
+	local volume = nextVolume(now)
+	lastPlayClock = now
+	playToken += 1
+	local token = playToken
+
 	if volumeTween then
 		volumeTween:Cancel()
 	end
 	if pitchTween then
 		pitchTween:Cancel()
 	end
-end
-
--- Volume de cette écoute : plein après un long silence, réduit si le joueur enchaîne les rewinds.
-local function nextVolume(): number
-	local now = os.clock()
-	if now - lastPlayClock <= Config.REWIND_SOUND_FATIGUE_WINDOW then
-		fatigueRatio = math.max(fatigueRatio * Config.REWIND_SOUND_FATIGUE_FACTOR, Config.REWIND_SOUND_MIN_VOLUME_RATIO)
-	else
-		fatigueRatio = 1
-	end
-	lastPlayClock = now
-	return Config.REWIND_SOUND_VOLUME * fatigueRatio
-end
-
--- Lance le chœur pour un rewind de `duration` secondes.
-function TimeLoopAudio.playRewind(duration: number)
-	if Config.REWIND_SOUND_ID == "" then
-		return
-	end
-	cancelTweens()
-
-	sound.PlaybackSpeed = random:NextNumber(SPEED_MIN, SPEED_MAX)
-	sound.TimePosition = if sound.IsLoaded then random:NextNumber(0, sound.TimeLength * MAX_START_RATIO) else 0
 	sound.Volume = 0
-	pitchShift.Octave = random:NextNumber(START_OCTAVE_MIN, START_OCTAVE_MAX)
+	sound.TimePosition = 0
+	pitchShift.Octave = 1
 	sound:Play()
-
-	volumeTween = tween(sound, FADE_IN, Enum.EasingStyle.Sine, { Volume = nextVolume() })
-	-- La hauteur s'effondre pendant que le temps recule : c'est le son qui "se déforme".
-	pitchTween = tween(pitchShift, duration, Enum.EasingStyle.Quad, { Octave = Config.REWIND_SOUND_END_OCTAVE })
+	volumeTween = tween(sound, CHOIR.fadeIn, { Volume = volume })
+	local audible = math.min(duration, CHOIR.maxDuration)
+	pitchTween = tween(pitchShift, audible, { Octave = CHOIR.endOctave })
+	task.delay(math.max(audible - CHOIR.fadeOut, CHOIR.fadeIn), function()
+		if token == playToken then
+			TimeLoopAudio.fadeOut()
+		end
+	end)
 end
 
--- Fondu de sortie, à la fin du rembobinage. Le son s'arrête une fois devenu inaudible.
+-- Fondu de sortie (fin du rembobinage ou durée maximale atteinte). Le son s'arrête une fois muet.
 function TimeLoopAudio.fadeOut()
 	if not sound.IsPlaying then
 		return
@@ -99,11 +100,11 @@ function TimeLoopAudio.fadeOut()
 	if volumeTween then
 		volumeTween:Cancel()
 	end
-
-	local fadeTween = tween(sound, Config.REWIND_SOUND_FADE_OUT, Enum.EasingStyle.Sine, { Volume = 0 })
+	local token = playToken
+	local fadeTween = tween(sound, CHOIR.fadeOut, { Volume = 0 })
 	volumeTween = fadeTween
 	fadeTween.Completed:Once(function(state: Enum.PlaybackState)
-		if state == Enum.PlaybackState.Completed and volumeTween == fadeTween then
+		if state == Enum.PlaybackState.Completed and token == playToken then
 			sound:Stop()
 		end
 	end)

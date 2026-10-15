@@ -35,6 +35,7 @@ local WorldMapConfig = require(sharedFolder:WaitForChild("World"):WaitForChild("
 local DialogueRemotes = require(npcFolder:WaitForChild("DialogueRemotes") :: ModuleScript)
 
 local DialogueView = require(script.Parent:WaitForChild("DialogueView") :: ModuleScript)
+local AudioMixer = require(script.Parent.Parent:WaitForChild("Audio"):WaitForChild("AudioMixer") :: ModuleScript)
 local UIBus = require(script.Parent.Parent:WaitForChild("UI"):WaitForChild("UIBus") :: ModuleScript)
 
 local ADVANCE_ACTION = "DialogueAdvance"
@@ -56,6 +57,7 @@ local blip = Instance.new("Sound")
 blip.Name = "DialogueBlip"
 blip.SoundId = Config.BLIP_SOUND_ID
 blip.Volume = Config.BLIP_VOLUME
+AudioMixer.assign(blip, "Sfx")
 blip.Parent = SoundService
 
 --------------------------------------------------------------------------------

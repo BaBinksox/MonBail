@@ -32,20 +32,7 @@ local TimeLoopConfig = {
 	REWIND_KEY = Enum.KeyCode.R,
 
 	-- Immersion du rembobinage (client) -----------------------------------------
-	-- >>> SON DU TIME LOOP : mets ici l'ID de ton chœur, au format "rbxassetid://123456" ("" = silence).
-	-- Placeholder : "Heavenly Presence Eerie Choral Tones Dark" (ProSoundEffects, bibliothèque Roblox),
-	-- des voix chorales sombres et réverbérées. Autre piste du même catalogue : 9125439864
-	-- "Choral Drone Eerie Tones Hollow Reverberant".
-	REWIND_SOUND_ID = "rbxassetid://9125602726",
-	REWIND_SOUND_VOLUME = 0.7,
-	-- Le son se déforme pendant le rewind : sa hauteur glisse jusqu'à cette valeur (1 = normal, 0.5 = une octave plus bas).
-	REWIND_SOUND_END_OCTAVE = 0.5,
-	REWIND_SOUND_FADE_OUT = 1.6, -- secondes de fondu de sortie, à la fin du rembobinage
-	-- Lassitude : chaque rewind lancé moins de REWIND_SOUND_FATIGUE_WINDOW secondes après le précédent
-	-- joue le chœur un cran moins fort (x REWIND_SOUND_FATIGUE_FACTOR), sans descendre sous le minimum.
-	REWIND_SOUND_FATIGUE_WINDOW = 90,
-	REWIND_SOUND_FATIGUE_FACTOR = 0.75,
-	REWIND_SOUND_MIN_VOLUME_RATIO = 0.35,
+	-- Chœur du rembobinage : voir AudioConfig.REWIND_CHOIR (Shared/Audio/AudioConfig).
 
 	-- >>> IMAGES DE GLITCH : des textures de "neige" plaquées sur tout l'écran pendant l'anomalie et
 	-- le rembobinage. Ajoute les tiennes à la liste (une liste vide = glitch sans images).

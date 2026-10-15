@@ -30,7 +30,6 @@ local GuiService = game:GetService("GuiService")
 local Lighting = game:GetService("Lighting")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local SoundService = game:GetService("SoundService")
 local StarterGui = game:GetService("StarterGui")
 
 local sharedFolder = ReplicatedStorage:WaitForChild("Shared")
@@ -45,6 +44,7 @@ local Catalog = require(script.Parent:WaitForChild("AvatarCreatorCatalog"))
 local CreatorSession = require(script.Parent:WaitForChild("CreatorSession"))
 local Input = require(script.Parent:WaitForChild("AvatarCreatorInput"))
 local View = require(script.Parent:WaitForChild("AvatarCreatorView"))
+local MusicDirector = require(script.Parent.Parent:WaitForChild("Audio"):WaitForChild("MusicDirector"))
 
 type Selection = AvatarConfig.Selection
 type Step = Catalog.Step
@@ -71,8 +71,6 @@ local CLOSE_FADE_OUT = 0.6
 local CLOSE_FADE_IN = 1.2 -- réouverture de secours (voir scheduleReopenSafety)
 local REOPEN_SAFETY_DELAY = 8 -- s après la fermeture : filet si ni la cinématique ni son repli n'ont rouvert l'écran
 
-local MUSIC_FADE_IN = 2.5
-local MUSIC_FADE_OUT = 1.5
 
 local PREVIEW_DELAY = 0.12 -- anti-rebond des aperçus
 local PREVIEW_MIN_INTERVAL = 0.25 -- au plus un aperçu par quart de seconde pendant un défilement rapide
@@ -106,14 +104,6 @@ local APPEARANCE_COUNT = Catalog.countAppearanceSteps()
 
 -- MagicConfig.MAGICS est affiché tel quel : une magie ajoutée apparaît sans rien toucher ici.
 local view = View.new(STEPS, MagicConfig.MAGICS)
-
--- Créé depuis un LocalScript : ce son n'existe et ne se joue que sur ce client.
-local music = Instance.new("Sound")
-music.Name = "HubMusic"
-music.SoundId = AvatarConfig.HUB_MUSIC_ID
-music.Looped = true
-music.Volume = 0
-music.Parent = SoundService
 
 --------------------------------------------------------------------------------
 -- État
@@ -204,22 +194,15 @@ end
 -- Musique et ambiance (effets locaux : seul ce client les perçoit)
 --------------------------------------------------------------------------------
 
+-- La musique du créateur passe par MusicDirector (couche prioritaire « override ») : une seule
+-- musique à la fois, fondus réglés dans AudioConfig.TRACKS.creator, volume « Musique » du joueur.
+-- Changer de page ne la relance pas ; à la fermeture, la musique de la région reprend.
 local function startMusic()
-	if AvatarConfig.HUB_MUSIC_ID == "" then
-		return
-	end
-	music.Volume = 0
-	music:Play()
-	Theme.tween(music, { Volume = AvatarConfig.HUB_MUSIC_VOLUME }, MUSIC_FADE_IN, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+	MusicDirector.set("override", "creator")
 end
 
 local function stopMusic()
-	local fadeOut = Theme.tween(music, { Volume = 0 }, MUSIC_FADE_OUT, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
-	fadeOut.Completed:Once(function()
-		if phase == "closed" or phase == "closing" then
-			music:Stop()
-		end
-	end)
+	MusicDirector.set("override", nil)
 end
 
 -- Monde froid et délavé (la profondeur de champ est gérée par AvatarCreatorCamera).
