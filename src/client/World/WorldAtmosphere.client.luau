@@ -104,8 +104,11 @@ local function getTargetWeather(): any
 	return Config.WEATHERS[workspace:GetAttribute(Config.WEATHER_ATTRIBUTE)] or Config.WEATHERS[Config.DEFAULT_WEATHER]
 end
 
+-- Anomalie : soit globale (attribut du Workspace, ancien comportement), soit propre à la rencontre de
+-- boss à laquelle ce joueur participe (attribut "EncounterMood" posé par EncounterService sur lui seul).
 local function isAnomalyActive(): boolean
 	return workspace:GetAttribute(Config.MOOD_ATTRIBUTE) == Config.MOODS.Anomaly
+		or localPlayer:GetAttribute("EncounterMood") == Config.MOODS.Anomaly
 end
 
 -- Météo affichée : elle glisse vers la météo du serveur au lieu de changer d'un coup.

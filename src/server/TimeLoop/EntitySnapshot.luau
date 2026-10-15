@@ -47,11 +47,22 @@ function EntitySnapshot.capture(character: Model, timestamp: number): Snapshot?
 	}
 end
 
+-- true si l'entité est morte (Humanoid à 0 PV ou ennemi marqué éliminé par DamageService).
+-- Une mort est définitive : le rembobinage ne la touche plus du tout.
+function EntitySnapshot.isDead(character: Model): boolean
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	return humanoid == nil
+		or humanoid.Health <= 0
+		or humanoid:GetState() == Enum.HumanoidStateType.Dead
+		or character:GetAttribute("Defeated") == true
+end
+
 -- Applique l'état continu (position, santé) interpolé entre deux snapshots.
 -- alpha = 0 -> `newer`, alpha = 1 -> `older`.
+-- Jamais sur une entité morte : sinon un cadavre retrouverait des PV et pourrait être "tué" une 2e fois.
 function EntitySnapshot.applyInterpolated(character: Model, newer: Snapshot, older: Snapshot, alpha: number)
 	local humanoid, rootPart = EntitySnapshot.getParts(character)
-	if humanoid == nil or rootPart == nil then
+	if humanoid == nil or rootPart == nil or EntitySnapshot.isDead(character) then
 		return
 	end
 
@@ -61,6 +72,9 @@ end
 
 -- Applique l'état discret (non interpolable) du snapshot d'arrivée, une seule fois en fin de rewind.
 function EntitySnapshot.applyDiscreteState(character: Model, snapshot: Snapshot)
+	if EntitySnapshot.isDead(character) then
+		return
+	end
 	character:SetAttribute(Config.COMBAT_STATE_ATTRIBUTE, snapshot.combatState)
 end
 

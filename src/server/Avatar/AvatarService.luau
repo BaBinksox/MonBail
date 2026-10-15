@@ -22,6 +22,7 @@ local AvatarConfig = require(ReplicatedStorage.Shared.Avatar.AvatarConfig)
 local MagicConfig = require(ReplicatedStorage.Shared.Magic.MagicConfig)
 local Remotes = require(ReplicatedStorage.Shared.Avatar.AvatarRemotes)
 
+local AnchorService = require(script.Parent.Parent.Core.AnchorService)
 local AvatarAppearance = require(script.Parent.AvatarAppearance)
 local AvatarSerializer = require(script.Parent.AvatarSerializer)
 local ProfileStore = require(script.Parent.Parent.Data.ProfileStore)
@@ -34,8 +35,7 @@ type PlayerState = {
 	-- Hub
 	isCustomizing: boolean,
 	isConfirmPending: boolean, -- choix final reçu, fermeture dès que l'application est terminée
-	frozenRootPart: BasePart?,
-	wasAnchored: boolean,
+	frozenRootPart: BasePart?, -- figé par AnchorService (raison HUB_ANCHOR_REASON)
 	groundY: number?, -- hauteur du sol sous le personnage figé
 
 	-- File d'application : un seul ApplyDescription à la fois, seule la dernière demande compte
@@ -44,6 +44,7 @@ type PlayerState = {
 }
 
 local GROUND_RAY_LENGTH = 50
+local HUB_ANCHOR_REASON = "hub" -- ancrage compté : ne se mélange pas au rewind ni à l'anomalie
 
 local AvatarService = {}
 
@@ -93,16 +94,15 @@ local function freeze(state: PlayerState, character: Model)
 	local ground = workspace:Raycast(rootPart.Position, Vector3.new(0, -GROUND_RAY_LENGTH, 0), raycastParams)
 
 	state.frozenRootPart = rootPart
-	state.wasAnchored = rootPart.Anchored
 	state.groundY = if ground then ground.Position.Y else nil
 
-	rootPart.Anchored = true
+	AnchorService.hold(rootPart, HUB_ANCHOR_REASON)
 	snapToGround(state, humanoid)
 end
 
 local function unfreeze(state: PlayerState)
 	if state.frozenRootPart then
-		state.frozenRootPart.Anchored = state.wasAnchored
+		AnchorService.release(state.frozenRootPart, HUB_ANCHOR_REASON)
 	end
 	state.frozenRootPart = nil
 	state.groundY = nil
@@ -223,7 +223,6 @@ local function onPlayerAdded(player: Player)
 		isCustomizing = false,
 		isConfirmPending = false,
 		frozenRootPart = nil,
-		wasAnchored = false,
 		groundY = nil,
 		isApplying = false,
 		pendingSelection = nil,

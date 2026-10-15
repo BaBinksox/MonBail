@@ -10,9 +10,12 @@
 		4. sinon                                      -> chase() (PathfindingService)
 
 	L'attaque fatale est le lien avec le Time-Loop :
-		charge (immobile, invulnérable) -> TimeLoopService.openAnomaly(joueur le plus proche)
-		   A. le joueur rembobine -> tout revient 5 s en arrière, le boss reste sonné : la faille ;
-		   B. le joueur ne fait rien -> TimeLoopService le tue, le boss reprend sa traque.
+		charge (immobile, invulnérable) -> TimeLoopService.openAnomaly(participant le plus proche)
+		   A. un participant rembobine -> la RENCONTRE revient 5 s en arrière, le boss reste sonné : la faille ;
+		   B. personne ne fait rien    -> TimeLoopService tue le joueur visé, le boss reprend sa traque.
+
+	Chaque boss a sa RENCONTRE (EncounterService) : il ne cible que ses participants, l'anomalie et
+	le rembobinage ne concernent qu'eux, et seule leur ambiance vire au rouge.
 
 	Le serveur ne joue aucun effet visuel : il publie l'état du boss dans un attribut du Model,
 	et BossEffectsController (client) fait le spectacle.
@@ -20,7 +23,6 @@
 
 local CollectionService = game:GetService("CollectionService")
 local PathfindingService = game:GetService("PathfindingService")
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Boss.BossConfig)
@@ -31,11 +33,14 @@ local TimeLoopConfig = require(ReplicatedStorage.Shared.TimeLoop.TimeLoopConfig)
 local AvatarService = require(script.Parent.Parent.Avatar.AvatarService)
 local CombatStatus = require(script.Parent.Parent.Combat.CombatStatus)
 local DamageService = require(script.Parent.Parent.Combat.DamageService)
+local AnchorService = require(script.Parent.Parent.Core.AnchorService)
+local EncounterService = require(script.Parent.Parent.Encounter.EncounterService)
 local TimeLoopService = require(script.Parent.Parent.TimeLoop.TimeLoopService)
-local WorldService = require(script.Parent.Parent.World.WorldService)
 
 local STATES = Config.STATES
-local POLL_INTERVAL = 0.1 -- secondes entre deux vérifications pendant une attente (anomalie, rewind)
+local POLL_INTERVAL = 0.1 -- secondes entre deux vérifications pendant une attente (rewind)
+local CHARGE_ANCHOR_REASON = "boss_charge"
+local RETURN_HOME_DISTANCE = 8 -- studs : sans cible, il rentre à son point d'apparition s'il en est plus loin
 
 type Boss = {
 	model: Model,
@@ -46,6 +51,8 @@ type Boss = {
 	attackTrack: AnimationTrack?,
 	nextAttackClock: number, -- os.clock() à partir duquel il peut refrapper
 	ultimateReadyClock: number, -- os.clock() à partir duquel l'attaque fatale est disponible
+	home: Vector3, -- point d'apparition
+	encounterId: string, -- rencontre (timeline) du boss
 }
 
 local BossService = {}
@@ -109,13 +116,13 @@ local function getTargetParts(player: Player): (Humanoid?, BasePart?)
 	return humanoid, rootPart
 end
 
--- Le joueur vivant le plus proche dans AGGRO_RANGE, avec son RootPart et sa distance.
+-- Le PARTICIPANT vivant le plus proche dans AGGRO_RANGE, avec son RootPart et sa distance.
 local function findNearestPlayer(boss: Boss): (Player?, BasePart?, number)
 	local nearestPlayer: Player? = nil
 	local nearestRoot: BasePart? = nil
 	local nearestDistance = Config.AGGRO_RANGE
 
-	for _, player in Players:GetPlayers() do
+	for _, player in EncounterService.getParticipants(boss.model) do
 		local _, rootPart = getTargetParts(player)
 		if rootPart then
 			local distance = (rootPart.Position - boss.rootPart.Position).Magnitude
@@ -195,7 +202,7 @@ local function performAttack(boss: Boss, target: Player, targetRoot: BasePart)
 	end
 
 	task.wait(Config.ATTACK_WINDUP)
-	if not isAlive(boss) or TimeLoopService.isRewinding() then
+	if not isAlive(boss) or TimeLoopService.isEncounterRewinding(boss.encounterId) then
 		return
 	end
 
@@ -221,18 +228,8 @@ local function performAttack(boss: Boss, target: Player, targetRoot: BasePart)
 	CombatRemotes.HitConfirmed:FireAllClients(boss.model, target.Character, damage)
 end
 
--- Attend la fin de l'anomalie de `target`. Retourne true si elle s'est terminée par un rewind.
-local function waitForAnomalyOutcome(target: Player): boolean
-	while TimeLoopService.isInAnomaly(target) do
-		task.wait(POLL_INTERVAL)
-	end
-	-- Un rewind ferme l'anomalie et démarre dans la même frame : s'il y en a un en cours
-	-- maintenant, c'est que le joueur a rembobiné. Sinon, la fenêtre a expiré (ou il est parti).
-	return TimeLoopService.isRewinding()
-end
-
-local function waitForRewindEnd()
-	while TimeLoopService.isRewinding() do
+local function waitForRewindEnd(boss: Boss)
+	while TimeLoopService.isEncounterRewinding(boss.encounterId) do
 		task.wait(POLL_INTERVAL)
 	end
 end
@@ -244,20 +241,21 @@ local function performUltimate(boss: Boss)
 	-- 1. Charge : immobile et intouchable. Les clients voient l'état Charging et jouent l'effet.
 	log(boss, "charge son attaque fatale")
 	stopMoving(boss)
-	boss.rootPart.Anchored = true
+	AnchorService.hold(boss.rootPart, CHARGE_ANCHOR_REASON)
 	boss.model:SetAttribute(CombatConfig.INVULNERABLE_ATTRIBUTE, true)
 	setState(boss, STATES.Charging)
-	-- Le monde entier bascule : ciel noir, lumière rouge sang, pour tous les joueurs.
-	WorldService.setAnomaly(boss.model, true)
+	-- Les participants basculent : ciel noir, lumière rouge sang (eux seuls, pas tout le serveur).
+	EncounterService.setAnomalyMood(boss.model, true)
 	task.wait(Config.CHARGE_DURATION)
 
 	-- 2. L'attaque part : au lieu de tuer le joueur, on ouvre son anomalie temporelle.
+	--    Son issue est enregistrée par TimeLoopService au moment même de la fermeture.
 	local wasRewound = false
-	if isAlive(boss) and not TimeLoopService.isRewinding() then
+	if isAlive(boss) and not TimeLoopService.isEncounterRewinding(boss.encounterId) then
 		local target = findNearestPlayer(boss)
 		if target and TimeLoopService.openAnomaly(target) then
 			log(boss, `anomalie ouverte sur {target.Name}`)
-			wasRewound = waitForAnomalyOutcome(target)
+			wasRewound = TimeLoopService.waitForAnomalyOutcome(target) == "rewound"
 		end
 	end
 	if wasRewound then
@@ -265,14 +263,14 @@ local function performUltimate(boss: Boss)
 		setState(boss, STATES.Staggered)
 	end
 
-	-- 3. Fin de la charge. On attend la fin d'un éventuel rewind avant de libérer le boss :
-	--    le rewind gèle lui-même les entités et leur rend ensuite leur état Anchored d'avant.
-	waitForRewindEnd()
-	WorldService.setAnomaly(boss.model, false) -- le danger est passé (rewind ou mort) : le ciel se rouvre
+	-- 3. Fin de la charge. On attend la fin d'un éventuel rewind avant de libérer le boss
+	--    (ancrage compté : le rewind et la charge ne se défont pas l'un l'autre).
+	waitForRewindEnd(boss)
+	EncounterService.setAnomalyMood(boss.model, false) -- le danger est passé (rewind ou mort) : le ciel se rouvre
+	AnchorService.release(boss.rootPart, CHARGE_ANCHOR_REASON)
 	if not isAlive(boss) then
 		return
 	end
-	boss.rootPart.Anchored = false
 	claimServerOwnership(boss.rootPart)
 	boss.model:SetAttribute(CombatConfig.INVULNERABLE_ATTRIBUTE, false)
 
@@ -293,14 +291,20 @@ local function runBoss(boss: Boss)
 		local healthRatio = boss.humanoid.Health / boss.humanoid.MaxHealth
 		local isUltimateReady = healthRatio <= Config.ULTIMATE_HEALTH_RATIO and os.clock() >= boss.ultimateReadyClock
 
-		if TimeLoopService.isRewinding() then
+		if TimeLoopService.isEncounterRewinding(boss.encounterId) then
 			-- Le temps se rembobine : le boss est entre les mains du Time-Loop, on ne décide rien.
 		elseif CombatStatus.isStunned(boss.model) then
 			-- Paré, paralysé ou écrasé : il reste sur place, sans attaquer.
 			stopMoving(boss)
 		elseif target == nil or targetRoot == nil then
-			stopMoving(boss)
-			setState(boss, STATES.Idle)
+			-- Personne dans l'arène : il rentre à son point d'apparition et y attend.
+			if (boss.rootPart.Position - boss.home).Magnitude > RETURN_HOME_DISTANCE then
+				boss.humanoid:MoveTo(boss.home)
+				setState(boss, STATES.Chasing)
+			else
+				stopMoving(boss)
+				setState(boss, STATES.Idle)
+			end
 		elseif isUltimateReady then
 			performUltimate(boss)
 		elseif distance <= Config.ATTACK_RANGE then
@@ -314,8 +318,12 @@ local function runBoss(boss: Boss)
 
 	boss.model:SetAttribute(Config.STATE_ATTRIBUTE, STATES.Dead)
 	boss.model:SetAttribute(CombatConfig.INVULNERABLE_ATTRIBUTE, false)
-	WorldService.setAnomaly(boss.model, false)
-	bosses[boss.model] = nil
+	EncounterService.setAnomalyMood(boss.model, false)
+	AnchorService.release(boss.rootPart, CHARGE_ANCHOR_REASON)
+	EncounterService.unregisterBoss(boss.model)
+	if bosses[boss.model] == boss then
+		bosses[boss.model] = nil
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -368,19 +376,28 @@ local function registerBoss(instance: Instance)
 		attackTrack = loadTrack(animator :: Animator, Config.ATTACK_ANIMATION_ID, false),
 		nextAttackClock = 0,
 		ultimateReadyClock = 0,
+		home = rootPart.Position,
+		encounterId = "",
 	}
 	bosses[instance] = boss
 	instance:SetAttribute(Config.STATE_ATTRIBUTE, STATES.Idle)
 
-	-- Un boss est toujours une entité du Time-Loop : position et PV enregistrés, rembobinables.
+	-- Un boss est une cible de combat (tag) et le cœur de sa rencontre : sa timeline enregistre sa
+	-- position et ses PV, ceux des participants, et elle seule est rembobinée pendant l'anomalie.
 	CollectionService:AddTag(instance, TimeLoopConfig.ENTITY_TAG)
+	boss.encounterId = EncounterService.registerBoss(instance, rootPart.Position)
 
 	task.spawn(runBoss, boss)
 end
 
 local function unregisterBoss(instance: Instance)
 	if instance:IsA("Model") then
+		local boss = bosses[instance]
 		bosses[instance] = nil -- la boucle du boss s'arrête à sa prochaine décision (voir isAlive)
+		if boss then
+			AnchorService.release(boss.rootPart, CHARGE_ANCHOR_REASON)
+		end
+		EncounterService.unregisterBoss(instance)
 	end
 end
 

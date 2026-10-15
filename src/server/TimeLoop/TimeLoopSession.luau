@@ -16,7 +16,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Config = require(ReplicatedStorage.Shared.TimeLoop.TimeLoopConfig)
+local AnchorService = require(script.Parent.Parent.Core.AnchorService)
 local EntitySnapshot = require(script.Parent.EntitySnapshot)
+
+local REWIND_ANCHOR_REASON = "rewind"
 local SnapshotBuffer = require(script.Parent.SnapshotBuffer)
 
 type Snapshot = EntitySnapshot.Snapshot
@@ -29,7 +32,7 @@ type Entity = {
 	character: Model,
 	buffer: Buffer,
 	isNpc: boolean,
-	wasAnchored: boolean, -- état Anchored du RootPart avant le gel du rewind
+	frozenRoot: BasePart?, -- RootPart figé pendant le rewind (ancrage compté, voir AnchorService)
 }
 
 local TimeLoopSession = {}
@@ -63,20 +66,23 @@ end
 
 -- Gèle l'entité : un RootPart ancré n'est plus simulé par son propriétaire réseau,
 -- le serveur devient donc seul maître de son CFrame pendant la lecture inversée.
+-- L'ancrage est COMPTÉ (AnchorService) : le Hub, l'anomalie ou la charge du boss qui figent le même
+-- personnage ne sont ni annulés ni prolongés par le rewind.
 local function freeze(entity: Entity)
 	local _, rootPart = EntitySnapshot.getParts(entity.character)
-	if rootPart then
-		entity.wasAnchored = rootPart.Anchored
-		rootPart.Anchored = true
+	if rootPart and not EntitySnapshot.isDead(entity.character) then
+		AnchorService.hold(rootPart, REWIND_ANCHOR_REASON)
+		entity.frozenRoot = rootPart
 	end
 end
 
 local function unfreeze(entity: Entity)
-	local _, rootPart = EntitySnapshot.getParts(entity.character)
+	local rootPart = entity.frozenRoot
+	entity.frozenRoot = nil
 	if rootPart then
 		rootPart.AssemblyLinearVelocity = Vector3.zero
 		rootPart.AssemblyAngularVelocity = Vector3.zero
-		rootPart.Anchored = entity.wasAnchored
+		AnchorService.release(rootPart, REWIND_ANCHOR_REASON)
 	end
 	claimServerOwnership(entity)
 end
@@ -136,7 +142,14 @@ end
 --------------------------------------------------------------------------------
 
 local function captureAll(self: TimeLoopSession)
-	for _, entity in self._entities do
+	for character, entity in self._entities do
+		if character.Parent == nil or (EntitySnapshot.isDead(character) and character:FindFirstChildOfClass("Humanoid") ~= nil) then
+			-- Mort ou détruit : il quitte la timeline (son historique figé fausserait les rewinds suivants).
+			if not self._isRewinding then
+				self._entities[character] = nil
+			end
+			continue
+		end
 		local snapshot = EntitySnapshot.capture(entity.character, self._timelineTime)
 		if snapshot then
 			entity.buffer:push(snapshot)
@@ -215,7 +228,7 @@ function TimeLoopSession.addEntity(self: TimeLoopSession, character: Model)
 		character = character,
 		buffer = SnapshotBuffer.new(BUFFER_CAPACITY),
 		isNpc = Players:GetPlayerFromCharacter(character) == nil,
-		wasAnchored = false,
+		frozenRoot = nil,
 	}
 	self._entities[character] = entity
 	claimServerOwnership(entity)
@@ -234,6 +247,19 @@ end
 
 function TimeLoopSession.isRewinding(self: TimeLoopSession): boolean
 	return self._isRewinding
+end
+
+function TimeLoopSession.hasEntity(self: TimeLoopSession, character: Model): boolean
+	return self._entities[character] ~= nil
+end
+
+-- Personnages actuellement enregistrés (joueurs et PNJ).
+function TimeLoopSession.getCharacters(self: TimeLoopSession): { Model }
+	local characters = {}
+	for character in self._entities do
+		table.insert(characters, character)
+	end
+	return characters
 end
 
 -- Arrête / reprend l'horloge de la timeline (et donc l'enregistrement).
