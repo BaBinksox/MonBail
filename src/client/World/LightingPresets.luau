@@ -67,20 +67,21 @@ local DUSK: Preset = {
 	Clouds = { Cover = 0.55, Density = 0.6, Color = rgb(240, 180, 170) },
 }
 
--- Nuit : bleu froid, peu de couleur, juste assez de lumière pour jouer.
+-- Nuit : clair de lune. Bleu froid, couleurs retenues, mais le relief, les chemins et les ennemis
+-- restent lisibles sans lanterne : la lumière vient du ciel (ambiantes et exposition), pas de lampes.
 local NIGHT: Preset = {
 	Lighting = {
-		Ambient = rgb(26, 30, 48),
-		OutdoorAmbient = rgb(40, 48, 78),
-		Brightness = 0.9,
-		ColorShift_Top = rgb(120, 140, 200),
-		ExposureCompensation = -0.15,
+		Ambient = rgb(62, 70, 98),
+		OutdoorAmbient = rgb(104, 118, 160),
+		Brightness = 1.5,
+		ColorShift_Top = rgb(150, 170, 220),
+		ExposureCompensation = 0.3,
 	},
-	Atmosphere = { Density = 0.38, Offset = 0.1, Color = rgb(40, 50, 80), Decay = rgb(20, 24, 44), Glare = 0, Haze = 1.2 },
-	ColorCorrection = { TintColor = rgb(214, 224, 255), Saturation = -0.18, Contrast = 0.16, Brightness = -0.02 },
+	Atmosphere = { Density = 0.3, Offset = 0.12, Color = rgb(78, 92, 130), Decay = rgb(42, 50, 82), Glare = 0, Haze = 1 },
+	ColorCorrection = { TintColor = rgb(222, 232, 255), Saturation = -0.12, Contrast = 0.08, Brightness = 0.03 },
 	Bloom = { Intensity = 0.5, Threshold = 1.4, Size = 24 },
 	SunRays = { Intensity = 0.04, Spread = 0.3 },
-	Clouds = { Cover = 0.5, Density = 0.6, Color = rgb(70, 80, 110) },
+	Clouds = { Cover = 0.45, Density = 0.55, Color = rgb(104, 116, 146) },
 }
 
 -- Anomalie : ciel bouché, lumière rouge sang, brouillard si lourd qu'on ne voit plus l'horizon.

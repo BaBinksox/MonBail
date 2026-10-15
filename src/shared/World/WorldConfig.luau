@@ -33,14 +33,36 @@ local WEATHERS: { [string]: Weather } = {
 	gale = { name = "Vent des plaines", weight = 2, fog = 0.04, haze = 0.6, cloudCover = 0.65, windSpeed = 28 },
 }
 
--- Durée d'une journée complète (24 h de jeu), en secondes réelles.
-local DAY_LENGTH = 900
--- Décalage (heures) de l'horloge du monde. À changer pour décider de l'heure qu'il est maintenant.
-local CLOCK_OFFSET = 0
+--[[
+	Cycle jour / nuit : LE SEUL endroit où régler sa durée.
+	Le JOUR (de DAY_START à NIGHT_START, heures de jeu) et la NUIT (le reste) ont chacun leur durée
+	réelle : la journée dure bien plus longtemps que la nuit, sans que l'heure saute. Le soleil
+	avance simplement plus vite la nuit. Aube et crépuscule sont fondus par LightingPresets.
+	Valeurs par défaut : 28 min de jour + 10 min de nuit = un cycle complet de 38 min réelles.
+]]
+local DAY_REAL_SECONDS = 28 * 60
+local NIGHT_REAL_SECONDS = 10 * 60
+local DAY_START = 5.8 -- heure de jeu où le jour commence (aube)
+local NIGHT_START = 19.6 -- heure de jeu où la nuit commence (après le crépuscule)
+-- Décalage (secondes réelles) dans le cycle. À changer pour décider de l'heure qu'il est maintenant.
+local CYCLE_OFFSET = 0
+
+local CYCLE_LENGTH = DAY_REAL_SECONDS + NIGHT_REAL_SECONDS
+local DAY_HOURS = NIGHT_START - DAY_START
+local NIGHT_HOURS = 24 - DAY_HOURS
+
+-- Heure du monde (0 à 24) pour un instant `serverTime` (secondes, horloge du serveur).
+local function clockTimeAt(serverTime: number): number
+	local phase = (serverTime + CYCLE_OFFSET) % CYCLE_LENGTH
+	if phase < DAY_REAL_SECONDS then
+		return DAY_START + phase / DAY_REAL_SECONDS * DAY_HOURS
+	end
+	return (NIGHT_START + (phase - DAY_REAL_SECONDS) / NIGHT_REAL_SECONDS * NIGHT_HOURS) % 24
+end
 
 -- Heure du monde (0 à 24), identique sur le serveur et chez tous les clients au même instant.
 local function getClockTime(): number
-	return (CLOCK_OFFSET + workspace:GetServerTimeNow() / DAY_LENGTH * 24) % 24
+	return clockTimeAt(workspace:GetServerTimeNow())
 end
 
 return table.freeze({
@@ -50,10 +72,13 @@ return table.freeze({
 	MOODS = MOODS,
 
 	-- Heure ------------------------------------------------------------------------
-	DAY_LENGTH = DAY_LENGTH,
+	DAY_REAL_SECONDS = DAY_REAL_SECONDS,
+	NIGHT_REAL_SECONDS = NIGHT_REAL_SECONDS,
+	DAY_LENGTH = CYCLE_LENGTH, -- durée réelle d'un cycle complet (compatibilité)
 	getClockTime = getClockTime,
-	NIGHT_START = 19.6, -- à partir de cette heure (et jusqu'à NIGHT_END) : lucioles, etc.
-	NIGHT_END = 5.8,
+	clockTimeAt = clockTimeAt,
+	NIGHT_START = NIGHT_START, -- à partir de cette heure (et jusqu'à NIGHT_END) : lucioles, etc.
+	NIGHT_END = DAY_START,
 
 	-- Météo ------------------------------------------------------------------------
 	WEATHERS = WEATHERS,
