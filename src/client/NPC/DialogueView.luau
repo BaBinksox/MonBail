@@ -17,9 +17,9 @@
 	La taille s'adapte à l'écran (UIScale d'après la hauteur, largeur bornée) : lisible sur téléphone.
 ]]
 
-local COLOR_BACKGROUND = Color3.fromRGB(6, 6, 9)
-local COLOR_TEXT = Color3.fromRGB(226, 220, 208)
-local COLOR_MUTED = Color3.fromRGB(128, 122, 114)
+local COLOR_BACKGROUND = Color3.fromRGB(16, 15, 19)
+local COLOR_TEXT = Color3.fromRGB(238, 232, 220) -- mêmes valeurs que Theme.colors.text
+local COLOR_MUTED = Color3.fromRGB(176, 168, 156) -- Theme.colors.textMuted
 local COLOR_ACCENT = Color3.fromRGB(176, 146, 96) -- or terni, comme le Hub et la jauge
 
 local FONT_TEXT = Enum.Font.Garamond
@@ -80,7 +80,7 @@ function DialogueView.create(parent: Instance): View
 	box.Position = UDim2.new(0.5, 0, 1, -BOTTOM_MARGIN)
 	box.Size = BOX_SIZE
 	box.BackgroundColor3 = COLOR_BACKGROUND
-	box.BackgroundTransparency = 0.12
+	box.BackgroundTransparency = 0.06
 	box.BorderSizePixel = 0
 	box.Parent = gui
 

@@ -100,22 +100,22 @@ local UserInputService = game:GetService("UserInputService")
 local COLORS = table.freeze({
 	-- Fonds (charbon)
 	ink = Color3.fromRGB(6, 6, 9), -- noir d'encre : voiles, ombres (fond historique du projet)
-	background = Color3.fromRGB(13, 12, 16), -- fond des panneaux
-	surface = Color3.fromRGB(24, 22, 27), -- éléments en relief : boutons, cartes, vignettes
-	surfaceHover = Color3.fromRGB(36, 32, 36),
-	sunken = Color3.fromRGB(8, 8, 11), -- creux : pistes de curseur, champs
+	background = Color3.fromRGB(22, 20, 25), -- fond des panneaux (assez clair pour détacher le texte)
+	surface = Color3.fromRGB(38, 34, 40), -- éléments en relief : boutons, cartes, vignettes
+	surfaceHover = Color3.fromRGB(56, 49, 54),
+	sunken = Color3.fromRGB(12, 11, 15), -- creux : pistes de curseur, champs
 	-- Or et accents
 	gold = Color3.fromRGB(176, 146, 96), -- or terni : liserés (couleur historique du projet)
 	goldBright = Color3.fromRGB(226, 194, 132), -- or vif : survol, titres mis en avant
 	goldDim = Color3.fromRGB(104, 86, 58), -- or éteint : éléments inactifs
 	amber = Color3.fromRGB(230, 152, 52), -- accent chaud : sélection, action principale
 	cyan = Color3.fromRGB(92, 214, 232), -- accent froid : tout ce qui touche au TEMPS
-	danger = Color3.fromRGB(196, 56, 50), -- rouge : danger, action irréversible
-	success = Color3.fromRGB(122, 178, 104),
+	danger = Color3.fromRGB(222, 88, 76), -- rouge : danger, erreur, action irréversible (lisible en texte)
+	success = Color3.fromRGB(146, 206, 120), -- vert : réussite, objectif accompli
 	-- Textes
-	text = Color3.fromRGB(226, 220, 208), -- ivoire
-	textMuted = Color3.fromRGB(128, 122, 114), -- gris chaud
-	textDim = Color3.fromRGB(84, 80, 76), -- texte désactivé
+	text = Color3.fromRGB(238, 232, 220), -- ivoire
+	textMuted = Color3.fromRGB(176, 168, 156), -- gris chaud (descriptions, légendes : contraste ≥ 7:1 sur les panneaux)
+	textDim = Color3.fromRGB(118, 112, 106), -- texte désactivé (encore lisible)
 	textOnAccent = Color3.fromRGB(18, 13, 8), -- texte posé sur un fond doré
 })
 
@@ -146,10 +146,10 @@ local DURATIONS = table.freeze({ fast = 0.12, normal = 0.25, slow = 0.6 })
 
 -- Transparences de référence.
 local ALPHA = table.freeze({
-	panel = 0.16, -- fond d'un panneau
-	glass = 0.42, -- panneau léger qui laisse deviner la scène
-	raised = 0.1, -- élément en relief
-	border = 0.35, -- liseré au repos
+	panel = 0.04, -- fond d'un panneau : quasi opaque, le texte ne se lit plus « sur la scène »
+	glass = 0.22, -- panneau léger qui laisse deviner la scène
+	raised = 0.02, -- élément en relief (cartes, boutons)
+	border = 0.25, -- liseré au repos
 	borderFaint = 0.7, -- liseré discret
 })
 
@@ -826,6 +826,76 @@ function Theme.scroller(props: ScrollerProps): ScrollingFrame
 end
 
 --------------------------------------------------------------------------------
+-- Fond cliquable d'une fenêtre modale
+--------------------------------------------------------------------------------
+
+-- Vrai si le point d'écran `point` tombe dans `object`. Les deux conventions de coordonnées
+-- (avec ou sans la barre Roblox du haut) sont testées : dans le doute, le point est « dedans ».
+function Theme.isPointInside(object: GuiObject, point: Vector2): boolean
+	if not object.Visible then
+		return false
+	end
+	local topLeft = object.AbsolutePosition
+	local bottomRight = topLeft + object.AbsoluteSize
+	local inset = GuiService:GetGuiInset()
+	for _, candidate in { point, point + inset } do
+		if candidate.X >= topLeft.X and candidate.X <= bottomRight.X and candidate.Y >= topLeft.Y and candidate.Y <= bottomRight.Y then
+			return true
+		end
+	end
+	return false
+end
+
+local POINTER_INPUTS: { [Enum.UserInputType]: boolean } = {
+	[Enum.UserInputType.MouseButton1] = true,
+	[Enum.UserInputType.Touch] = true,
+}
+
+--[[
+	Ferme une fenêtre quand on clique sur son FOND, jamais quand on clique dedans.
+	`backdrop` : bouton plein écran derrière la fenêtre ; `inside` : les cadres de la fenêtre (livre,
+	parchemin...). Le clic ne compte que s'il a COMMENCÉ et FINI hors de ces cadres, à la souris ou
+	au doigt : un clic sur un texte, une marge, une barre de défilement ou un glisser depuis le livre
+	ne ferme rien, même si le moteur transmet le clic au fond. La manette ferme avec sa touche
+	Retour (B), gérée par la fenêtre ; le fond n'est donc pas sélectionnable.
+]]
+function Theme.bindBackdropDismiss(backdrop: GuiButton, inside: { GuiObject }, onDismiss: () -> ()): { RBXScriptConnection }
+	backdrop.Selectable = false
+	backdrop.ZIndex = 0
+	local pressedOutside = false
+	local function isInside(point: Vector2): boolean
+		for _, object in inside do
+			if Theme.isPointInside(object, point) then
+				return true
+			end
+		end
+		return false
+	end
+	local function pointOf(input: InputObject?): Vector2?
+		if input == nil or not POINTER_INPUTS[input.UserInputType] then
+			return nil
+		end
+		return Vector2.new(input.Position.X, input.Position.Y)
+	end
+	return {
+		backdrop.InputBegan:Connect(function(input: InputObject)
+			local point = pointOf(input)
+			if point then
+				pressedOutside = not isInside(point)
+			end
+		end),
+		backdrop.Activated:Connect(function(input: InputObject?)
+			local point = pointOf(input)
+			local wasOutside = pressedOutside
+			pressedOutside = false
+			if point and wasOutside and not isInside(point) then
+				onDismiss()
+			end
+		end),
+	}
+end
+
+--------------------------------------------------------------------------------
 -- Animation
 --------------------------------------------------------------------------------
 
@@ -1119,7 +1189,7 @@ local function computeButtonLook(button: Button): ButtonLook
 	-- secondary
 	return {
 		background = if isSelected then accent elseif isActive then COLORS.surfaceHover else COLORS.surface,
-		backgroundTransparency = if isSelected then 0.78 elseif isActive then 0.1 else 0.28,
+		backgroundTransparency = if isSelected then 0.7 elseif isActive then 0.05 else 0.12,
 		stroke = if isSelected or isActive then COLORS.goldBright else accent,
 		strokeTransparency = if isSelected then 0 elseif isActive then 0.1 else ALPHA.border,
 		text = if isSelected or isActive then COLORS.goldBright else COLORS.text,

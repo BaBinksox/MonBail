@@ -51,6 +51,7 @@ flash.BackgroundTransparency = 1
 flash.BorderSizePixel = 0
 flash.Size = UDim2.fromScale(1, 1)
 flash.Parent = feedbackScreen.root
+feedbackScreen.safe.ZIndex = 2 -- le titre « Parade parfaite » reste au-dessus du flash
 local perfect = Theme.title({
 	parent = feedbackScreen.safe,
 	text = "Parade parfaite",

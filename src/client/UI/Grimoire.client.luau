@@ -36,6 +36,7 @@ local UIBus = require(clientFolder:WaitForChild("UI"):WaitForChild("UIBus") :: M
 local PlayerState = require(clientFolder:WaitForChild("State"):WaitForChild("PlayerState") :: ModuleScript)
 
 local ACTION_NAME = "ToggleGrimoire"
+local BACK_ACTION_NAME = "CloseGrimoire"
 local CUSTOMIZING_ATTRIBUTE = "IsCustomizing"
 local TABS = {
 	{ id = "journal", label = "Journal" },
@@ -70,11 +71,13 @@ backdrop.Name = "Backdrop"
 backdrop.Text = ""
 backdrop.AutoButtonColor = false
 backdrop.BackgroundColor3 = colors.ink
-backdrop.BackgroundTransparency = 0.45
+backdrop.BackgroundTransparency = 0.5 -- voile derrière le livre (le livre lui-même est opaque)
 backdrop.BorderSizePixel = 0
 backdrop.Size = UDim2.fromScale(1, 1)
 backdrop.Modal = true -- libère la souris (caméra verrouillée) tant que le Grimoire est ouvert
+backdrop.ZIndex = 0 -- toujours SOUS le livre (screen.safe), qui reçoit les clics en premier
 backdrop.Parent = screen.root
+screen.safe.ZIndex = 1
 
 local book = Theme.panel({
 	name = "Book",
@@ -649,7 +652,16 @@ local function setOpen(open: boolean)
 	isOpen = open
 	screen.gui.Enabled = open
 	if open then
+		-- Manette : B referme le Grimoire (le fond n'est pas sélectionnable).
+		ContextActionService:BindActionAtPriority(BACK_ACTION_NAME, function(_name: string, state: Enum.UserInputState): Enum.ContextActionResult
+			if state == Enum.UserInputState.Begin then
+				setOpen(false)
+			end
+			return Enum.ContextActionResult.Sink
+		end, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.ButtonB)
 		render()
+	else
+		ContextActionService:UnbindAction(BACK_ACTION_NAME)
 	end
 end
 
@@ -662,7 +674,9 @@ end)
 closeButton:onActivated(function()
 	setOpen(false)
 end)
-backdrop.Activated:Connect(function()
+-- Clic sur le fond sombre (hors du livre) : ferme. Un clic DANS le livre (texte, marge, carte,
+-- barre de défilement) ne ferme jamais, même si le moteur le transmet au fond.
+Theme.bindBackdropDismiss(backdrop, { book }, function()
 	setOpen(false)
 end)
 
