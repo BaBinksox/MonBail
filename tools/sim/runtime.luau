@@ -269,6 +269,10 @@ return function(mock)
 		return mock.newTrack()
 	end
 	extra["Animator.LoadAnimation"] = extra["Humanoid.LoadAnimation"]
+	extra["Animator.GetPlayingAnimationTracks"] = function()
+		return {}
+	end
+	extra["Humanoid.GetPlayingAnimationTracks"] = extra["Animator.GetPlayingAnimationTracks"]
 	function mock.newTrack()
 		return {
 			Play = function() end,
