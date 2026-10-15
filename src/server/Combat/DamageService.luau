@@ -42,6 +42,7 @@ export type DamageSource = {
 	model: Model?, -- Model attaquant (personnage du joueur, ennemi, boss)
 	kind: string, -- "melee" | "ultimate" | "burn" | "enemy" | "environment"
 	unblockable: boolean?, -- attaque de zone : ne se pare pas (elle s'esquive)
+	heavy: boolean?, -- coup lourd (dernier coup du combo) : brise les gardes
 }
 
 export type HitResult = "hit" | "parried" | "dodged" | "immune"

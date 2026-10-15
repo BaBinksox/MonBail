@@ -29,7 +29,8 @@ local CombatRemotes = require(ReplicatedStorage.Shared.Combat.CombatRemotes)
 local TimeLoopConfig = require(ReplicatedStorage.Shared.TimeLoop.TimeLoopConfig)
 
 local AvatarService = require(script.Parent.Parent.Avatar.AvatarService)
-local MovementService = require(script.Parent.Parent.Movement.MovementService)
+local CombatStatus = require(script.Parent.Parent.Combat.CombatStatus)
+local DamageService = require(script.Parent.Parent.Combat.DamageService)
 local TimeLoopService = require(script.Parent.Parent.TimeLoop.TimeLoopService)
 local WorldService = require(script.Parent.Parent.World.WorldService)
 
@@ -205,14 +206,19 @@ local function performAttack(boss: Boss, target: Player, targetRoot: BasePart)
 
 	local distance = (currentRoot.Position - boss.rootPart.Position).Magnitude
 	local isOutOfReach = distance > Config.ATTACK_RANGE + Config.ATTACK_RANGE_TOLERANCE
-	if isOutOfReach or MovementService.isDashing(target) or TimeLoopService.isInAnomaly(target) then
+	if isOutOfReach or CombatStatus.isStunned(boss.model) then
 		log(boss, `{target.Name} esquive le coup`)
 		return
 	end
 
-	targetHumanoid:TakeDamage(Config.ATTACK_DAMAGE)
+	-- Dash, parade et immunités (anomalie, Hub, rembobinage) : arbitrés par DamageService (peut yield).
+	local result, damage = DamageService.damagePlayer(target, Config.ATTACK_DAMAGE, { model = boss.model, kind = "enemy" })
+	if result ~= "hit" then
+		log(boss, `coup sur {target.Name} : {result}`)
+		return
+	end
 	-- Même événement que pour un coup d'épée : les clients jouent impact, hit-stop et secousse.
-	CombatRemotes.HitConfirmed:FireAllClients(boss.model, target.Character, Config.ATTACK_DAMAGE)
+	CombatRemotes.HitConfirmed:FireAllClients(boss.model, target.Character, damage)
 end
 
 -- Attend la fin de l'anomalie de `target`. Retourne true si elle s'est terminée par un rewind.
@@ -289,6 +295,9 @@ local function runBoss(boss: Boss)
 
 		if TimeLoopService.isRewinding() then
 			-- Le temps se rembobine : le boss est entre les mains du Time-Loop, on ne décide rien.
+		elseif CombatStatus.isStunned(boss.model) then
+			-- Paré, paralysé ou écrasé : il reste sur place, sans attaquer.
+			stopMoving(boss)
 		elseif target == nil or targetRoot == nil then
 			stopMoving(boss)
 			setState(boss, STATES.Idle)

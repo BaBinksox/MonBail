@@ -98,6 +98,19 @@ local MAGICS: { Magic } = {
 			glow = Color3.fromRGB(255, 170, 190),
 		},
 	},
+	{
+		id = "gravity",
+		name = "Gravité",
+		ultimateName = "Effondrement Stellaire",
+		description = "Le poids du monde vous obéit. Les survivants sont arrachés au sol puis écrasés, et restent cloués un instant.",
+		radius = 28,
+		damage = 52, -- + 12 à l'écrasement (UltimateBehaviors)
+		palette = {
+			void = Color3.fromRGB(4, 6, 16),
+			main = Color3.fromRGB(96, 124, 196),
+			glow = Color3.fromRGB(214, 226, 255),
+		},
+	},
 }
 
 -- Retourne la magie d'identifiant `id`. Un identifiant inconnu ou absent (joueur qui n'a pas

@@ -6,7 +6,8 @@
 		- valide les demandes d'attaque : état du joueur, ordre et cadence du combo ;
 		- valide chaque impact signalé par le client : fenêtre de frappe, cible autorisée, distance,
 		  ligne de vue (raycast serveur), une seule touche par cible et par coup ;
-		- applique les dégâts et l'éjection. C'est le SEUL endroit du jeu où un coup d'épée blesse ;
+		- applique les dégâts (via DamageService : contributions, élimination unique, parade en PvP)
+		  et l'éjection. C'est le SEUL endroit du jeu où un coup d'épée blesse ;
 		- tient la Tension de chaque joueur (gagnée à chaque impact validé) et déclenche le pouvoir
 		  ultime de sa Magie Innée : jauge vérifiée ici, vidée ici, dégâts de zone infligés ici.
 
@@ -30,7 +31,7 @@ local SpatialHitbox = require(ReplicatedStorage.Shared.Combat.SpatialHitbox)
 local TimeLoopConfig = require(ReplicatedStorage.Shared.TimeLoop.TimeLoopConfig)
 
 local AvatarService = require(script.Parent.Parent.Avatar.AvatarService)
-local MovementService = require(script.Parent.Parent.Movement.MovementService)
+local DamageService = require(script.Parent.DamageService)
 local SwordFactory = require(script.Parent.SwordFactory)
 local TimeLoopService = require(script.Parent.Parent.TimeLoop.TimeLoopService)
 local UltimateBehaviors = require(script.Parent.UltimateBehaviors)
@@ -73,7 +74,7 @@ end
 -- Un joueur figé par un autre système (Hub, anomalie, rewind) est hors combat :
 -- il ne peut ni frapper ni être frappé.
 local function isOutOfCombat(player: Player): boolean
-	return AvatarService.isCustomizing(player) or TimeLoopService.isInAnomaly(player) or TimeLoopService.isRewinding()
+	return AvatarService.isCustomizing(player) or TimeLoopService.isInAnomaly(player) or TimeLoopService.isRewindingFor(player)
 end
 
 local function isInvulnerable(target: Model): boolean
@@ -201,8 +202,9 @@ end
 -- Validation d'un impact
 --------------------------------------------------------------------------------
 
--- Une cible valide est un PNJ taggé, ou le personnage d'un autre joueur si le PvP est actif.
--- Dans tous les cas, une cible déclarée invulnérable (boss en charge) ou en plein dash est épargnée.
+-- Une cible valide est un ennemi blessable (PNJ taggé, vivant, pas encore éliminé), ou le personnage
+-- d'un autre joueur si le PvP est actif. Une cible invulnérable (boss en charge) est épargnée.
+-- (Le dash et la parade d'un joueur ciblé sont gérés par DamageService.damagePlayer.)
 local function isTargetAllowed(target: Model): boolean
 	if isInvulnerable(target) then
 		return false
@@ -210,9 +212,9 @@ local function isTargetAllowed(target: Model): boolean
 
 	local targetPlayer = Players:GetPlayerFromCharacter(target)
 	if targetPlayer then
-		return Config.PVP_ENABLED and not isOutOfCombat(targetPlayer) and not MovementService.isDashing(targetPlayer)
+		return Config.PVP_ENABLED and not isOutOfCombat(targetPlayer)
 	end
-	return CollectionService:HasTag(target, TimeLoopConfig.ENTITY_TAG)
+	return DamageService.isDamageableEnemy(target)
 end
 
 -- Distance maximale (studs) entre l'attaquant et le bord d'une cible pour qu'elle ait pu se trouver
@@ -316,15 +318,38 @@ local function onHitReported(player: Player, target: any)
 	end
 
 	attack.hitTargets[target] = true
-	targetHumanoid:TakeDamage(step.damage)
-	if step.knockback > 0 then
+	local source: DamageService.DamageSource = {
+		player = player,
+		model = attacker,
+		kind = "melee",
+		heavy = step.knockback > 0, -- le coup final du combo brise les gardes
+	}
+
+	local applied = 0
+	local targetPlayer = Players:GetPlayerFromCharacter(target)
+	if targetPlayer then
+		-- PvP : dash, parade et immunités du défenseur sont arbitrés par DamageService (peut yield).
+		local result, damage = DamageService.damagePlayer(targetPlayer, step.damage, source)
+		if result ~= "hit" then
+			logRejection(player, `coup sur {targetPlayer.Name} : {result}`)
+			return
+		end
+		applied = damage
+	else
+		applied = DamageService.dealDamage(target, step.damage, source)
+	end
+	if applied <= 0 then
+		return -- garde intégrale, cible éliminée entre-temps... : ni Tension ni éjection
+	end
+
+	if step.knockback > 0 and targetHumanoid.Health > 0 then
 		applyKnockback(attackerRoot, targetRoot, step.knockback)
 	end
 	setTension(player, getTension(player) + Config.TENSION_PER_HIT)
-	Remotes.HitConfirmed:FireAllClients(attacker, target, step.damage)
+	Remotes.HitConfirmed:FireAllClients(attacker, target, applied)
 
 	if Config.DEBUG_LOGS then
-		print(`[Combat] {player.Name} touche {target.Name} : -{step.damage} PV (reste {targetHumanoid.Health})`)
+		print(`[Combat] {player.Name} touche {target.Name} : -{applied} PV (reste {targetHumanoid.Health})`)
 	end
 end
 
@@ -332,11 +357,11 @@ end
 -- Pouvoir ultime
 --------------------------------------------------------------------------------
 
--- Tous les PNJ taggés, vivants, à moins de `radius` studs de `origin`.
+-- Tous les ennemis blessables (vivants, pas éliminés, pas invulnérables) à moins de `radius` studs de `origin`.
 local function findUltimateTargets(origin: Vector3, radius: number): { Model }
 	local targets = {}
 	for _, instance in CollectionService:GetTagged(TimeLoopConfig.ENTITY_TAG) do
-		if instance:IsA("Model") and instance:IsDescendantOf(workspace) then
+		if instance:IsA("Model") and instance:IsDescendantOf(workspace) and DamageService.isDamageableEnemy(instance) then
 			local _, rootPart = getLivingParts(instance)
 			if rootPart and (rootPart.Position - origin).Magnitude <= radius then
 				table.insert(targets, instance)
@@ -374,23 +399,21 @@ local function onUltimateRequested(player: Player)
 
 	-- Les dégâts tombent à la fin de l'arrêt sur image des clients, quand l'onde de choc part.
 	task.wait(Config.ULTIMATE_HIT_STOP)
-	if TimeLoopService.isRewinding() then
-		return -- le temps a été rembobiné entre-temps : l'explosion n'a "pas eu lieu"
+	if TimeLoopService.isRewindingFor(player) or isOutOfCombat(player) or getLivingParts(caster) == nil then
+		return -- rembobinage, anomalie ou mort du lanceur entre-temps : l'explosion n'a "pas eu lieu"
 	end
 	local damageDealt = 0
+	local source: DamageService.DamageSource = { player = player, model = caster, kind = "ultimate" }
 	for _, target in targets do
-		local targetHumanoid = getLivingParts(target)
-		if targetHumanoid and not isInvulnerable(target) then
-			local healthBefore = targetHumanoid.Health
-			targetHumanoid:TakeDamage(magic.damage)
-			damageDealt += healthBefore - targetHumanoid.Health
-		end
+		-- DamageService revérifie tout (éliminé, devenu invulnérable pendant l'arrêt sur image...).
+		damageDealt += DamageService.dealDamage(target, magic.damage, source)
 	end
 
 	-- Effet propre à la magie (implosion, brûlure, paralysie, gel, drain) : voir UltimateBehaviors.
 	local casterHumanoid = getLivingParts(caster)
 	if casterHumanoid then
 		task.spawn(UltimateBehaviors.run, {
+			caster = player,
 			casterHumanoid = casterHumanoid,
 			origin = origin,
 			targets = targets,

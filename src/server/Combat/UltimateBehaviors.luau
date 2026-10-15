@@ -1,7 +1,7 @@
 --!strict
 --[[
 	UltimateBehaviors
-	Ce qui rend les cinq ultimes DIFFÉRENTS en jeu, au-delà de leur rayon et de leurs dégâts.
+	Ce qui rend les six ultimes DIFFÉRENTS en jeu, au-delà de leur rayon et de leurs dégâts.
 
 	CombatService inflige les dégâts de zone communs, puis appelle run() : l'effet propre à la magie
 	du lanceur s'applique alors aux cibles encore en vie.
@@ -9,7 +9,10 @@
 		pyromancy  : brûlure     - ils continuent de perdre des PV pendant quelques secondes ;
 		lightning  : paralysie   - ils ne peuvent plus bouger un court instant ;
 		ice        : gel         - ils sont fortement ralentis, longtemps ;
-		shadow     : drain       - le lanceur récupère une part des dégâts infligés.
+		shadow     : drain       - le lanceur récupère une part des dégâts infligés ;
+		gravity    : effondrement - les survivants sont arrachés du sol puis écrasés, et restent cloués un instant.
+	Les dégâts secondaires (brûlure, écrasement) passent par DamageService : ils sont attribués au lanceur
+	(contributions, élimination) ; les immobilisations passent par CombatStatus : les IA les respectent.
 
 	Ajouter ou changer un effet : une fonction dans BEHAVIORS, rangée sous l'`id` de la magie.
 	Une magie sans entrée n'a simplement pas d'effet secondaire.
@@ -21,9 +24,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CombatConfig = require(ReplicatedStorage.Shared.Combat.CombatConfig)
 local MagicConfig = require(ReplicatedStorage.Shared.Magic.MagicConfig)
 
+local CombatStatus = require(script.Parent.CombatStatus)
+local DamageService = require(script.Parent.DamageService)
 local TimeLoopService = require(script.Parent.Parent.TimeLoop.TimeLoopService)
 
 export type Context = {
+	caster: Player, -- joueur qui a lancé l'ultime (attribution des dégâts secondaires)
 	casterHumanoid: Humanoid,
 	origin: Vector3, -- position du lanceur au moment de l'ultime
 	targets: { Model }, -- cibles touchées par les dégâts de zone
@@ -46,6 +52,13 @@ local SLOW_FACTOR = 0.35 -- vitesse restante
 local SLOW_DURATION = 5
 -- Ombre
 local DRAIN_RATIO = 0.4 -- part des dégâts rendue au lanceur
+-- Gravité
+local LIFT_SPEED = 38 -- studs/s vers le haut
+local LIFT_DURATION = 0.35
+local SLAM_SPEED = 90 -- studs/s vers le bas
+local SLAM_DURATION = 0.2
+local SLAM_DAMAGE = 12
+local PIN_DURATION = 1.2 -- secondes cloué au sol après l'écrasement
 
 -- Attributs posés sur le Humanoid ralenti, pour que deux effets de vitesse ne se marchent pas dessus.
 local BASE_SPEED_ATTRIBUTE = "BaseWalkSpeed"
@@ -123,28 +136,27 @@ local BEHAVIORS: { [string]: (Context) -> () } = {
 		end
 	end,
 
-	-- Brûlure : des dégâts répétés. Ils s'interrompent si le temps est rembobiné entre-temps.
+	-- Brûlure : des dégâts répétés, attribués au lanceur. Ils s'interrompent si le temps est rembobiné.
 	pyromancy = function(context: Context)
+		local source: DamageService.DamageSource = { player = context.caster, model = context.casterHumanoid.Parent :: Model?, kind = "burn" }
 		for _ = 1, BURN_TICKS do
 			task.wait(BURN_TICK_INTERVAL)
-			if TimeLoopService.isRewinding() then
+			if TimeLoopService.isRewindingFor(context.caster) then
 				return
 			end
 			for _, target in context.targets do
-				local humanoid = getAffectableParts(target)
-				if humanoid then
-					humanoid:TakeDamage(BURN_TICK_DAMAGE)
-				end
+				DamageService.dealDamage(target, BURN_TICK_DAMAGE, source)
 			end
 		end
 	end,
 
-	-- Paralysie : vitesse nulle un court instant.
+	-- Paralysie : vitesse nulle ET étourdissement (les IA n'attaquent plus) un court instant.
 	lightning = function(context: Context)
 		for _, target in context.targets do
 			local humanoid = getAffectableParts(target)
 			if humanoid then
 				applySpeedFactor(humanoid, 0, STUN_DURATION)
+				CombatStatus.stun(target, STUN_DURATION)
 			end
 		end
 	end,
@@ -164,6 +176,53 @@ local BEHAVIORS: { [string]: (Context) -> () } = {
 		local humanoid = context.casterHumanoid
 		if humanoid.Health > 0 then
 			humanoid.Health = math.min(humanoid.Health + context.damageDealt * DRAIN_RATIO, humanoid.MaxHealth)
+		end
+	end,
+
+	-- Effondrement : chaque survivant est soulevé, puis plaqué au sol (dégâts attribués) et cloué.
+	gravity = function(context: Context)
+		local lifted: { Model } = {}
+		for _, target in context.targets do
+			local _, rootPart = getAffectableParts(target)
+			if rootPart and not rootPart.Anchored then
+				local attachment = Instance.new("Attachment")
+				attachment.Name = "GravityAttachment"
+				attachment.Parent = rootPart
+
+				local velocity = Instance.new("LinearVelocity")
+				velocity.Name = "GravityLift"
+				velocity.Attachment0 = attachment
+				velocity.RelativeTo = Enum.ActuatorRelativeTo.World
+				velocity.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+				velocity.VectorVelocity = Vector3.new(0, LIFT_SPEED, 0)
+				velocity.MaxForce = 1e6
+				velocity.Parent = rootPart
+
+				Debris:AddItem(attachment, LIFT_DURATION + SLAM_DURATION)
+				task.delay(LIFT_DURATION, function()
+					if velocity.Parent then
+						velocity.VectorVelocity = Vector3.new(0, -SLAM_SPEED, 0)
+					end
+				end)
+				table.insert(lifted, target)
+			end
+			-- Même un ennemi qu'on ne peut pas soulever (ancré, très lourd) est cloué sur place.
+			if getAffectableParts(target) then
+				CombatStatus.stun(target, LIFT_DURATION + SLAM_DURATION + PIN_DURATION)
+			end
+		end
+
+		task.wait(LIFT_DURATION + SLAM_DURATION)
+		if TimeLoopService.isRewindingFor(context.caster) then
+			return
+		end
+		local source: DamageService.DamageSource = { player = context.caster, model = context.casterHumanoid.Parent :: Model?, kind = "ultimate" }
+		for _, target in lifted do
+			DamageService.dealDamage(target, SLAM_DAMAGE, source)
+			local humanoid = getAffectableParts(target)
+			if humanoid then
+				applySpeedFactor(humanoid, 0, PIN_DURATION)
+			end
 		end
 	end,
 }

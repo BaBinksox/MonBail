@@ -18,6 +18,7 @@
 	il demande (RequestAttack, ReportHit, RequestUltimate), CombatService vérifie et décide.
 ]]
 
+local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -101,7 +102,23 @@ local function getMagic(): any
 	return MagicConfig.getById(localPlayer:GetAttribute(MagicConfig.ATTRIBUTE))
 end
 
+-- Le serveur décide de tout ; ce filtre évite seulement de jouer un faux impact (et d'envoyer une
+-- demande inutile) sur un villageois, un ennemi déjà éliminé ou une cible invulnérable.
+local TIME_LOOP_ENTITY_TAG = "TimeLoopEntity" -- = TimeLoopConfig.ENTITY_TAG
+local function isPlausibleTarget(target: Model): boolean
+	if target:GetAttribute(Config.INVULNERABLE_ATTRIBUTE) == true or target:GetAttribute("Defeated") == true then
+		return false
+	end
+	if Players:GetPlayerFromCharacter(target) then
+		return Config.PVP_ENABLED
+	end
+	return CollectionService:HasTag(target, TIME_LOOP_ENTITY_TAG)
+end
+
 local function onHitboxHit(target: Model, position: Vector3)
+	if not isPlausibleTarget(target) then
+		return
+	end
 	-- Retour immédiat pour l'attaquant (impact, hit-stop, secousse), sans attendre le serveur.
 	CombatEffects.playSwordHit(localPlayer.Character, target, position, true)
 	Remotes.ReportHit:FireServer(target)
