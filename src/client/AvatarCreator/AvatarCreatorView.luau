@@ -1,425 +1,1420 @@
 --!strict
 --[[
 	AvatarCreatorView
-	Construit le ScreenGui du Hub de création, entièrement par code (rien à poser dans StarterGui,
-	et l'interface est versionnée avec le reste). Ce module ne contient AUCUNE logique : il crée les
-	instances et les expose, c'est AvatarCreatorController qui les anime et écoute les boutons.
+	Construit l'interface du créateur de personnage avec Theme, entièrement par code (rien à poser
+	dans StarterGui). Aucune règle de jeu ni aucun Remote ici : la vue crée les éléments, les met en
+	page selon l'écran et sait les mettre à jour (option choisie, carte sélectionnée, récapitulatif).
+	AvatarCreatorController décide QUOI afficher et QUAND.
 
-	Le panneau a deux pages, affichées l'une après l'autre :
-		1. ÉVEIL  : l'apparence (7 sélecteurs "< valeur >") et le bouton pour continuer ;
-		2. DESTIN : le choix de la Magie Innée (un bouton par magie), sa description, la validation.
+	Disposition : le personnage est TOUJOURS dans la zone libre (Stage), rien ne le recouvre.
+		Écran large (PC, tablette, téléphone en paysage)     Écran haut (téléphone, tablette en portrait)
+		+------+--------------------+-----------+            +----------------------------+
+		| Rail |    personnage      |  Panneau  |            | Rail (onglets défilants)   |
+		|      |                    | d'options |            +----------------------------+
+		|      |  (<)          (>)  |           |            |        personnage          |
+		+------+--------------------+-----------+            |  (<)                  (>)  |
+		                                                     +----------------------------+
+		                                                     | Feuille d'options          |
+		                                                     +----------------------------+
+	La zone libre est MESURÉE (positions réelles du rail et du panneau) puis transmise à la caméra,
+	qui y cadre le personnage : aucune position codée en dur ne peut le faire chevaucher.
 
-	Arborescence produite :
-		AvatarCreatorGui (ScreenGui)
-		├── Panel (CanvasGroup)          panneau, à droite
-		│   ├── Shade                    dégradé noir qui fond vers la scène
-		│   └── Content
-		│       ├── AppearancePage
-		│       └── DestinyPage
-		└── Fade (Frame)                 voile noir plein écran (intro et transitions)
-		    └── IntroLabel               texte de narration
+	Arborescence :
+		AvatarCreatorGui (ScreenGui, Theme.screenGui)
+		└── Root (toile virtuelle de Theme)
+		    ├── DragZone      bouton invisible plein écran : glisser = tourner la vue
+		    ├── Shade         assombrit les bords de l'écran (jamais le centre)
+		    ├── Safe
+		    │   ├── RailSlot  emplacement fixe du rail ; Rail glisse dedans à l'apparition
+		    │   └── PanelSlot emplacement fixe du panneau ; Panel = en-tête, pages, pied, confirmation
+		    ├── Stage         zone libre : boutons de rotation et rappel des commandes en bas
+		    └── Veil          voile noir (intro, fondus) et texte de narration
 ]]
 
-local COLOR_BACKGROUND = Color3.fromRGB(6, 6, 9)
-local COLOR_TEXT = Color3.fromRGB(226, 220, 208)
-local COLOR_MUTED = Color3.fromRGB(128, 122, 114)
-local COLOR_ACCENT = Color3.fromRGB(176, 146, 96) -- or terni
+local GuiService = game:GetService("GuiService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local FONT_TITLE = Enum.Font.Garamond
-local FONT_CAPTION = Enum.Font.GothamMedium
+local AvatarConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Avatar"):WaitForChild("AvatarConfig"))
+local MagicConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Magic"):WaitForChild("MagicConfig"))
+local Theme = require(script.Parent.Parent:WaitForChild("UI"):WaitForChild("Theme"))
+local Catalog = require(script.Parent:WaitForChild("AvatarCreatorCatalog"))
 
-local PANEL_WIDTH_SCALE = 0.34
-local LIST_PADDING = 10
-local STEPPER_HEIGHT = 52
-local STEPPER_BUTTON_SIZE = 34
-local MAGIC_BUTTON_HEIGHT = 44
-local MAGIC_DESCRIPTION_HEIGHT = 92
--- Hauteur d'écran (pixels) pour laquelle le contenu est dessiné. En dessous, il rétrécit en bloc.
-local REFERENCE_SCREEN_HEIGHT = 640
+type Button = Theme.Button
+type Slider = Theme.Slider
+type Tabs = Theme.Tabs
+type Layout = Theme.Layout
+type Step = Catalog.Step
+type Magic = MagicConfig.Magic
 
--- Sélecteur "< valeur >" : sert aux listes (coiffures, visages...) comme aux échelles.
-export type Stepper = {
-	valueLabel: TextLabel,
-	counterLabel: TextLabel, -- position dans la liste, ex. "3 / 15" (vide pour une échelle)
-	previousButton: TextButton,
-	nextButton: TextButton,
+export type Mode = "wide" | "tall"
+
+-- Rectangle normalisé de l'écran (même forme que AvatarCreatorCamera.Window).
+export type Window = {
+	x: number,
+	y: number,
+	width: number,
+	height: number,
 }
 
--- Bouton d'une Magie Innée dans la page DESTIN.
-export type MagicButton = {
+-- Grille de vignettes d'une étape "liste".
+export type OptionGrid = {
+	stepIndex: number,
+	scroller: ScrollingFrame,
+	layout: UIGridLayout,
+	tiles: { Button },
+}
+
+-- Carte d'une Magie Innée (page Destin).
+export type MagicCard = {
 	button: TextButton,
-	stroke: UIStroke, -- liseré, mis en avant quand la magie est sélectionnée
+	stroke: UIStroke,
+	magic: Magic,
+	isHovered: boolean,
 }
 
--- Ce que la vue a besoin de savoir d'une magie pour dessiner son bouton.
-export type MagicEntry = {
-	name: string,
-	color: Color3,
+-- Ligne du récapitulatif : cliquer ramène à l'étape.
+export type SummaryRow = {
+	button: Button,
+	valueLabel: TextLabel,
+	stepIndex: number,
 }
 
-export type View = {
-	gui: ScreenGui,
-	panel: CanvasGroup,
-	fade: Frame,
-	introLabel: TextLabel,
+local COLORS = Theme.colors
+local FONTS = Theme.fonts
 
-	appearancePage: Frame,
-	baseStepper: Stepper,
-	faceStepper: Stepper,
-	markStepper: Stepper,
-	hairStepper: Stepper,
-	outfitStepper: Stepper,
-	heightStepper: Stepper,
-	widthStepper: Stepper,
-	nextButton: TextButton,
-
-	destinyPage: Frame,
-	magicButtons: { MagicButton },
-	magicDescription: TextLabel,
-	confirmButton: TextButton,
-	backButton: TextButton,
-}
+local DISPLAY_ORDER = Theme.displayOrder.creator
+local EDGE_MARGIN = 12 -- px virtuels entre le bord de l'écran et le rail / le panneau
+local RAIL_HEADER_HEIGHT = 56
+local RAIL_TALL_HEIGHT = 56
+local HEADER_HEIGHT = 84
+local HEADER_HEIGHT_COMPACT = 62
+local FOOTER_HEIGHT = 50
+local SELECTOR_HEIGHT = 58
+local CONFIRM_BOX_HEIGHT = 124
+local CONTROLS_BAND = 64 -- bande des boutons de rotation, sous le personnage (px virtuels)
+local TILE_ASPECT = 0.82 -- largeur / hauteur d'une vignette (le nom tient sous l'image)
+local TILE_GAP = 8
+local CHROME_SHOW_DURATION = 0.6
+local CHROME_HIDE_DURATION = 0.4
+local PAGE_FADE_OUT = 0.1
+local PAGE_FADE_IN = 0.2
+local DEFAULT_SKIN = Color3.fromRGB(234, 190, 152) -- avant de connaître la couleur de peau du personnage
+local DEFAULT_WINDOW: Window = { x = 0.2, y = 0.05, width = 0.45, height = 0.8 }
 
 local AvatarCreatorView = {}
+AvatarCreatorView.__index = AvatarCreatorView
+
+type ViewData = {
+	screen: Theme.Screen,
+	gui: ScreenGui,
+	dragZone: TextButton,
+
+	railSlot: Frame,
+	railConstraint: UISizeConstraint,
+	rail: Frame,
+	railPadding: UIPadding,
+	railHeader: Frame,
+	tabs: Tabs,
+
+	panelSlot: Frame,
+	panelConstraint: UISizeConstraint,
+	panel: Frame,
+	panelPadding: UIPadding,
+	header: Frame,
+	stepCaption: TextLabel,
+	titleLabel: TextLabel,
+	subtitleLabel: TextLabel,
+	pagesGroup: CanvasGroup,
+
+	optionsPage: Frame,
+	previousOption: Button,
+	nextOption: Button,
+	optionName: TextLabel,
+	optionCounter: TextLabel,
+	grids: { [number]: OptionGrid }, -- par index d'étape
+
+	proportionsPage: Frame,
+	heightSlider: Slider,
+	widthSlider: Slider,
+	resetProportions: Button,
+
+	destinyPage: Frame,
+	magicCards: { MagicCard },
+
+	summaryPage: Frame,
+	summaryRows: { SummaryRow },
+	powerButton: Button,
+	powerBand: UIGradient,
+	powerName: TextLabel,
+	powerUltimate: TextLabel,
+	errorLabel: TextLabel,
+	confirmBox: Frame,
+
+	footer: Frame,
+	backButton: Button,
+	nextButton: Button,
+
+	stage: Frame,
+	stageControls: CanvasGroup,
+	rotateLeft: Button,
+	rotateRight: Button,
+	hintLabel: TextLabel,
+
+	veil: Frame,
+	introLabel: TextLabel,
+
+	mode: Mode,
+	_columns: number,
+	_selectedMagic: number,
+	_chromeShown: boolean,
+	_pageToken: number,
+	_stageDirty: boolean,
+	_stageListeners: { (window: Window) -> () },
+	_skinDiscs: { Frame },
+	_veilTween: Tween?,
+	_narrationTween: Tween?,
+}
+
+export type View = typeof(setmetatable({} :: ViewData, AvatarCreatorView))
 
 --------------------------------------------------------------------------------
--- Briques de base
+-- Briques
 --------------------------------------------------------------------------------
 
-local function newLabel(text: string, font: Enum.Font, textSize: number, color: Color3): TextLabel
-	local label = Instance.new("TextLabel")
-	label.BackgroundTransparency = 1
-	label.Font = font
-	label.Text = text
-	label.TextSize = textSize
-	label.TextColor3 = color
-	return label
-end
-
-local function newArrowButton(text: string): TextButton
-	local button = Instance.new("TextButton")
-	button.AutoButtonColor = false
-	button.BackgroundTransparency = 1
-	button.Size = UDim2.fromOffset(STEPPER_BUTTON_SIZE, STEPPER_BUTTON_SIZE)
-	button.Font = FONT_TITLE
-	button.Text = text
-	button.TextSize = 28
-	button.TextColor3 = COLOR_ACCENT
-	return button
-end
-
-local function newSeparator(layoutOrder: number, parent: Instance)
-	local separator = Instance.new("Frame")
-	separator.Name = "Separator"
-	separator.BorderSizePixel = 0
-	separator.BackgroundColor3 = COLOR_ACCENT
-	separator.BackgroundTransparency = 0.5
-	separator.Size = UDim2.new(0.5, 0, 0, 1)
-	separator.LayoutOrder = layoutOrder
-	separator.Parent = parent
-end
-
--- Titre + sous-titre + séparateur en tête d'une page (LayoutOrder 1 à 3).
-local function newPageHeader(title: string, subtitle: string, parent: Instance)
-	local titleLabel = newLabel(title, FONT_TITLE, 40, COLOR_TEXT)
-	titleLabel.Name = "Title"
-	titleLabel.Size = UDim2.new(1, 0, 0, 44)
-	titleLabel.LayoutOrder = 1
-	titleLabel.Parent = parent
-
-	local subtitleLabel = newLabel(subtitle, FONT_TITLE, 18, COLOR_MUTED)
-	subtitleLabel.Name = "Subtitle"
-	subtitleLabel.Size = UDim2.new(1, 0, 0, 20)
-	subtitleLabel.LayoutOrder = 2
-	subtitleLabel.Parent = parent
-
-	newSeparator(3, parent)
-end
-
--- Grand bouton à liseré doré (continuer, valider).
-local function newWideButton(name: string, text: string, layoutOrder: number, parent: Instance): TextButton
-	local button = Instance.new("TextButton")
-	button.Name = name
-	button.AutoButtonColor = false
-	button.BackgroundColor3 = COLOR_ACCENT
-	button.BackgroundTransparency = 1
-	button.Size = UDim2.new(1, 0, 0, 44)
-	button.Font = FONT_TITLE
-	button.Text = text
-	button.TextSize = 22
-	button.TextColor3 = COLOR_TEXT
-	button.LayoutOrder = layoutOrder
-	button.Parent = parent
-
-	local stroke = Instance.new("UIStroke")
-	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	stroke.Color = COLOR_ACCENT
-	stroke.Thickness = 1
-	stroke.Parent = button
-
-	return button
-end
-
--- Une page du panneau : un cadre plein, dont les enfants s'empilent verticalement, centrés.
-local function newPage(name: string, parent: Instance): Frame
-	local page = Instance.new("Frame")
-	page.Name = name
-	page.BackgroundTransparency = 1
-	page.Size = UDim2.fromScale(1, 1)
-	page.Parent = parent
-
-	local layout = Instance.new("UIListLayout")
-	layout.FillDirection = Enum.FillDirection.Vertical
-	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	layout.VerticalAlignment = Enum.VerticalAlignment.Center
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Padding = UDim.new(0, LIST_PADDING)
-	layout.Parent = page
-
-	return page
-end
-
-local function newStepper(name: string, caption: string, layoutOrder: number, parent: Instance): Stepper
+local function newFrame(name: string, parent: Instance?): Frame
 	local frame = Instance.new("Frame")
 	frame.Name = name
 	frame.BackgroundTransparency = 1
-	frame.Size = UDim2.new(1, 0, 0, STEPPER_HEIGHT)
-	frame.LayoutOrder = layoutOrder
+	frame.BorderSizePixel = 0
+	frame.Size = UDim2.fromScale(1, 1)
 	frame.Parent = parent
-
-	local captionLabel = newLabel(caption, FONT_CAPTION, 12, COLOR_MUTED)
-	captionLabel.Name = "Caption"
-	captionLabel.Size = UDim2.new(1, 0, 0, 16)
-	captionLabel.Parent = frame
-
-	local counterLabel = newLabel("", FONT_CAPTION, 11, COLOR_MUTED)
-	counterLabel.Name = "Counter"
-	counterLabel.Size = UDim2.new(1, 0, 0, 16)
-	counterLabel.TextXAlignment = Enum.TextXAlignment.Right
-	counterLabel.Parent = frame
-
-	local previousButton = newArrowButton("<")
-	previousButton.Name = "Previous"
-	previousButton.AnchorPoint = Vector2.new(0, 1)
-	previousButton.Position = UDim2.fromScale(0, 1)
-	previousButton.Parent = frame
-
-	local nextButton = newArrowButton(">")
-	nextButton.Name = "Next"
-	nextButton.AnchorPoint = Vector2.new(1, 1)
-	nextButton.Position = UDim2.fromScale(1, 1)
-	nextButton.Parent = frame
-
-	local valueLabel = newLabel("", FONT_TITLE, 24, COLOR_TEXT)
-	valueLabel.Name = "Value"
-	valueLabel.AnchorPoint = Vector2.new(0.5, 1)
-	valueLabel.Position = UDim2.fromScale(0.5, 1)
-	valueLabel.Size = UDim2.new(1, -2 * STEPPER_BUTTON_SIZE, 0, STEPPER_BUTTON_SIZE)
-	valueLabel.TextScaled = true -- les noms longs rétrécissent au lieu de déborder
-	valueLabel.Parent = frame
-
-	local valueSizeLimit = Instance.new("UITextSizeConstraint")
-	valueSizeLimit.MinTextSize = 12
-	valueSizeLimit.MaxTextSize = 23
-	valueSizeLimit.Parent = valueLabel
-
-	return {
-		valueLabel = valueLabel,
-		counterLabel = counterLabel,
-		previousButton = previousButton,
-		nextButton = nextButton,
-	}
+	return frame
 end
 
--- Bouton d'une magie : son nom, précédé d'une barre à sa couleur.
-local function newMagicButton(entry: MagicEntry, layoutOrder: number, parent: Instance): MagicButton
-	local button = Instance.new("TextButton")
-	button.Name = "Magic" .. layoutOrder
-	button.AutoButtonColor = false
-	button.BackgroundColor3 = entry.color
-	button.BackgroundTransparency = 1
-	button.Size = UDim2.new(1, 0, 0, MAGIC_BUTTON_HEIGHT)
-	button.Font = FONT_TITLE
-	button.Text = entry.name
-	button.TextSize = 24
-	button.TextColor3 = COLOR_TEXT
-	button.LayoutOrder = layoutOrder
-	button.Parent = parent
+local function addCorner(object: GuiObject, radius: UDim)
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = radius
+	corner.Parent = object
+end
 
+local function addStroke(object: GuiObject, color: Color3, transparency: number, thickness: number): UIStroke
 	local stroke = Instance.new("UIStroke")
 	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	stroke.Color = entry.color
-	stroke.Thickness = 1
-	stroke.Transparency = 0.75
-	stroke.Parent = button
+	stroke.Color = color
+	stroke.Transparency = transparency
+	stroke.Thickness = thickness
+	stroke.Parent = object
+	return stroke
+end
 
-	local swatch = Instance.new("Frame")
-	swatch.Name = "Swatch"
-	swatch.BorderSizePixel = 0
-	swatch.BackgroundColor3 = entry.color
-	swatch.Size = UDim2.new(0, 4, 1, 0)
-	swatch.Parent = button
+local function addListLayout(parent: Instance, padding: number): UIListLayout
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Vertical
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, padding)
+	layout.Parent = parent
+	return layout
+end
 
-	return {
-		button = button,
-		stroke = stroke,
-	}
+local function addUniformPadding(parent: Instance, padding: number): UIPadding
+	local uiPadding = Instance.new("UIPadding")
+	uiPadding.PaddingTop = UDim.new(0, padding)
+	uiPadding.PaddingBottom = UDim.new(0, padding)
+	uiPadding.PaddingLeft = UDim.new(0, padding)
+	uiPadding.PaddingRight = UDim.new(0, padding)
+	uiPadding.Parent = parent
+	return uiPadding
+end
+
+-- Pastille ronde (base des vignettes dessinées).
+local function newDisc(parent: Instance, color: Color3, transparency: number): Frame
+	local disc = Instance.new("Frame")
+	disc.Name = "Disc"
+	disc.BorderSizePixel = 0
+	disc.BackgroundColor3 = color
+	disc.BackgroundTransparency = transparency
+	disc.AnchorPoint = Vector2.new(0.5, 0.5)
+	disc.Position = UDim2.fromScale(0.5, 0.5)
+	disc.Size = UDim2.fromScale(1, 1)
+	addCorner(disc, UDim.new(0.5, 0))
+	local aspect = Instance.new("UIAspectRatioConstraint")
+	aspect.AspectRatio = 1
+	aspect.Parent = disc
+	disc.Parent = parent
+	return disc
+end
+
+local function newImage(name: string, image: string, parent: Instance): ImageLabel
+	local imageLabel = Instance.new("ImageLabel")
+	imageLabel.Name = name
+	imageLabel.BackgroundTransparency = 1
+	imageLabel.Image = image
+	imageLabel.ScaleType = Enum.ScaleType.Fit
+	imageLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+	imageLabel.Position = UDim2.fromScale(0.5, 0.5)
+	imageLabel.Size = UDim2.fromScale(1, 1)
+	imageLabel.Parent = parent
+	return imageLabel
+end
+
+--------------------------------------------------------------------------------
+-- Vignettes
+--------------------------------------------------------------------------------
+
+-- Dessine la vignette d'une option dans `parent`. Les pastilles couleur peau sont ajoutées à `skinDiscs`.
+local function drawThumbnail(thumbnail: Catalog.Thumbnail, parent: Frame, skinDiscs: { Frame })
+	local kind = thumbnail.kind
+	local image = thumbnail.image
+
+	if kind == "image" and image then
+		local disc = newDisc(parent, COLORS.sunken, 0.35)
+		addStroke(disc, COLORS.goldDim, 0.6, 1)
+		newImage("Thumbnail", image, parent)
+		local inset = thumbnail.inset
+		if inset then
+			-- Petit médaillon en coin : la cape d'une tenue.
+			local insetFrame = newFrame("Inset", parent)
+			insetFrame.AnchorPoint = Vector2.new(1, 1)
+			insetFrame.Position = UDim2.fromScale(1, 1)
+			insetFrame.Size = UDim2.fromScale(0.42, 0.42)
+			local insetDisc = newDisc(insetFrame, COLORS.background, 0.05)
+			addStroke(insetDisc, COLORS.gold, 0.3, 1)
+			local insetImage = newImage("InsetImage", inset, insetDisc)
+			insetImage.Size = UDim2.fromScale(0.9, 0.9)
+		end
+	elseif kind == "face" and image then
+		local disc = newDisc(parent, DEFAULT_SKIN, 0)
+		addStroke(disc, COLORS.goldDim, 0.4, 1)
+		local face = newImage("Face", image, disc)
+		face.Size = UDim2.fromScale(0.94, 0.94)
+		table.insert(skinDiscs, disc)
+	elseif kind == "medallion" then
+		local disc = newDisc(parent, COLORS.sunken, 0.2)
+		addStroke(disc, COLORS.gold, 0.2, 1.5)
+		Theme.title({
+			name = "Initial",
+			text = thumbnail.text or "",
+			color = COLORS.goldBright,
+			alignX = Enum.TextXAlignment.Center,
+			anchor = Vector2.new(0.5, 0.5),
+			position = UDim2.fromScale(0.5, 0.5),
+			size = UDim2.fromScale(0.6, 0.6),
+			scaled = true,
+			maxTextSize = 64,
+			parent = disc,
+		})
+	else
+		local disc = newDisc(parent, COLORS.sunken, 0.5)
+		addStroke(disc, COLORS.goldDim, 0.6, 1)
+		Theme.label({
+			name = "None",
+			text = "—",
+			color = COLORS.textMuted,
+			alignX = Enum.TextXAlignment.Center,
+			anchor = Vector2.new(0.5, 0.5),
+			position = UDim2.fromScale(0.5, 0.5),
+			size = UDim2.fromScale(0.5, 0.5),
+			scaled = true,
+			maxTextSize = 40,
+			parent = disc,
+		})
+	end
+end
+
+-- Vignette cliquable d'une option : image en haut, nom dessous.
+local function createTile(entry: Catalog.OptionEntry, index: number, parent: Instance, skinDiscs: { Frame }): Button
+	local tile = Theme.button({
+		name = "Option" .. index,
+		text = entry.name,
+		font = FONTS.caption,
+		textSize = 12,
+		layoutOrder = index,
+		parent = parent,
+	})
+	local label = tile.label
+	label.AnchorPoint = Vector2.new(0.5, 1)
+	label.Position = UDim2.new(0.5, 0, 1, -4)
+	label.Size = UDim2.new(1, -8, 0.2, 0)
+	label.TextWrapped = true
+
+	local thumb = newFrame("Thumb", tile.instance)
+	thumb.AnchorPoint = Vector2.new(0.5, 0)
+	thumb.Position = UDim2.new(0.5, 0, 0, 6)
+	thumb.Size = UDim2.new(1, -12, 0.76, -8)
+	drawThumbnail(entry.thumbnail, thumb, skinDiscs)
+	return tile
+end
+
+--------------------------------------------------------------------------------
+-- Cartes de magie
+--------------------------------------------------------------------------------
+
+local function refreshCard(card: MagicCard, isSelected: boolean)
+	local palette = card.magic.palette
+	Theme.tween(card.stroke, {
+		Transparency = if isSelected then 0 elseif card.isHovered then 0.2 else 0.65,
+		Thickness = if isSelected then 2 else 1,
+	}, Theme.durations.fast)
+	Theme.tween(card.button, {
+		BackgroundColor3 = if isSelected then palette.main elseif card.isHovered then COLORS.surfaceHover else COLORS.surface,
+		BackgroundTransparency = if isSelected then 0.8 elseif card.isHovered then 0.12 else 0.3,
+	}, Theme.durations.fast)
+end
+
+local function createMagicCard(magic: Magic, index: number, parent: Instance): MagicCard
+	local button = Instance.new("TextButton")
+	button.Name = "Magic_" .. magic.id
+	button.AutoButtonColor = false
+	button.Text = ""
+	button.BorderSizePixel = 0
+	button.BackgroundColor3 = COLORS.surface
+	button.BackgroundTransparency = 0.3
+	button.Size = UDim2.new(1, -8, 0, 0)
+	button.AutomaticSize = Enum.AutomaticSize.Y
+	button.LayoutOrder = index
+	Theme.makeSelectable(button)
+	addCorner(button, UDim.new(0, Theme.cornerRadius))
+	local stroke = addStroke(button, magic.palette.main, 0.65, 1)
+
+	-- Bande aux couleurs de la magie : cœur sombre -> couleur dominante -> éclat.
+	local band = Instance.new("Frame")
+	band.Name = "Band"
+	band.BorderSizePixel = 0
+	band.BackgroundColor3 = Color3.new(1, 1, 1)
+	band.Position = UDim2.fromOffset(6, 8)
+	band.Size = UDim2.new(0, 5, 1, -16)
+	addCorner(band, UDim.new(0.5, 0))
+	local bandGradient = Instance.new("UIGradient")
+	bandGradient.Color = Theme.magicGradient(magic.palette)
+	bandGradient.Rotation = 90
+	bandGradient.Parent = band
+	band.Parent = button
+
+	local texts = newFrame("Texts", button)
+	texts.Position = UDim2.fromOffset(20, 0)
+	texts.Size = UDim2.new(1, -30, 0, 0)
+	texts.AutomaticSize = Enum.AutomaticSize.Y
+	local textPadding = Instance.new("UIPadding")
+	textPadding.PaddingTop = UDim.new(0, 10)
+	textPadding.PaddingBottom = UDim.new(0, 12)
+	textPadding.Parent = texts
+	addListLayout(texts, 3)
+
+	Theme.title({
+		name = "Name",
+		text = magic.name,
+		textSize = 24,
+		color = magic.palette.glow,
+		size = UDim2.new(1, 0, 0, 28),
+		layoutOrder = 1,
+		parent = texts,
+	})
+	Theme.caption({
+		name = "Ultimate",
+		text = `Ultime · {magic.ultimateName}`,
+		color = magic.palette.main,
+		size = UDim2.new(1, 0, 0, 16),
+		scaled = true,
+		minTextSize = 9,
+		layoutOrder = 2,
+		parent = texts,
+	})
+	Theme.label({
+		name = "Description",
+		text = magic.description,
+		textSize = 15,
+		color = COLORS.textMuted,
+		wrap = true,
+		autoSize = "Y",
+		size = UDim2.new(1, 0, 0, 0),
+		layoutOrder = 3,
+		parent = texts,
+	})
+
+	button.Parent = parent
+	return { button = button, stroke = stroke, magic = magic, isHovered = false }
 end
 
 --------------------------------------------------------------------------------
 -- Construction
 --------------------------------------------------------------------------------
 
--- `magicEntries` : une entrée par Magie Innée, dans l'ordre de MagicConfig.MAGICS.
-function AvatarCreatorView.create(parent: Instance, magicEntries: { MagicEntry }): View
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "AvatarCreatorGui"
-	gui.ResetOnSpawn = false
-	gui.IgnoreGuiInset = true
-	gui.DisplayOrder = 50
-	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	gui.Enabled = false
+local function buildShade(root: Frame)
+	local shade = newFrame("Shade", root)
+	shade.ZIndex = 2
 
-	-- Panneau ---------------------------------------------------------------
-	local panel = Instance.new("CanvasGroup") -- CanvasGroup : permet de fondre tout le panneau d'un coup
-	panel.Name = "Panel"
-	panel.BackgroundTransparency = 1
-	panel.AnchorPoint = Vector2.new(1, 0)
-	panel.Position = UDim2.fromScale(1, 0)
-	panel.Size = UDim2.fromScale(PANEL_WIDTH_SCALE, 1)
-	panel.Parent = gui
-
-	local shade = Instance.new("Frame")
-	shade.Name = "Shade"
-	shade.BorderSizePixel = 0
-	shade.BackgroundColor3 = COLOR_BACKGROUND
-	shade.Size = UDim2.fromScale(1, 1)
-	shade.Parent = panel
-
-	local shadeGradient = Instance.new("UIGradient")
-	shadeGradient.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 1),
-		NumberSequenceKeypoint.new(0.45, 0.25),
-		NumberSequenceKeypoint.new(1, 0.1),
-	})
-	shadeGradient.Parent = shade
-
-	local content = Instance.new("Frame")
-	content.Name = "Content"
-	content.BackgroundTransparency = 1
-	content.AnchorPoint = Vector2.new(1, 0.5)
-	content.Position = UDim2.fromScale(1, 0.5)
-	content.Size = UDim2.fromScale(0.8, 1)
-	content.Parent = panel
-
-	local padding = Instance.new("UIPadding")
-	padding.PaddingLeft = UDim.new(0, 16)
-	padding.PaddingRight = UDim.new(0, 32)
-	padding.Parent = content
-
-	-- Sur un petit écran (ou une petite fenêtre Studio), tout le contenu rétrécit pour rester visible.
-	local contentScale = Instance.new("UIScale")
-	contentScale.Parent = content
-
-	local function updateContentScale()
-		contentScale.Scale = math.min(1, gui.AbsoluteSize.Y / REFERENCE_SCREEN_HEIGHT)
-	end
-	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateContentScale)
-
-	-- Page 1 : apparence ------------------------------------------------------
-	local appearancePage = newPage("AppearancePage", content)
-	newPageHeader("É V E I L", "Souvenez-vous de qui vous étiez.", appearancePage)
-
-	local baseStepper = newStepper("Base", "CORPS", 4, appearancePage)
-	local faceStepper = newStepper("Face", "VISAGE", 5, appearancePage)
-	local markStepper = newStepper("Mark", "CICATRICES ET TATOUAGES", 6, appearancePage)
-	local hairStepper = newStepper("Hair", "CHEVELURE", 7, appearancePage)
-	local outfitStepper = newStepper("Outfit", "TENUE", 8, appearancePage)
-	local heightStepper = newStepper("Height", "TAILLE", 9, appearancePage)
-	local widthStepper = newStepper("Width", "CARRURE", 10, appearancePage)
-
-	newSeparator(11, appearancePage)
-	local nextButton = newWideButton("Next", "CONTINUER", 12, appearancePage)
-
-	-- Page 2 : Magie Innée ----------------------------------------------------
-	local destinyPage = newPage("DestinyPage", content)
-	destinyPage.Visible = false
-	newPageHeader("D E S T I N", "Une seule magie coule dans vos veines.", destinyPage)
-
-	local magicButtons: { MagicButton } = {}
-	for index, entry in magicEntries do
-		magicButtons[index] = newMagicButton(entry, 3 + index, destinyPage)
-	end
-	local afterMagics = 3 + #magicEntries
-
-	local magicDescription = newLabel("", FONT_TITLE, 17, COLOR_MUTED)
-	magicDescription.Name = "MagicDescription"
-	magicDescription.Size = UDim2.new(1, 0, 0, MAGIC_DESCRIPTION_HEIGHT)
-	magicDescription.TextWrapped = true
-	magicDescription.TextYAlignment = Enum.TextYAlignment.Top
-	magicDescription.RichText = true
-	magicDescription.LayoutOrder = afterMagics + 1
-	magicDescription.Parent = destinyPage
-
-	newSeparator(afterMagics + 2, destinyPage)
-	local confirmButton = newWideButton("Confirm", "", afterMagics + 3, destinyPage)
-
-	local backButton = Instance.new("TextButton")
-	backButton.Name = "Back"
-	backButton.AutoButtonColor = false
-	backButton.BackgroundTransparency = 1
-	backButton.Size = UDim2.new(1, 0, 0, 24)
-	backButton.Font = FONT_TITLE
-	backButton.Text = "Revenir à l'apparence"
-	backButton.TextSize = 17
-	backButton.TextColor3 = COLOR_MUTED
-	backButton.LayoutOrder = afterMagics + 4
-	backButton.Parent = destinyPage
-
-	-- Voile noir + narration (au-dessus de tout) -----------------------------
-	local fade = Instance.new("Frame")
-	fade.Name = "Fade"
-	fade.BorderSizePixel = 0
-	fade.BackgroundColor3 = Color3.new(0, 0, 0)
-	fade.Size = UDim2.fromScale(1, 1)
-	fade.ZIndex = 10
-	fade.Parent = gui
-
-	local introLabel = newLabel("", FONT_TITLE, 30, COLOR_TEXT)
-	introLabel.Name = "IntroLabel"
-	introLabel.AnchorPoint = Vector2.new(0.5, 0.5)
-	introLabel.Position = UDim2.fromScale(0.5, 0.5)
-	introLabel.Size = UDim2.fromScale(0.8, 0.2)
-	introLabel.TextWrapped = true
-	introLabel.TextTransparency = 1
-	introLabel.ZIndex = 11
-	introLabel.Parent = fade
-
-	gui.Parent = parent
-	updateContentScale()
-
-	return {
-		gui = gui,
-		panel = panel,
-		fade = fade,
-		introLabel = introLabel,
-
-		appearancePage = appearancePage,
-		baseStepper = baseStepper,
-		faceStepper = faceStepper,
-		markStepper = markStepper,
-		hairStepper = hairStepper,
-		outfitStepper = outfitStepper,
-		heightStepper = heightStepper,
-		widthStepper = widthStepper,
-		nextButton = nextButton,
-
-		destinyPage = destinyPage,
-		magicButtons = magicButtons,
-		magicDescription = magicDescription,
-		confirmButton = confirmButton,
-		backButton = backButton,
+	-- Chaque bord : sombre contre le bord de l'écran, transparent vers le centre (rotation du dégradé).
+	type Edge = { name: string, position: UDim2, size: UDim2, rotation: number }
+	local edges: { Edge } = {
+		{ name = "Left", position = UDim2.fromScale(0, 0), size = UDim2.fromScale(0.3, 1), rotation = 0 },
+		{ name = "Right", position = UDim2.fromScale(0.7, 0), size = UDim2.fromScale(0.3, 1), rotation = 180 },
+		{ name = "Top", position = UDim2.fromScale(0, 0), size = UDim2.fromScale(1, 0.18), rotation = 90 },
+		{ name = "Bottom", position = UDim2.fromScale(0, 0.78), size = UDim2.fromScale(1, 0.22), rotation = -90 },
 	}
+	for _, edge in edges do
+		local frame = Instance.new("Frame")
+		frame.Name = edge.name
+		frame.BorderSizePixel = 0
+		frame.BackgroundColor3 = COLORS.ink
+		frame.Position = edge.position
+		frame.Size = edge.size
+		local gradient = Instance.new("UIGradient")
+		gradient.Rotation = edge.rotation
+		gradient.Transparency = NumberSequence.new(0.35, 1)
+		gradient.Parent = frame
+		frame.Parent = shade
+	end
+end
+
+-- Construit l'interface. `steps` : étapes du catalogue ; `magics` : MagicConfig.MAGICS (nombre libre).
+function AvatarCreatorView.new(steps: { Step }, magics: { Magic }): View
+	local screen = Theme.screenGui("AvatarCreatorGui", DISPLAY_ORDER)
+	local gui = screen.gui
+	gui.Enabled = false
+	local root = screen.root
+
+	-- Zone de glisser : sous tout le reste ; un clic sur la scène n'atteint jamais le monde.
+	local dragZone = Instance.new("TextButton")
+	dragZone.Name = "DragZone"
+	dragZone.AutoButtonColor = false
+	dragZone.BackgroundTransparency = 1
+	dragZone.Text = ""
+	dragZone.Size = UDim2.fromScale(1, 1)
+	dragZone.Selectable = false
+	dragZone.ZIndex = 1
+	dragZone.Parent = root
+
+	buildShade(root)
+	screen.safe.ZIndex = 3
+
+	-- Rail ------------------------------------------------------------------------
+	local railSlot = newFrame("RailSlot", screen.safe)
+	local railConstraint = Instance.new("UISizeConstraint")
+	railConstraint.Parent = railSlot
+
+	local rail = Theme.panel({ name = "Rail", style = "glass", active = true, parent = railSlot })
+	rail.Size = UDim2.fromScale(1, 1)
+	local railPadding = addUniformPadding(rail, 10)
+
+	local railHeader = newFrame("Header", rail)
+	railHeader.Size = UDim2.new(1, 0, 0, RAIL_HEADER_HEIGHT)
+	Theme.caption({
+		text = "SOUVENEZ-VOUS",
+		color = COLORS.gold,
+		alignX = Enum.TextXAlignment.Center,
+		size = UDim2.new(1, 0, 0, 16),
+		parent = railHeader,
+	})
+	Theme.title({
+		text = "Éveil",
+		textSize = 28,
+		alignX = Enum.TextXAlignment.Center,
+		position = UDim2.fromOffset(0, 16),
+		size = UDim2.new(1, 0, 0, 32),
+		parent = railHeader,
+	})
+
+	local tabItems: { Theme.TabItem } = {}
+	for index, step in steps do
+		tabItems[index] = {
+			id = step.id,
+			label = step.label,
+			glyph = step.numeral,
+			separatorBefore = step.kind == "destiny",
+		}
+	end
+	local tabs = Theme.tabs({
+		items = tabItems,
+		orientation = "vertical",
+		autoSelect = false,
+		thickness = 42,
+		length = 132,
+		textSize = 16,
+		parent = rail,
+	})
+
+	-- Panneau --------------------------------------------------------------------
+	local panelSlot = newFrame("PanelSlot", screen.safe)
+	local panelConstraint = Instance.new("UISizeConstraint")
+	panelConstraint.Parent = panelSlot
+
+	local panel = Theme.panel({ name = "Panel", style = "panel", active = true, parent = panelSlot })
+	panel.Size = UDim2.fromScale(1, 1)
+	local panelPadding = addUniformPadding(panel, 18)
+
+	local header = newFrame("Header", panel)
+	header.Size = UDim2.new(1, 0, 0, HEADER_HEIGHT)
+	local stepCaption = Theme.caption({ name = "Step", color = COLORS.gold, size = UDim2.new(1, 0, 0, 16), parent = header })
+	local titleLabel = Theme.title({
+		name = "Title",
+		textSize = 32,
+		position = UDim2.fromOffset(0, 18),
+		size = UDim2.new(1, 0, 0, 36),
+		scaled = true,
+		minTextSize = 18,
+		parent = header,
+	})
+	local subtitleLabel = Theme.label({
+		name = "Subtitle",
+		textSize = 16,
+		color = COLORS.textMuted,
+		position = UDim2.fromOffset(0, 56),
+		size = UDim2.new(1, 0, 0, 20),
+		scaled = true,
+		minTextSize = 11,
+		parent = header,
+	})
+	Theme.divider({ anchor = Vector2.new(0, 1), position = UDim2.fromScale(0, 1), parent = header })
+
+	local pagesGroup, pages = Theme.group({ name = "Pages", style = "none", border = false, corner = 0, parent = panel })
+
+	local footer = newFrame("Footer", panel)
+	footer.AnchorPoint = Vector2.new(0, 1)
+	footer.Position = UDim2.fromScale(0, 1)
+	footer.Size = UDim2.new(1, 0, 0, FOOTER_HEIGHT)
+	local backButton = Theme.button({
+		name = "Back",
+		text = "‹  Précédent",
+		size = UDim2.new(0.4, -4, 1, 0),
+		parent = footer,
+	})
+	local nextButton = Theme.button({
+		name = "Next",
+		text = "Suivant  ›",
+		variant = "primary",
+		anchor = Vector2.new(1, 0),
+		position = UDim2.fromScale(1, 0),
+		size = UDim2.new(0.6, -4, 1, 0),
+		parent = footer,
+	})
+
+	-- Confirmation (au-dessus du pied, dans le panneau : elle ne couvre jamais le personnage).
+	local confirmBox = Theme.panel({
+		name = "ConfirmBox",
+		style = "raised",
+		borderColor = COLORS.danger,
+		padding = 12,
+		active = true,
+		anchor = Vector2.new(0, 1),
+		position = UDim2.new(0, 0, 1, -(FOOTER_HEIGHT + 8)),
+		size = UDim2.new(1, 0, 0, CONFIRM_BOX_HEIGHT),
+		visible = false,
+		zIndex = 5,
+		parent = panel,
+	})
+	confirmBox.BackgroundTransparency = 0.02
+	Theme.caption({ text = "IRRÉVERSIBLE", color = COLORS.danger, size = UDim2.new(1, 0, 0, 16), parent = confirmBox })
+	Theme.label({
+		text = "Rouvrir les yeux avec ce corps et ce pouvoir ? Une fois éveillé, plus rien de tout cela ne pourra être changé.",
+		textSize = 16,
+		wrap = true,
+		alignY = Enum.TextYAlignment.Top,
+		position = UDim2.fromOffset(0, 22),
+		size = UDim2.new(1, 0, 1, -22),
+		scaled = true,
+		minTextSize = 11,
+		parent = confirmBox,
+	})
+
+	-- Page : options en liste -------------------------------------------------------
+	local optionsPage = newFrame("OptionsPage", pages)
+	local selector = newFrame("Selector", optionsPage)
+	selector.Size = UDim2.new(1, 0, 0, SELECTOR_HEIGHT)
+	local previousOption = Theme.iconButton({
+		name = "PreviousOption",
+		glyph = "‹",
+		textSize = 30,
+		anchor = Vector2.new(0, 0.5),
+		position = UDim2.fromScale(0, 0.5),
+		size = UDim2.fromOffset(48, 48),
+		parent = selector,
+	})
+	local nextOption = Theme.iconButton({
+		name = "NextOption",
+		glyph = "›",
+		textSize = 30,
+		anchor = Vector2.new(1, 0.5),
+		position = UDim2.fromScale(1, 0.5),
+		size = UDim2.fromOffset(48, 48),
+		parent = selector,
+	})
+	local optionName = Theme.title({
+		name = "OptionName",
+		textSize = 24,
+		alignX = Enum.TextXAlignment.Center,
+		anchor = Vector2.new(0.5, 0),
+		position = UDim2.new(0.5, 0, 0, 4),
+		size = UDim2.new(1, -116, 0, 30),
+		scaled = true,
+		minTextSize = 14,
+		parent = selector,
+	})
+	local optionCounter = Theme.caption({
+		name = "Counter",
+		alignX = Enum.TextXAlignment.Center,
+		anchor = Vector2.new(0.5, 0),
+		position = UDim2.new(0.5, 0, 0, 36),
+		size = UDim2.new(1, -116, 0, 16),
+		parent = selector,
+	})
+
+	local skinDiscs: { Frame } = {}
+	local grids: { [number]: OptionGrid } = {}
+	for stepIndex, step in steps do
+		local list = step.list
+		if list then
+			local scroller = Theme.scroller({
+				name = "Grid_" .. step.id,
+				position = UDim2.fromOffset(0, SELECTOR_HEIGHT + 8),
+				size = UDim2.new(1, 0, 1, -(SELECTOR_HEIGHT + 8)),
+				visible = false,
+				parent = optionsPage,
+			})
+			addUniformPadding(scroller, 4) -- place pour le cadre de sélection manette
+
+			local layout = Instance.new("UIGridLayout")
+			layout.SortOrder = Enum.SortOrder.LayoutOrder
+			layout.CellPadding = UDim2.fromOffset(TILE_GAP, TILE_GAP)
+			layout.CellSize = UDim2.new(1 / 3, -TILE_GAP, 0, 100)
+			local cellAspect = Instance.new("UIAspectRatioConstraint")
+			cellAspect.AspectRatio = TILE_ASPECT
+			cellAspect.DominantAxis = Enum.DominantAxis.Width
+			cellAspect.Parent = layout
+			layout.Parent = scroller
+
+			local tiles: { Button } = {}
+			for optionIndex, entry in list.options do
+				tiles[optionIndex] = createTile(entry, optionIndex, scroller, skinDiscs)
+			end
+			grids[stepIndex] = { stepIndex = stepIndex, scroller = scroller, layout = layout, tiles = tiles }
+		end
+	end
+
+	-- Page : proportions -----------------------------------------------------------
+	local proportionsPage = newFrame("ProportionsPage", pages)
+	proportionsPage.Visible = false
+	addListLayout(proportionsPage, 14)
+	Theme.label({
+		text = "Ajustez votre taille et votre carrure, cran par cran. Les bornes sont celles du monde.",
+		textSize = 15,
+		color = COLORS.textMuted,
+		wrap = true,
+		autoSize = "Y",
+		size = UDim2.new(1, 0, 0, 0),
+		layoutOrder = 1,
+		parent = proportionsPage,
+	})
+	local heightRange = AvatarConfig.HEIGHT_SCALE
+	local heightSlider = Theme.slider({
+		name = "Height",
+		label = "TAILLE",
+		min = heightRange.min,
+		max = heightRange.max,
+		step = heightRange.step,
+		value = heightRange.default,
+		format = Catalog.formatScale,
+		layoutOrder = 2,
+		parent = proportionsPage,
+	})
+	local widthRange = AvatarConfig.WIDTH_SCALE
+	local widthSlider = Theme.slider({
+		name = "Width",
+		label = "CARRURE",
+		min = widthRange.min,
+		max = widthRange.max,
+		step = widthRange.step,
+		value = widthRange.default,
+		format = Catalog.formatScale,
+		layoutOrder = 3,
+		parent = proportionsPage,
+	})
+	local resetProportions = Theme.button({
+		name = "ResetProportions",
+		text = "Revenir aux proportions d'origine",
+		variant = "ghost",
+		textSize = 16,
+		size = UDim2.new(1, 0, 0, 40),
+		layoutOrder = 4,
+		parent = proportionsPage,
+	})
+
+	-- Page : Destin ----------------------------------------------------------------
+	local destinyPage = newFrame("DestinyPage", pages)
+	destinyPage.Visible = false
+	local destinyScroller = Theme.scroller({ name = "Magics", parent = destinyPage })
+	addUniformPadding(destinyScroller, 4)
+	addListLayout(destinyScroller, 10)
+	local magicCards: { MagicCard } = {}
+	for index, magic in magics do
+		magicCards[index] = createMagicCard(magic, index, destinyScroller)
+	end
+
+	-- Page : récapitulatif ---------------------------------------------------------
+	local summaryPage = newFrame("SummaryPage", pages)
+	summaryPage.Visible = false
+	local summaryScroller = Theme.scroller({ name = "Summary", parent = summaryPage })
+	addUniformPadding(summaryScroller, 4)
+	addListLayout(summaryScroller, 6)
+
+	local summaryRows: { SummaryRow } = {}
+	for stepIndex, step in steps do
+		if step.kind == "list" or step.kind == "proportions" then
+			local row = Theme.button({
+				name = "Row_" .. step.id,
+				variant = "ghost",
+				size = UDim2.new(1, -8, 0, 44),
+				layoutOrder = stepIndex,
+				parent = summaryScroller,
+			})
+			Theme.caption({
+				text = `{step.numeral}   {string.upper(step.label)}`,
+				color = COLORS.gold,
+				position = UDim2.fromOffset(12, 0),
+				size = UDim2.new(0.4, -12, 1, 0),
+				scaled = true,
+				minTextSize = 9,
+				parent = row.instance,
+			})
+			local valueLabel = Theme.label({
+				name = "Value",
+				textSize = 17,
+				alignX = Enum.TextXAlignment.Right,
+				anchor = Vector2.new(1, 0),
+				position = UDim2.new(1, -28, 0, 0),
+				size = UDim2.new(0.6, -28, 1, 0),
+				scaled = true,
+				minTextSize = 11,
+				parent = row.instance,
+			})
+			Theme.label({
+				text = "›",
+				color = COLORS.goldDim,
+				alignX = Enum.TextXAlignment.Center,
+				anchor = Vector2.new(1, 0.5),
+				position = UDim2.new(1, -6, 0.5, 0),
+				size = UDim2.fromOffset(18, 24),
+				parent = row.instance,
+			})
+			table.insert(summaryRows, { button = row, valueLabel = valueLabel, stepIndex = stepIndex })
+		end
+	end
+
+	-- Ligne du pouvoir : bande colorée, nom, ultime.
+	local powerButton = Theme.button({
+		name = "Row_destiny",
+		variant = "ghost",
+		size = UDim2.new(1, -8, 0, 76),
+		layoutOrder = #steps + 1,
+		parent = summaryScroller,
+	})
+	local powerBandFrame = Instance.new("Frame")
+	powerBandFrame.Name = "Band"
+	powerBandFrame.BorderSizePixel = 0
+	powerBandFrame.BackgroundColor3 = Color3.new(1, 1, 1)
+	powerBandFrame.Position = UDim2.fromOffset(4, 8)
+	powerBandFrame.Size = UDim2.new(0, 5, 1, -16)
+	addCorner(powerBandFrame, UDim.new(0.5, 0))
+	local powerBand = Instance.new("UIGradient")
+	powerBand.Rotation = 90
+	powerBand.Parent = powerBandFrame
+	powerBandFrame.Parent = powerButton.instance
+	Theme.caption({
+		text = "POUVOIR",
+		color = COLORS.gold,
+		position = UDim2.fromOffset(18, 8),
+		size = UDim2.new(1, -46, 0, 16),
+		parent = powerButton.instance,
+	})
+	local powerName = Theme.title({
+		name = "PowerName",
+		textSize = 24,
+		position = UDim2.fromOffset(18, 24),
+		size = UDim2.new(1, -46, 0, 28),
+		scaled = true,
+		minTextSize = 14,
+		parent = powerButton.instance,
+	})
+	local powerUltimate = Theme.caption({
+		name = "PowerUltimate",
+		position = UDim2.fromOffset(18, 52),
+		size = UDim2.new(1, -46, 0, 16),
+		scaled = true,
+		minTextSize = 9,
+		parent = powerButton.instance,
+	})
+
+	Theme.label({
+		name = "Warning",
+		text = "Ce choix est irréversible : une fois éveillé, votre apparence et votre Magie Innée ne pourront plus être modifiées.",
+		textSize = 15,
+		color = COLORS.textMuted,
+		wrap = true,
+		autoSize = "Y",
+		size = UDim2.new(1, -8, 0, 0),
+		layoutOrder = #steps + 2,
+		parent = summaryScroller,
+	})
+	local errorLabel = Theme.label({
+		name = "Error",
+		textSize = 15,
+		color = COLORS.danger,
+		wrap = true,
+		autoSize = "Y",
+		size = UDim2.new(1, -8, 0, 0),
+		layoutOrder = #steps + 3,
+		visible = false,
+		parent = summaryScroller,
+	})
+
+	-- Zone libre du personnage : boutons de rotation et rappel des commandes ------------
+	local stage = newFrame("Stage", root)
+	stage.ZIndex = 4
+	local stageControls, stageContent = Theme.group({
+		name = "Controls",
+		style = "none",
+		border = false,
+		corner = 0,
+		anchor = Vector2.new(0, 1),
+		position = UDim2.fromScale(0, 1),
+		size = UDim2.new(1, 0, 0, CONTROLS_BAND),
+		parent = stage,
+	})
+	local rotateLeft = Theme.iconButton({
+		name = "RotateLeft",
+		glyph = "⟲",
+		round = true,
+		textSize = 26,
+		anchor = Vector2.new(0, 0.5),
+		position = UDim2.new(0, 12, 0.5, 0),
+		size = UDim2.fromOffset(48, 48),
+		parent = stageContent,
+	})
+	local rotateRight = Theme.iconButton({
+		name = "RotateRight",
+		glyph = "⟳",
+		round = true,
+		textSize = 26,
+		anchor = Vector2.new(1, 0.5),
+		position = UDim2.new(1, -12, 0.5, 0),
+		size = UDim2.fromOffset(48, 48),
+		parent = stageContent,
+	})
+	local hintLabel = Theme.caption({
+		name = "Hint",
+		alignX = Enum.TextXAlignment.Center,
+		anchor = Vector2.new(0.5, 0.5),
+		position = UDim2.fromScale(0.5, 0.5),
+		size = UDim2.new(1, -140, 0, 34),
+		wrap = true,
+		scaled = true,
+		maxTextSize = 13,
+		minTextSize = 8,
+		stroke = true,
+		parent = stageContent,
+	})
+
+	-- Voile noir et narration (au-dessus de tout) -------------------------------------
+	local veil = Instance.new("Frame")
+	veil.Name = "Veil"
+	veil.BorderSizePixel = 0
+	veil.BackgroundColor3 = Color3.new(0, 0, 0)
+	veil.Size = UDim2.fromScale(1, 1)
+	veil.Active = true
+	veil.ZIndex = 100
+	veil.Parent = root
+	local introLabel = Theme.label({
+		name = "IntroLabel",
+		font = FONTS.title,
+		textSize = 30,
+		alignX = Enum.TextXAlignment.Center,
+		wrap = true,
+		transparency = 1,
+		anchor = Vector2.new(0.5, 0.5),
+		position = UDim2.fromScale(0.5, 0.5),
+		size = UDim2.fromScale(0.8, 0.3),
+		parent = veil,
+	})
+
+	local data: ViewData = {
+		screen = screen,
+		gui = gui,
+		dragZone = dragZone,
+		railSlot = railSlot,
+		railConstraint = railConstraint,
+		rail = rail,
+		railPadding = railPadding,
+		railHeader = railHeader,
+		tabs = tabs,
+		panelSlot = panelSlot,
+		panelConstraint = panelConstraint,
+		panel = panel,
+		panelPadding = panelPadding,
+		header = header,
+		stepCaption = stepCaption,
+		titleLabel = titleLabel,
+		subtitleLabel = subtitleLabel,
+		pagesGroup = pagesGroup,
+		optionsPage = optionsPage,
+		previousOption = previousOption,
+		nextOption = nextOption,
+		optionName = optionName,
+		optionCounter = optionCounter,
+		grids = grids,
+		proportionsPage = proportionsPage,
+		heightSlider = heightSlider,
+		widthSlider = widthSlider,
+		resetProportions = resetProportions,
+		destinyPage = destinyPage,
+		magicCards = magicCards,
+		summaryPage = summaryPage,
+		summaryRows = summaryRows,
+		powerButton = powerButton,
+		powerBand = powerBand,
+		powerName = powerName,
+		powerUltimate = powerUltimate,
+		errorLabel = errorLabel,
+		confirmBox = confirmBox,
+		footer = footer,
+		backButton = backButton,
+		nextButton = nextButton,
+		stage = stage,
+		stageControls = stageControls,
+		rotateLeft = rotateLeft,
+		rotateRight = rotateRight,
+		hintLabel = hintLabel,
+		veil = veil,
+		introLabel = introLabel,
+		mode = "wide",
+		_columns = 3,
+		_selectedMagic = 1,
+		_chromeShown = true,
+		_pageToken = 0,
+		_stageDirty = false,
+		_stageListeners = {},
+		_skinDiscs = skinDiscs,
+		_veilTween = nil,
+		_narrationTween = nil,
+	}
+	local view = setmetatable(data, AvatarCreatorView)
+
+	-- Survol des cartes de magie (souris et manette).
+	for index, card in magicCards do
+		local function setHovered(isHovered: boolean)
+			card.isHovered = isHovered
+			refreshCard(card, index == view._selectedMagic)
+		end
+		card.button.MouseEnter:Connect(function()
+			setHovered(true)
+		end)
+		card.button.MouseLeave:Connect(function()
+			setHovered(false)
+		end)
+		card.button.SelectionGained:Connect(function()
+			setHovered(true)
+		end)
+		card.button.SelectionLost:Connect(function()
+			setHovered(false)
+		end)
+	end
+
+	-- La zone libre est remesurée dès que le rail, le panneau ou l'écran bougent.
+	local function markStageDirty()
+		view:_scheduleStageRefresh()
+	end
+	for _, slot in { railSlot, panelSlot } do
+		slot:GetPropertyChangedSignal("AbsoluteSize"):Connect(markStageDirty)
+		slot:GetPropertyChangedSignal("AbsolutePosition"):Connect(markStageDirty)
+	end
+	Theme.onLayoutChanged(screen, function(layout: Layout)
+		view:applyLayout(layout)
+	end)
+
+	view:applyLayout(Theme.getLayout(screen))
+	view:setChromeShown(false, 0)
+	return view
+end
+
+--------------------------------------------------------------------------------
+-- Mise en page
+--------------------------------------------------------------------------------
+
+-- Position d'un élément du décor (rail ou panneau) caché hors de l'écran, selon la disposition.
+local function getHiddenOffset(mode: Mode, isRail: boolean): UDim2
+	if mode == "wide" then
+		return if isRail then UDim2.fromScale(-1.3, 0) else UDim2.fromScale(1.3, 0)
+	end
+	return if isRail then UDim2.fromScale(0, -2) else UDim2.fromScale(0, 1.3)
+end
+
+-- Écran large : rail à gauche, panneau à droite. Écran haut : rail en haut, feuille en bas.
+function AvatarCreatorView.applyLayout(self: View, layout: Layout)
+	local mode: Mode = if layout.isPortrait then "tall" else "wide"
+	self.mode = mode
+	local isCompact = layout.isCompact
+
+	if mode == "wide" then
+		self.railSlot.AnchorPoint = Vector2.new(0, 0.5)
+		self.railSlot.Position = UDim2.new(0, EDGE_MARGIN, 0.5, 0)
+		self.railSlot.Size = UDim2.fromScale(0.17, 0.86)
+		self.railConstraint.MinSize = Vector2.new(150, 220)
+		self.railConstraint.MaxSize = Vector2.new(230, 640)
+
+		self.panelSlot.AnchorPoint = Vector2.new(1, 0.5)
+		self.panelSlot.Position = UDim2.new(1, -EDGE_MARGIN, 0.5, 0)
+		self.panelSlot.Size = UDim2.fromScale(0.34, 0.94)
+		self.panelConstraint.MinSize = Vector2.new(320, 300)
+		self.panelConstraint.MaxSize = Vector2.new(500, 900)
+
+		local showRailHeader = layout.height >= 560
+		self.railHeader.Visible = showRailHeader
+		self.tabs:setOrientation("vertical")
+		local tabsTop = if showRailHeader then RAIL_HEADER_HEIGHT + 6 else 0
+		self.tabs.instance.Position = UDim2.fromOffset(0, tabsTop)
+		self.tabs.instance.Size = UDim2.new(1, 0, 1, -tabsTop)
+		self.railPadding.PaddingTop = UDim.new(0, 10)
+		self.railPadding.PaddingBottom = UDim.new(0, 10)
+		self._columns = 3
+	else
+		self.railSlot.AnchorPoint = Vector2.new(0.5, 0)
+		self.railSlot.Position = UDim2.fromOffset(0, 8) + UDim2.fromScale(0.5, 0)
+		self.railSlot.Size = UDim2.new(1, -2 * EDGE_MARGIN, 0, RAIL_TALL_HEIGHT)
+		self.railConstraint.MinSize = Vector2.zero
+		self.railConstraint.MaxSize = Vector2.new(math.huge, math.huge)
+
+		self.panelSlot.AnchorPoint = Vector2.new(0.5, 1)
+		self.panelSlot.Position = UDim2.fromScale(0.5, 1)
+		self.panelSlot.Size = UDim2.fromScale(1, 0.46)
+		self.panelConstraint.MinSize = Vector2.new(0, 320)
+		self.panelConstraint.MaxSize = Vector2.new(900, 640)
+
+		self.railHeader.Visible = false
+		self.tabs:setOrientation("horizontal")
+		self.tabs.instance.Position = UDim2.new()
+		self.tabs.instance.Size = UDim2.fromScale(1, 1)
+		self.railPadding.PaddingTop = UDim.new(0, 4)
+		self.railPadding.PaddingBottom = UDim.new(0, 4)
+		self._columns = math.clamp(math.floor(layout.width / 130), 4, 6)
+	end
+
+	-- En-tête plus court sur téléphone.
+	local headerHeight = if isCompact then HEADER_HEIGHT_COMPACT else HEADER_HEIGHT
+	local panelPadding = if isCompact then 12 else 18
+	self.header.Size = UDim2.new(1, 0, 0, headerHeight)
+	self.titleLabel.Position = UDim2.fromOffset(0, if isCompact then 14 else 18)
+	self.titleLabel.Size = UDim2.new(1, 0, 0, if isCompact then 28 else 36)
+	self.subtitleLabel.Position = UDim2.fromOffset(0, if isCompact then 42 else 56)
+	self.subtitleLabel.Size = UDim2.new(1, 0, 0, if isCompact then 16 else 20)
+	for _, side in { "PaddingTop", "PaddingBottom", "PaddingLeft", "PaddingRight" } do
+		(self.panelPadding :: any)[side] = UDim.new(0, panelPadding)
+	end
+	local pagesTop = headerHeight + 10
+	self.pagesGroup.Position = UDim2.fromOffset(0, pagesTop)
+	self.pagesGroup.Size = UDim2.new(1, 0, 1, -(pagesTop + FOOTER_HEIGHT + 10))
+
+	-- Vignettes : colonnes selon la largeur disponible.
+	for _, grid in self.grids do
+		grid.layout.CellSize = UDim2.new(1 / self._columns, -TILE_GAP, 0, 100)
+		self:relinkGrid(grid)
+	end
+
+	-- Un décor caché reste caché hors de l'écran dans la nouvelle disposition.
+	if not self._chromeShown then
+		self.rail.Position = getHiddenOffset(mode, true)
+		self.panel.Position = getHiddenOffset(mode, false)
+	end
+	self:_scheduleStageRefresh()
+end
+
+-- Voisins manette des vignettes d'une grille (colonnes de la disposition courante).
+function AvatarCreatorView.relinkGrid(self: View, grid: OptionGrid)
+	local objects: { GuiObject } = {}
+	for index, tile in grid.tiles do
+		objects[index] = tile.instance
+	end
+	Theme.linkSelection(objects, "grid", self._columns)
+end
+
+-- Mesure la zone libre (entre le rail et le panneau), y place la scène et retourne la fenêtre
+-- de cadrage de la caméra (zone libre moins la bande des boutons de rotation).
+function AvatarCreatorView.measureStage(self: View): Window
+	local screenSize = self.gui.AbsoluteSize
+	if screenSize.X <= 0 or screenSize.Y <= 0 then
+		return DEFAULT_WINDOW
+	end
+	local scale = self.screen.scale.Scale
+	local railPosition, railSize = self.railSlot.AbsolutePosition, self.railSlot.AbsoluteSize
+	local panelPosition = self.panelSlot.AbsolutePosition
+	local topInset = GuiService:GetGuiInset().Y
+
+	local left, top, right, bottom
+	if self.mode == "wide" then
+		left = railPosition.X + railSize.X
+		right = panelPosition.X
+		top = topInset
+		bottom = screenSize.Y
+	else
+		left = 0
+		right = screenSize.X
+		top = railPosition.Y + railSize.Y
+		bottom = panelPosition.Y
+	end
+	local width = math.max(right - left, 1)
+	local height = math.max(bottom - top, 1)
+
+	self.stage.Position = UDim2.fromOffset(left / scale, top / scale)
+	self.stage.Size = UDim2.fromOffset(width / scale, height / scale)
+
+	local band = math.min(CONTROLS_BAND * scale, height * 0.3)
+	return {
+		x = left / screenSize.X,
+		y = top / screenSize.Y,
+		width = width / screenSize.X,
+		height = math.max(height - band, 1) / screenSize.Y,
+	}
+end
+
+-- Regroupe les remesures d'une même image (plusieurs propriétés changent ensemble).
+function AvatarCreatorView._scheduleStageRefresh(self: View)
+	if self._stageDirty then
+		return
+	end
+	self._stageDirty = true
+	task.defer(function()
+		self._stageDirty = false
+		local window = self:measureStage()
+		for _, listener in table.clone(self._stageListeners) do
+			task.spawn(listener, window)
+		end
+	end)
+end
+
+-- `callback(window)` chaque fois que la zone libre change (pour la caméra).
+function AvatarCreatorView.onStageChanged(self: View, callback: (window: Window) -> ())
+	table.insert(self._stageListeners, callback)
+end
+
+-- Redemande une mesure de la zone libre à l'image suivante (après avoir activé l'écran, par exemple :
+-- les positions absolues ne sont à jour qu'une fois l'interface affichée).
+function AvatarCreatorView.requestStageRefresh(self: View)
+	self:_scheduleStageRefresh()
+end
+
+--------------------------------------------------------------------------------
+-- Apparitions et transitions
+--------------------------------------------------------------------------------
+
+-- Fait entrer (ou sortir) le rail, le panneau et les commandes de la scène. Durée 0 = immédiat.
+function AvatarCreatorView.setChromeShown(self: View, shown: boolean, duration: number?)
+	self._chromeShown = shown
+	local railTarget = if shown then UDim2.new() else getHiddenOffset(self.mode, true)
+	local panelTarget = if shown then UDim2.new() else getHiddenOffset(self.mode, false)
+	local length = duration or (if shown then CHROME_SHOW_DURATION else CHROME_HIDE_DURATION)
+
+	if shown then
+		self.rail.Visible = true
+		self.panel.Visible = true
+	end
+	if length <= 0 then
+		self.rail.Position = railTarget
+		self.panel.Position = panelTarget
+		self.rail.Visible = shown
+		self.panel.Visible = shown
+		self.stageControls.GroupTransparency = if shown then 0 else 1
+		self.stageControls.Visible = shown
+		return
+	end
+
+	local direction = if shown then Enum.EasingDirection.Out else Enum.EasingDirection.In
+	Theme.tween(self.rail, { Position = railTarget }, length, Enum.EasingStyle.Quart, direction)
+	local panelTween = Theme.tween(self.panel, { Position = panelTarget }, length, Enum.EasingStyle.Quart, direction)
+	if not shown then
+		panelTween.Completed:Once(function(state: Enum.PlaybackState)
+			if state == Enum.PlaybackState.Completed and not self._chromeShown then
+				self.rail.Visible = false
+				self.panel.Visible = false
+			end
+		end)
+	end
+	Theme.fade(self.stageControls, shown, length)
+end
+
+function AvatarCreatorView.isChromeShown(self: View): boolean
+	return self._chromeShown
+end
+
+-- Voile noir du créateur (intro, validation). Le voile visible absorbe les clics ; une fois levé, il
+-- est masqué pour ne plus rien bloquer. Un fondu en cours est remplacé. Durée 0 ou absente = immédiat.
+function AvatarCreatorView.setVeil(self: View, shown: boolean, duration: number?): Tween?
+	local previous = self._veilTween
+	if previous then
+		previous:Cancel()
+	end
+	self._veilTween = nil
+
+	local veil = self.veil
+	local target = if shown then 0 else 1
+	if duration == nil or duration <= 0 then
+		veil.BackgroundTransparency = target
+		veil.Visible = shown
+		return nil
+	end
+
+	veil.Visible = true
+	local veilTween = Theme.tween(veil, { BackgroundTransparency = target }, duration, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+	self._veilTween = veilTween
+	if not shown then
+		veilTween.Completed:Once(function(state: Enum.PlaybackState)
+			if state == Enum.PlaybackState.Completed and self._veilTween == veilTween then
+				veil.Visible = false
+			end
+		end)
+	end
+	return veilTween
+end
+
+-- Texte de narration posé sur le voile. `text` nil = le texte s'efface (et garde son contenu
+-- pendant le fondu). Durée 0 ou absente = immédiat. Retourne le fondu lancé.
+function AvatarCreatorView.setNarration(self: View, text: string?, duration: number?): Tween?
+	local previous = self._narrationTween
+	if previous then
+		previous:Cancel()
+	end
+	self._narrationTween = nil
+
+	local label = self.introLabel
+	if text then
+		label.Text = text
+	end
+	local target = if text then 0 else 1
+	if duration == nil or duration <= 0 then
+		label.TextTransparency = target
+		return nil
+	end
+	local narrationTween =
+		Theme.tween(label, { TextTransparency = target }, duration, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+	self._narrationTween = narrationTween
+	return narrationTween
+end
+
+-- Fondu court des pages : `apply` est appelé au creux du fondu (il dessine le nouvel état).
+-- Deux transitions rapprochées : seule la dernière est appliquée.
+function AvatarCreatorView.transitionPages(self: View, apply: () -> ())
+	self._pageToken += 1
+	local token = self._pageToken
+	Theme.tween(self.pagesGroup, { GroupTransparency = 1 }, PAGE_FADE_OUT).Completed:Once(function()
+		if token ~= self._pageToken then
+			return
+		end
+		apply()
+		Theme.tween(self.pagesGroup, { GroupTransparency = 0 }, PAGE_FADE_IN)
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- Contenu
+--------------------------------------------------------------------------------
+
+function AvatarCreatorView.setHeader(self: View, caption: string, title: string, subtitle: string)
+	self.stepCaption.Text = caption
+	self.titleLabel.Text = title
+	self.subtitleLabel.Text = subtitle
+end
+
+-- Affiche la page de l'étape `stepIndex` (et seulement elle).
+function AvatarCreatorView.showPage(self: View, step: Step, stepIndex: number)
+	self.optionsPage.Visible = step.kind == "list"
+	for index, grid in self.grids do
+		grid.scroller.Visible = index == stepIndex
+	end
+	self.proportionsPage.Visible = step.kind == "proportions"
+	self.destinyPage.Visible = step.kind == "destiny"
+	self.summaryPage.Visible = step.kind == "summary"
+end
+
+-- Option courante d'une étape "liste" : nom, compteur "3 / 22", vignette mise en avant.
+function AvatarCreatorView.setOption(self: View, stepIndex: number, optionIndex: number, name: string, count: number)
+	self.optionName.Text = name
+	self.optionCounter.Text = `{optionIndex} / {count}`
+	local grid = self.grids[stepIndex]
+	if grid then
+		for index, tile in grid.tiles do
+			tile:setSelected(index == optionIndex)
+		end
+		-- La vignette choisie reste visible (positions à jour à l'image suivante, après un changement de page).
+		local selectedTile = grid.tiles[optionIndex]
+		if selectedTile then
+			task.defer(function()
+				if grid.scroller.Visible then
+					Theme.scrollIntoView(grid.scroller, selectedTile.instance)
+				end
+			end)
+		end
+	end
+end
+
+function AvatarCreatorView.setMagic(self: View, magicIndex: number)
+	self._selectedMagic = magicIndex
+	for index, card in self.magicCards do
+		refreshCard(card, index == magicIndex)
+	end
+end
+
+-- Remplit le récapitulatif. `values[stepIndex]` = texte de l'étape.
+function AvatarCreatorView.setSummary(self: View, values: { [number]: string }, magic: Magic)
+	for _, row in self.summaryRows do
+		row.valueLabel.Text = values[row.stepIndex] or ""
+	end
+	self.powerName.Text = magic.name
+	self.powerName.TextColor3 = magic.palette.glow
+	self.powerUltimate.Text = `Ultime · {magic.ultimateName}`
+	self.powerUltimate.TextColor3 = magic.palette.main
+	self.powerBand.Color = Theme.magicGradient(magic.palette)
+end
+
+function AvatarCreatorView.setConfirming(self: View, confirming: boolean)
+	self.confirmBox.Visible = confirming
+end
+
+function AvatarCreatorView.setError(self: View, text: string?)
+	self.errorLabel.Text = text or ""
+	self.errorLabel.Visible = text ~= nil
+end
+
+-- Boutons du pied : `backText` nil masque le bouton de gauche. `isFinal` : le bouton de droite devient
+-- celui de la validation irréversible (rouge).
+function AvatarCreatorView.setFooter(self: View, backText: string?, nextText: string, isFinal: boolean?)
+	self.backButton.instance.Visible = backText ~= nil
+	self.backButton:setText(backText or "")
+	self.nextButton:setText(nextText)
+	self.nextButton:setVariant(if isFinal then "danger" else "primary")
+end
+
+function AvatarCreatorView.setHint(self: View, text: string)
+	self.hintLabel.Text = text
+end
+
+-- Couleur de peau du personnage, reprise sous les vignettes de visages et de marques.
+function AvatarCreatorView.setSkinColor(self: View, color: Color3)
+	for _, disc in self._skinDiscs do
+		disc.BackgroundColor3 = color
+	end
+end
+
+-- Élément à sélectionner à la manette en arrivant sur une étape.
+function AvatarCreatorView.getDefaultSelectable(self: View, step: Step, stepIndex: number, optionIndex: number): GuiObject?
+	if step.kind == "list" then
+		local grid = self.grids[stepIndex]
+		local tile = grid and grid.tiles[optionIndex]
+		return if tile then tile.instance else nil
+	elseif step.kind == "proportions" then
+		return self.heightSlider.track
+	elseif step.kind == "destiny" then
+		local card = self.magicCards[self._selectedMagic]
+		return if card then card.button else nil
+	elseif self.confirmBox.Visible then
+		return self.nextButton.instance
+	end
+	return self.nextButton.instance
 end
 
 return AvatarCreatorView
