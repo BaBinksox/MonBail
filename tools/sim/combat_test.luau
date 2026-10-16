@@ -398,6 +398,21 @@ if enemy2 then
 else
 	H.check("un second ennemi pour le rembobinage", false)
 end
+print("== Sauvegarde et reconnexion")
+local profileBefore = H.profile(player)
+local xpBefore = profileBefore and profileBefore.progression.xp
+local serialized = profileBefore and mock.game:GetService("HttpService"):JSONEncode(profileBefore) or ""
+H.check("ni Mana, ni Tension, ni recharge dans la sauvegarde (rien à migrer)", not string.find(serialized, "Mana") and not string.find(serialized, "Tension") and not string.find(serialized, "SpellReady"))
+ResourceService.setTension(player, 70)
+ResourceService.spendMana(player, 50)
+H.leave(player)
+player = H.join("Lame", 9701)
+character = player.Character
+humanoid = character:FindFirstChildOfClass("Humanoid")
+H.check("au retour : pas de nouveau créateur, progression conservée", player:GetAttribute("IsCustomizing") == false and H.profile(player) and H.profile(player).progression.xp == xpBefore)
+H.check("au retour : Mana plein, Tension à zéro, aucune charge ni riposte en cours", player:GetAttribute(ResourceConfig.MANA_ATTRIBUTE) == 100 and tension() == 0 and player:GetAttribute(CombatConfig.CHARGING_ATTRIBUTE) == false)
+humanoid.MaxHealth = 100000
+humanoid.Health = 100000
 H.noNewErrors("combat serveur sans erreur")
 
 print("== Client : combo, mise en file, charge")

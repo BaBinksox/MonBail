@@ -66,7 +66,11 @@ Il ne décrit pas l'état du prototype de départ : l'inventaire réel est dans 
 | State | `StateSync` | pousse au client des tranches d'état (`progression`, `quests`, `missions`, `inventory`, `guild`, `party`, `discoveries`, `settings`) |
 | Progression | `RewardService` | versement idempotent des récompenses (XP, réputation, objets, déblocages, découvertes) |
 | Progression | `ProgressionService` | XP, rang d'aventurier, promotions (conditions de `RankConfig`) |
-| Combat | `CombatService` (existant) | épée, Tension, ultimes ; ses dégâts passent par `DamageService` |
+| Combat | `CombatService` (Combat 2.0) | épée (5 coups, charge, riposte, plongée), ultimes ; ses dégâts passent par `DamageService` |
+| Combat | `ResourceService` | Mana (régénération en / hors combat), Tension, état « en combat », Concentration |
+| Combat | `PostureService` | posture des ennemis : rupture (étourdi, dégâts x 1,3), boss protégé par une recharge |
+| Combat | `StatusService` | altérations communes (brûlure, froid, gel, électrisé...), réactions élémentaires |
+| Magic | `SpellService` | les douze sorts, validés et résolus par le serveur (Mana, recharges, portée, murs) |
 | Combat | `DamageService` | point unique des dégâts infligés aux ennemis : contributions, élimination unique, signal `EnemyDefeated` |
 | Combat | `ParryService` | parade parfaite : fenêtre validée côté serveur, consultée par toute attaque ennemie avant dégâts |
 | Enemy | `EnemyService` + `Behaviors/*` | apparition, IA par comportement, télégraphes, réapparition |
@@ -104,6 +108,12 @@ ainsi que les modules `*Remotes`.
 | `UI/HudController` | rang, suivi de quête, notifications, panneau de lecture des textes examinés, invites réservées à une magie masquées |
 | `UI/Grimoire` | menu principal (J) : Journal, Contrats (tableau des missions), Compagnons (groupe + guilde), Progression (+ inventaire). La carte reste `World/WorldMapController` (M) |
 | `Combat/ParryController` | entrée de parade (Q physique / « A » AZERTY, L1, bouton tactile), posture, étincelle, ennemis étourdis |
+| `Combat/CombatController` | épée : combo avec mise en file, charge maintenue, riposte, plongée ; ultime |
+| `Combat/ConcentrationController`, `Combat/StatusEffects` | Concentration (G maintenu) ; altérations visibles sur les personnages |
+| `Magic/SpellController`, `Magic/SpellEffects` | sorts (1 / 2), visée souris ou automatique, effets |
+| `Movement/*`, `Animation/*` | sprint, double saut, dash ; poses procédurales (CharacterAnimator, PoseLibrary, AnimationDirector) |
+| `Audio/CombatMusicController` | musique dynamique : présence hostile, combat, boss, anomalie, victoire |
+| `UI/CombatHud`, `Input/TouchLayout` | PV, Mana, Tension, sorts, Concentration, altérations ; boutons tactiles adaptés à l'écran |
 | `Enemy/EnemyEffectsController` | barres de vie, télégraphes au sol recalés sur l'heure serveur, actions visibles des ennemis |
 | `World/EchoRenderer` | rendu local des échos (silhouette, sous-titres, rune touchée) |
 | `World/ArrivalController` | cinématique d'arrivée au belvédère |
@@ -122,10 +132,14 @@ sont résolues par lettre (`KeyboardLayout`, comme la carte).
 
 | Action | Clavier | Manette | Mobile | Propriétaire |
 |---|---|---|---|---|
-| Attaque | clic gauche | R2 | bouton | CombatController (existant) |
-| Ultime | E | Y | bouton | CombatController (existant) |
-| Rembobinage | R | L2 | bouton | TimeLoopController (existant) |
-| Dash | Maj gauche | B | bouton | DashController (existant) |
+| Attaque (maintenue : chargée) | clic gauche | R2 | bouton | CombatController |
+| Ultime | E | Y | bouton | CombatController |
+| Rembobinage | R | croix bas | bouton pendant une anomalie | TimeLoopController |
+| Sprint (Combat 2.0) | Maj gauche maintenue | L3 (bascule) | bouton | MovementController |
+| Dash (Combat 2.0) | C, ou double appui sur une direction | B | bouton | DashController |
+| Double saut | Espace en l'air | A | saut en l'air | MovementController |
+| Sort de base / secondaire | 1 / 2 (emplacements : « & » / « é » en AZERTY) | R1 / L2 | boutons | SpellController |
+| Concentration | G maintenue | croix droite | bouton | ConcentrationController |
 | Carte | lettre « M » | — | bouton du Grimoire | WorldMapController (existant) |
 | Interagir / parler | F (ProximityPrompt) | X | toucher l'invite | InteractionService / NPCInteraction |
 | **Parade** | KeyCode.Q (« A » en AZERTY) | L1 | bouton | ParryController |
@@ -278,17 +292,14 @@ de la région. Le reste du Workspace n'est jamais touché.
 10. `TimeLoopService`
 11. `EncounterService`
 12. `MovementService`
-13. `DamageService`
+13. `DamageService` (chargé à la demande, sans `start`)
 14. `ParryService`
-15. `CombatService`
-16. `BossService`
-17. `EnemyService`
-18. `NpcSpawner`
-19. `VillagerService`
-20. `InteractionService`
-21. `MechanismService`
-22. `EchoService`
-23. `QuestService`
-24. `MissionService`
-25. `PartyService`
-26. `GuildService`
+15. `ResourceService`, `PostureService`, `StatusService`
+16. `CombatService`, puis `SpellService`
+17. `BossService`
+18. `EnemyService`
+19. `NpcSpawner`, `VillagerService`, `QuestService`, `DialogueService`
+20. `MechanismService`, `InteractionService`, `EchoService`
+21. `MissionService`, `PartyService`, `GuildService`
+
+Le détail de Combat 2.0 (attaques, ressources, altérations, sorts, musique, HUD) est dans `docs/COMBAT_2.md`.
