@@ -4,11 +4,18 @@
 	UNE seule musique à la fois. Plusieurs scripts expriment ce qu'ils voudraient entendre, chacun
 	sur sa couche ; la couche la plus prioritaire qui demande une piste l'emporte :
 		"override"  écrans plein cadre : créateur de personnage (prioritaire)
+		"anomaly"   anomalie temporelle (CombatMusicController)
+		"boss"      boss réveillé à proximité
+		"combat"    joueur en combat (attribut InCombat posé par le serveur)
+		"victory"   courte phrase de victoire, puis retour au calme
+		"alert"     présence hostile proche
 		"region"    musique de la région où se trouve le joueur (MusicController)
 	Changer de piste = fondu de sortie de l'ancienne, fondu d'entrée de la nouvelle (légèrement
 	croisés, AudioConfig.CROSSFADE_OVERLAP). Redemander la piste en cours ne la relance pas : changer
-	de page dans le créateur ou retraverser une frontière ne la fait pas repartir du début.
-	Une piste sans ID ("" dans AudioConfig) vaut silence.
+	de page dans le créateur ou retraverser une frontière ne la fait pas repartir du début. Une piste
+	quittée puis retrouvée dans les RESUME_MEMORY secondes reprend où elle en était (l'exploration
+	ne repart pas du début après chaque combat). Au plus deux pistes en fondu de sortie : jamais de
+	superposition incontrôlée. Une piste sans ID ("" dans AudioConfig) vaut silence.
 
 	API :
 		MusicDirector.set(layer, trackKey?)     nil = la couche ne demande plus rien
@@ -22,9 +29,9 @@ local TweenService = game:GetService("TweenService")
 local AudioConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Audio"):WaitForChild("AudioConfig") :: ModuleScript)
 local AudioMixer = require(script.Parent:WaitForChild("AudioMixer") :: ModuleScript)
 
-export type Layer = "override" | "region"
+export type Layer = "override" | "anomaly" | "boss" | "combat" | "victory" | "alert" | "region"
 
-type Track = { id: string, volume: number, fadeIn: number, fadeOut: number }
+type Track = { id: string, volume: number, fadeIn: number, fadeOut: number, looped: boolean }
 
 type Voice = {
 	key: string,
@@ -32,13 +39,15 @@ type Voice = {
 	tween: Tween?,
 }
 
-local LAYER_ORDER: { Layer } = { "override", "region" }
+local LAYER_ORDER: { Layer } = { "override", "anomaly", "boss", "combat", "victory", "alert", "region" }
+local MAX_FADING = 2 -- pistes en fondu de sortie au plus ; au-delà, la plus ancienne se tait
 
 local MusicDirector = {}
 
 local layers: { [string]: string? } = {}
 local current: Voice? = nil
 local fading: { Voice } = {}
+local positions: { [string]: { time: number, clock: number } } = {} -- reprise des pistes quittées
 
 local function trackOf(key: string?): Track?
 	if key == nil then
@@ -75,7 +84,18 @@ end
 
 local function retire(voice: Voice)
 	local track = AudioConfig.TRACKS[voice.key]
+	if track == nil or track.looped ~= false then
+		positions[voice.key] = { time = voice.sound.TimePosition, clock = os.clock() }
+	end
 	table.insert(fading, voice)
+	while #fading > MAX_FADING do
+		local oldest = table.remove(fading, 1) :: Voice
+		if oldest.tween then
+			oldest.tween:Cancel()
+		end
+		oldest.sound:Stop()
+		oldest.sound:Destroy()
+	end
 	fadeTo(voice, 0, if track then track.fadeOut else 2, function()
 		local index = table.find(fading, voice)
 		if index then
@@ -119,8 +139,12 @@ local function refresh()
 	local sound = Instance.new("Sound")
 	sound.Name = "Music_" .. key
 	sound.SoundId = track.id
-	sound.Looped = true
+	sound.Looped = track.looped ~= false
 	sound.Volume = 0
+	local memory = positions[key]
+	if memory and sound.Looped and os.clock() - memory.clock <= AudioConfig.RESUME_MEMORY then
+		sound.TimePosition = memory.time -- reprise là où on l'avait quittée
+	end
 	AudioMixer.assign(sound, "Music")
 	sound.Parent = SoundService
 	local voice: Voice = { key = key, sound = sound }

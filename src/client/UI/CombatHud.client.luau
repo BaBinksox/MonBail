@@ -25,6 +25,7 @@ local MagicConfig = require(sharedFolder:WaitForChild("Magic"):WaitForChild("Mag
 
 local Theme = require(script.Parent:WaitForChild("Theme") :: ModuleScript)
 local UIBus = require(script.Parent:WaitForChild("UIBus") :: ModuleScript)
+local SfxPlayer = require(script.Parent.Parent:WaitForChild("Audio"):WaitForChild("SfxPlayer") :: ModuleScript)
 
 local CUSTOMIZING_ATTRIBUTE = "IsCustomizing"
 local BAR_WIDTH = 300
@@ -200,8 +201,15 @@ local function refreshPrompt()
 	prompt.Visible = false
 end
 
+local wasTensionFull = false
+
 local function refreshTension()
 	local tension = numberAttribute(CombatConfig.TENSION_ATTRIBUTE, 0)
+	local isFull = tension >= CombatConfig.TENSION_MAX
+	if isFull and not wasTensionFull then
+		SfxPlayer.play("ultimateReady")
+	end
+	wasTensionFull = isFull
 	setRatio(tensionBar, tension / CombatConfig.TENSION_MAX)
 	tensionBar.stroke.Transparency = if tension >= CombatConfig.TENSION_MAX then 0 else 0.55
 	tensionBar.label.Text = ""
@@ -247,6 +255,22 @@ local function flashManaDenied()
 	end)
 end
 
+-- Esquive parfaite (élan accordé par le serveur) : un mot bref et un son cristallin.
+local function onMomentum()
+	local untilTime = numberAttribute(CombatConfig.MOMENTUM_ATTRIBUTE, 0)
+	if untilTime <= workspace:GetServerTimeNow() then
+		return
+	end
+	SfxPlayer.play("dodgePerfect")
+	if prompt.Visible then
+		return -- une invite plus importante (riposte, ultime) garde la place
+	end
+	prompt.Text = "Esquive parfaite"
+	prompt.TextColor3 = colors.cyan
+	prompt.Visible = true
+	task.delay(0.9, refreshPrompt)
+end
+
 --------------------------------------------------------------------------------
 -- Branchements
 --------------------------------------------------------------------------------
@@ -255,6 +279,7 @@ localPlayer:GetAttributeChangedSignal(ResourceConfig.MANA_ATTRIBUTE):Connect(ref
 localPlayer:GetAttributeChangedSignal(ResourceConfig.MANA_MAX_ATTRIBUTE):Connect(refreshMana)
 localPlayer:GetAttributeChangedSignal(CombatConfig.TENSION_ATTRIBUTE):Connect(refreshTension)
 localPlayer:GetAttributeChangedSignal(CombatConfig.COUNTER_ATTRIBUTE):Connect(refreshPrompt)
+localPlayer:GetAttributeChangedSignal(CombatConfig.MOMENTUM_ATTRIBUTE):Connect(onMomentum)
 localPlayer:GetAttributeChangedSignal(MagicConfig.ATTRIBUTE):Connect(refreshMagic)
 localPlayer:GetAttributeChangedSignal(CUSTOMIZING_ATTRIBUTE):Connect(refreshVisibility)
 localPlayer.CharacterAdded:Connect(watchCharacter)
@@ -265,6 +290,7 @@ if localPlayer.Character then
 	task.spawn(watchCharacter, localPlayer.Character)
 end
 refreshLayout(Theme.getLayout(screen))
+wasTensionFull = numberAttribute(CombatConfig.TENSION_ATTRIBUTE, 0) >= CombatConfig.TENSION_MAX
 refreshMana()
 refreshMagic()
 refreshTension()

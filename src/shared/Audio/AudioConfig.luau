@@ -25,6 +25,7 @@ export type Track = {
 	fadeIn: number, -- secondes
 	fadeOut: number, -- secondes
 	criteria: string, -- ce qu'il faut chercher pour remplir ce champ
+	looped: boolean, -- false = courte phrase jouée une fois (victoire)
 }
 
 export type RegionMusic = {
@@ -35,8 +36,8 @@ export type RegionMusic = {
 local DEFAULT_FADE_IN = 3
 local DEFAULT_FADE_OUT = 2.5
 
-local function track(id: string, volume: number, criteria: string, fadeIn: number?, fadeOut: number?): Track
-	return { id = id, volume = volume, fadeIn = fadeIn or DEFAULT_FADE_IN, fadeOut = fadeOut or DEFAULT_FADE_OUT, criteria = criteria }
+local function track(id: string, volume: number, criteria: string, fadeIn: number?, fadeOut: number?, looped: boolean?): Track
+	return { id = id, volume = volume, fadeIn = fadeIn or DEFAULT_FADE_IN, fadeOut = fadeOut or DEFAULT_FADE_OUT, criteria = criteria, looped = looped ~= false }
 end
 
 local TRACKS: { [string]: Track } = {
@@ -53,6 +54,14 @@ local TRACKS: { [string]: Track } = {
 	-- Régions futures : les clés existent pour qu'une région ajoutée n'ait qu'à les remplir.
 	elf_village = track("", 0.3, "Village elfe (futur) : harpe, flûte, chœur éthéré ; lumineux."),
 	dwarf_halls = track("", 0.3, "Continent nain (futur) : cuivres graves, cordes, chœur d'hommes discret ; solennel."),
+
+	-- États de combat (CombatMusicController) : même famille sonore que les thèmes de région
+	-- (piano, cordes, harpe, chœur féminin discret), plus d'élan ; jamais de métal ni d'électro.
+	hostile = track("", 0.28, "Présence hostile : nappe de cordes tendue, pulsation grave très discrète, quelques notes de piano ; sans percussion forte ; boucle.", 2.5, 3),
+	combat = track("", 0.36, "Combat : cordes rythmées (ostinato), piano qui martèle sobrement, chœur féminin en appui, percussions orchestrales mesurées ; épique mais mélancolique ; boucle de 1 à 3 min.", 1.2, 3.5),
+	boss = track("", 0.42, "Boss : orchestre complet, chœur plus présent, thème grave et tragique ; montée progressive ; boucle.", 1.5, 4),
+	anomaly = track("", 0.34, "Anomalie temporelle : cordes suspendues, chœur féminin aigu et lointain, piano à l'envers ou étiré ; tension sans horreur.", 0.6, 1.5),
+	victory = track("", 0.38, "Victoire / accalmie : courte phrase de piano et cordes (5 à 10 s), résolution douce, soulagement ; jouée une fois.", 0.8, 2.5, false),
 }
 
 -- Région (RegionConfig.REGIONS[].id) -> pistes. Une région absente garde la musique en cours.
@@ -186,4 +195,19 @@ return table.freeze({
 	-- laquelle la nouvelle entre déjà. 0 = la nouvelle attend que l'ancienne se soit tue ; 1 = fondu
 	-- croisé complet. Jamais deux pistes à plein volume en même temps.
 	CROSSFADE_OVERLAP = 0.6,
+	-- Une piste interrompue (exploration coupée par un combat) reprend où elle en était si on y
+	-- revient dans ce délai (s), au lieu de repartir du début.
+	RESUME_MEMORY = 180,
+	-- Musique dynamique de combat (CombatMusicController) : priorités
+	-- créateur > anomalie > boss > combat > victoire > présence hostile > région.
+	COMBAT_MUSIC = table.freeze({
+		UPDATE_INTERVAL = 0.5, -- s entre deux évaluations
+		HOSTILE_RADIUS = 32, -- studs : un ennemi vivant plus près = présence hostile
+		HOSTILE_ENTER_TIME = 1.5, -- s de présence continue avant d'en changer la musique
+		HOSTILE_EXIT_TIME = 6, -- s sans ennemi proche avant de revenir à la région
+		COMBAT_EXIT_TIME = 3, -- s après la fin de l'état « en combat » (serveur) avant d'en sortir
+		BOSS_RADIUS = 90, -- studs : distance à laquelle un boss réveillé impose sa musique
+		VICTORY_DURATION = 8, -- s de phrase de victoire avant le retour au calme
+		VICTORY_RADIUS = 60, -- studs : un ennemi vaincu dans ce rayon pendant le combat = victoire
+	}),
 })

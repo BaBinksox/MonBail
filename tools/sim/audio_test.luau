@@ -113,6 +113,81 @@ H.check("deux rembobinages rapprochés : un seul chœur", choir.PlayCount == 1, 
 H.advance(AudioConfig.REWIND_CHOIR.maxDuration + AudioConfig.REWIND_CHOIR.fadeOut + 0.5)
 H.check("le chœur s'efface de lui-même (court)", choir.IsPlaying == false and choir.Volume < 0.001)
 H.check("volume modéré", AudioConfig.REWIND_CHOIR.volume <= 0.4)
+
+print("== Musique dynamique de combat")
+local ResourceService = H.server("Combat/ResourceService")
+local ResourceConfig = H.shared("Combat/ResourceConfig")
+AudioConfig.TRACKS.village.id = "rbxassetid://test-village"
+AudioConfig.TRACKS.village_night.id = "rbxassetid://test-village_night"
+StateRemotes.UpdateSettings:FireServer({ music = 1, ambience = 1, sfx = 1 })
+MusicDirector.set("region", nil) -- les ID viennent d'être posés : la région redemande sa piste
+H.advance(8)
+local regionKey = MusicDirector.getCurrentKey()
+H.check("exploration : musique de région", regionKey == "village" or regionKey == "village_night", regionKey)
+local regionSound = SoundService:FindFirstChild("Music_" .. tostring(regionKey))
+if regionSound then
+	regionSound.TimePosition = 42
+end
+local CM = AudioConfig.COMBAT_MUSIC
+local function fight(seconds)
+	local elapsed = 0
+	while elapsed < seconds do
+		ResourceService.markCombat(player) -- comme un coup donné ou reçu, vu par le serveur
+		H.advance(0.5)
+		elapsed += 0.5
+	end
+end
+fight(1.5)
+H.check("en combat (état du serveur) : musique de combat", MusicDirector.getCurrentKey() == "combat", MusicDirector.getCurrentKey())
+fight(5)
+count, names = audible()
+H.check("une seule musique audible en combat", count == 1, names)
+H.advance(ResourceConfig.COMBAT_TIMEOUT + 1)
+H.check("hystérésis : la musique de combat tient encore un instant après l'état serveur", MusicDirector.getCurrentKey() == "combat", MusicDirector.getCurrentKey())
+H.advance(CM.COMBAT_EXIT_TIME + 1)
+H.check("fin du combat : retour à la région", MusicDirector.getCurrentKey() == regionKey, MusicDirector.getCurrentKey())
+local resumed = SoundService:FindFirstChild("Music_" .. tostring(regionKey))
+H.check("la musique d'exploration reprend où elle en était (pas de redémarrage)", resumed ~= nil and resumed.TimePosition >= 40, resumed and resumed.TimePosition)
+H.advance(6)
+count, names = audible()
+H.check("jamais deux musiques à plein volume", count == 1, names)
+TimeLoopRemotes.AnomalyOpened:FireClient(player, 5)
+H.advance(0.3)
+H.check("anomalie : musique d'anomalie prioritaire", MusicDirector.getCurrentKey() == "anomaly", MusicDirector.getCurrentKey())
+fight(1.5)
+H.check("l'anomalie passe avant le combat", MusicDirector.getCurrentKey() == "anomaly")
+TimeLoopRemotes.AnomalyClosed:FireClient(player)
+fight(1)
+H.check("anomalie refermée : retour au combat en cours", MusicDirector.getCurrentKey() == "combat", MusicDirector.getCurrentKey())
+-- Victoire : un ennemi proche (factice, sans IA) vaincu pendant le combat.
+local foe = mock.Instance.new("Model")
+foe.Name = "EnnemiFactice"
+local foeHumanoid = mock.Instance.new("Humanoid")
+foeHumanoid.MaxHealth = 100
+foeHumanoid.Health = 100
+foeHumanoid.Parent = foe
+local foeRoot = mock.Instance.new("Part")
+foeRoot.Name = "HumanoidRootPart"
+foeRoot.Parent = foe
+foe.PrimaryPart = foeRoot
+foeRoot.CFrame = mock.CFrame.new(H.root(player).Position + mock.Vector3.new(0, 0, 10))
+foe.Parent = mock.workspace
+mock.game:GetService("CollectionService"):AddTag(foe, "TimeLoopEntity")
+fight(1.5)
+foe:SetAttribute("Defeated", true)
+H.advance(ResourceConfig.COMBAT_TIMEOUT + CM.COMBAT_EXIT_TIME + 1)
+H.check("fin d'un combat gagné : phrase de victoire", MusicDirector.getCurrentKey() == "victory", MusicDirector.getCurrentKey())
+local victorySound = SoundService:FindFirstChild("Music_victory")
+H.check("la victoire est jouée une fois (non bouclée)", victorySound ~= nil and victorySound.Looped == false)
+foe:Destroy()
+H.advance(CM.VICTORY_DURATION + 1)
+local after = MusicDirector.getCurrentKey()
+H.check("après la victoire : calme (région) ou présence hostile", after ~= "victory" and after ~= "combat", after)
+AudioConfig.TRACKS.combat.id = ""
+fight(1.5)
+H.advance(6)
+count, names = audible()
+H.check("piste de combat vide : silence, sans erreur", count == 0, names)
 H.noNewErrors("audio sans erreur")
 H.printWarnings()
 H.finish()
