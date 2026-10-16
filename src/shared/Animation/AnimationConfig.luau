@@ -86,6 +86,50 @@ local ACTIONS: { [string]: Action } = {
 	cast_ultimate = action("cast_ultimate", 0.05, 0.25),
 }
 
+--[[
+	>>> IDENTIFIANTS PUBLIÉS : après publication d'une séquence (docs/ANIMATIONS.md), coller ici son
+	identifiant ("rbxassetid://123456789"). Vide = séquence générée (Studio), clip de repli ou pose.
+]]
+local PUBLISHED: { [string]: string } = {
+	sword_1 = "",
+	sword_2 = "",
+	sword_3 = "",
+	sword_4 = "",
+	sword_5 = "",
+	sword_charge = "",
+	sword_charged = "",
+	sword_counter = "",
+	sword_plunge_fall = "",
+	sword_plunge = "",
+	parry = "",
+	parry_perfect = "",
+	hit_react = "",
+	stagger = "",
+	dash = "",
+	double_jump = "",
+	land = "",
+	concentrate = "",
+	cast_pyromancy_base = "",
+	cast_pyromancy_secondary = "",
+	cast_ice_base = "",
+	cast_ice_secondary = "",
+	cast_lightning_base = "",
+	cast_lightning_secondary = "",
+	cast_shadow_base = "",
+	cast_shadow_secondary = "",
+	cast_antimatter_base = "",
+	cast_antimatter_secondary = "",
+	cast_gravity_base = "",
+	cast_gravity_secondary = "",
+	cast_ultimate = "",
+}
+for actionName, animationId in PUBLISHED do
+	local entry = ACTIONS[actionName]
+	if entry and animationId ~= "" then
+		entry.animationId = animationId
+	end
+end
+
 return table.freeze({
 	ACTIONS = ACTIONS,
 	ROBLOX_SWORD_SLASH = ROBLOX_SWORD_SLASH,

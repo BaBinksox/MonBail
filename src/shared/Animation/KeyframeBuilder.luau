@@ -222,13 +222,34 @@ function KeyframeBuilder.install(): Model?
 		saves.Name = "AnimSaves"
 		saves.Parent = rig
 	end
+	-- Emplacement de l'Animation Editor actuel : ServerStorage > RBX_ANIMSAVES > <rig>.
+	local ServerStorage = game:GetService("ServerStorage")
+	local editorSaves = ServerStorage:FindFirstChild("RBX_ANIMSAVES")
+	if editorSaves == nil then
+		editorSaves = Instance.new("Model")
+		editorSaves.Name = "RBX_ANIMSAVES"
+		editorSaves.Parent = ServerStorage
+	end
+	local rigSaves = (editorSaves :: Instance):FindFirstChild(rig.Name)
+	if rigSaves == nil then
+		local reference = Instance.new("ObjectValue")
+		reference.Name = rig.Name
+		reference.Value = rig
+		reference.Parent = editorSaves
+		rigSaves = reference
+	end
+
 	local count = 0
 	for _, sequence in KeyframeBuilder.buildAll(AnimationConfig.ACTIONS) do
-		local old = (saves :: Instance):FindFirstChild(sequence.Name)
-		if old then
-			old:Destroy()
+		for _, folder in { saves :: Instance, rigSaves :: Instance } do
+			local old = folder:FindFirstChild(sequence.Name)
+			if old then
+				old:Destroy()
+			end
 		end
+		local copy = sequence:Clone()
 		sequence.Parent = saves
+		copy.Parent = rigSaves
 		count += 1
 	end
 	print(`[KeyframeBuilder] {count} séquences installées dans {rig:GetFullName()}.AnimSaves`)
