@@ -42,6 +42,9 @@ local ClientSettings = require(script.Parent.Parent:WaitForChild("State"):WaitFo
 local REDUCED_BLOOM = 0.5
 local REDUCED_SUN_RAYS = 0.4
 local REDUCED_PARTICLES = 0.35
+-- Pendant le créateur de personnage.
+local CREATOR_BLOOM = 0.25
+local CREATOR_BLOOM_THRESHOLD = 2.2
 local LightingPresets = require(script.Parent:WaitForChild("LightingPresets") :: ModuleScript)
 
 local APPLY_INTERVAL = 0.5 -- secondes entre deux mises à jour de la lumière en temps normal
@@ -205,6 +208,13 @@ local function apply(elapsed: number)
 	preset.ColorCorrection.Saturation += ambience.saturation
 	local tint: Color3 = preset.ColorCorrection.TintColor
 	preset.ColorCorrection.TintColor = Color3.new(tint.R * ambience.tint.R, tint.G * ambience.tint.G, tint.B * ambience.tint.B)
+
+	-- 2 bis bis. Créateur de personnage : presque pas de bloom. Une peau très claire éclairée par le
+	-- studio dépassait son seuil et « brillait » ; les autres teints n'étaient pas concernés.
+	if localPlayer:GetAttribute(AvatarConfig.CUSTOMIZING_ATTRIBUTE) == true then
+		preset.Bloom.Intensity *= CREATOR_BLOOM
+		preset.Bloom.Threshold = math.max(preset.Bloom.Threshold, CREATOR_BLOOM_THRESHOLD)
+	end
 
 	-- 2 ter. Effets réduits : moins d'éblouissement et de particules (la lumière reste la même).
 	local isReduced = ClientSettings.isReducedEffects()

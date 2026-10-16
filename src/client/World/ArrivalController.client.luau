@@ -4,14 +4,22 @@
 	Cinématique d'arrivée dans le monde, à la sortie du créateur de personnage.
 
 	SpawnRemotes.ArrivalCinematic(cameraCFrame, focus, regionName), envoyé par le serveur juste après
-	avoir posé le personnage au belvédère :
+	avoir posé le personnage au belvédère (le personnage n'est plus jamais déplacé ensuite) :
 		1. l'écran est déjà noir (fondu de fin du créateur, voile partagé de Theme) ou le devient ;
-		2. la caméra (Scriptable) se place à cameraCFrame, tournée vers `focus` ;
-		3. fondu d'ouverture, lent travelling (6,5 s) entre deux bandes cinéma, titre de la région en
-		   lettres dorées (son nom et son sous-titre, lus dans RegionConfig) ;
-		4. retour en douceur derrière le personnage, puis caméra normale (Custom, sujet = Humanoid).
+		2. PANORAMA : fondu d'ouverture sur le village vu de très haut, lente descente en arc qui
+		   révèle les toits, la place, puis la chapelle sur sa butte et le lac ; titre de la région ;
+		3. court fondu au noir (la caméra ne traverse jamais la colline entre le village et le joueur) ;
+		4. APPROCHE : depuis l'ancre camera_overlook, au-dessus du joueur qui contemple le village,
+		   descente douce jusqu'à la caméra de jeu derrière lui ; puis caméra normale (Custom).
+	Les trajectoires viennent d'ArrivalPath et sont VÉRIFIÉES par raycasts avant d'être jouées
+	(terrain, montagnes, bâtiments, rochers) : un plan bloqué est relevé, ou remplacé par un fondu.
 	Pendant la cinématique, les déplacements sont suspendus (contrôles du PlayerModule) et
-	CreatorSession.isArrivalBusy() est vrai : les interfaces peuvent s'en servir pour rester discrètes.
+	CreatorSession.isArrivalBusy() est vrai. Un respawn, une mort ou un dépassement de durée
+	interrompent la cinématique et rendent immédiatement la caméra et les contrôles.
+
+	Cause du défaut corrigé ici (caméra dans le sol) : l'ancien travelling avançait vers la place EN
+	DESCENDANT depuis camera_overlook et finissait à y = 45,9 pour un sol à 46,0, puis rejoignait le
+	joueur en ligne droite, sans aucune vérification d'obstacle.
 
 	Repli : si l'événement n'arrive pas dans les 4 s qui suivent CreatorClosed, l'écran est simplement
 	rouvert (jamais d'écran noir bloqué). Un événement qui arrive après ce repli est ignoré : on ne
@@ -31,6 +39,7 @@ local RegionConfig = require(sharedFolder:WaitForChild("World"):WaitForChild("Re
 local clientFolder = script.Parent.Parent
 local Theme = require(clientFolder:WaitForChild("UI"):WaitForChild("Theme"))
 local CreatorSession = require(clientFolder:WaitForChild("AvatarCreator"):WaitForChild("CreatorSession"))
+local ArrivalPath = require(script.Parent:WaitForChild("ArrivalPath"))
 
 local FALLBACK_DELAY = 4 -- s après CreatorClosed sans cinématique : l'écran est rouvert
 local LATE_WINDOW = 15 -- s après ce repli pendant lesquelles une cinématique tardive est ignorée
@@ -39,28 +48,20 @@ local BLACKOUT_FADE = 0.6 -- fondu au noir si l'écran ne l'est pas déjà
 local OPEN_FADE = 1.8 -- fondu d'ouverture sur le premier plan
 local REOPEN_FADE = 1.2 -- réouverture simple (repli, ou fin anormale)
 
-local TRAVEL_DURATION = 6.5
+local CUT_FADE = 0.7 -- fondu au noir entre le panorama et l'approche
+local CUT_OPEN = 0.9 -- réouverture sur l'approche
+local MAX_DURATION = 30 -- s : au-delà, la cinématique est interrompue et le joueur reprend la main
+local CAST_RETRIES = 8 -- obstacles invisibles et traversables ignorés par rayon (marqueurs, volumes)
 local TITLE_DELAY = 1.2 -- après le début du fondu d'ouverture
 local TITLE_FADE_IN = 1.4
 local TITLE_HOLD = 2.4
 local TITLE_FADE_OUT = 1.2
 local TITLE_DRIFT = 0.02 -- le titre remonte doucement en apparaissant (part de l'écran)
-local RETURN_DURATION = 1.8 -- vol de retour derrière le personnage
 local BARS_DURATION = 0.9
 local BAR_HEIGHT = 0.1 -- part de la hauteur de l'écran couverte par chaque bande cinéma
 
 local CINEMATIC_FOV = 50
-local PUSH_FRACTION = 0.12 -- le travelling avance de cette part de la distance au point visé...
-local MAX_PUSH = 18 -- ... sans dépasser ce nombre de studs
-local DRIFT_FRACTION = 0.06 -- glissement latéral (part de la distance)
-local MAX_DRIFT = 14
-local DESCENT_FRACTION = 0.03 -- légère descente (part de la distance)
-local MAX_DESCENT = 8
-
--- Pose de la caméra de jeu en fin de cinématique (proche de celle de la caméra Roblox par défaut).
-local RETURN_DISTANCE = 12.5
-local RETURN_PITCH = 14 -- degrés, la caméra plonge légèrement
-local SUBJECT_HEIGHT = 1.5 -- au-dessus du RootPart
+local SUBJECT_HEIGHT = 1.5 -- au-dessus du RootPart, quand le personnage n'a pas de tête
 
 local RENDER_STEP_NAME = "ArrivalCinematic"
 local RENDER_PRIORITY = Enum.RenderPriority.Camera.Value + 1
@@ -185,6 +186,7 @@ local closeToken = 0 -- incrémenté à chaque CreatorClosed
 local pendingCloseToken: number? = nil -- fermeture qui attend encore sa cinématique
 local lateUntil = 0 -- os.clock() jusqu'auquel une cinématique tardive est ignorée
 local savedFieldOfView = 70
+local cinematicToken = 0 -- change à chaque cinématique et à chaque interruption
 
 --------------------------------------------------------------------------------
 -- Helpers
@@ -226,37 +228,49 @@ local function setControlsEnabled(enabled: boolean)
 	end
 end
 
--- Départ et arrivée du travelling : on avance vers `focus` en glissant un peu de côté et en descendant.
-local function buildTravel(cameraCFrame: CFrame, focus: Vector3): (Vector3, Vector3)
-	local start = cameraCFrame.Position
-	local toFocus = focus - start
-	local distance = toFocus.Magnitude
-	if distance < 1e-3 then
-		return start, start
+-- Premier obstacle VISIBLE ou SOLIDE sur un segment (les personnages sont ignorés, ainsi que les
+-- marqueurs invisibles et traversables : ancres, volumes). nil si le segment est libre.
+local function castObstacle(origin: Vector3, direction: Vector3): Vector3?
+	local exclude: { Instance } = {}
+	for _, player in Players:GetPlayers() do
+		if player.Character then
+			table.insert(exclude, player.Character)
+		end
 	end
-	local forward = toFocus.Unit
-	local side = forward:Cross(Vector3.yAxis)
-	local right = if side.Magnitude > 1e-3 then side.Unit else Vector3.xAxis
-	local finish = start
-		+ forward * math.min(distance * PUSH_FRACTION, MAX_PUSH)
-		+ right * math.min(distance * DRIFT_FRACTION, MAX_DRIFT)
-		- Vector3.yAxis * math.min(distance * DESCENT_FRACTION, MAX_DESCENT)
-	return start, finish
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.IgnoreWater = true
+	for _ = 1, CAST_RETRIES do
+		params.FilterDescendantsInstances = exclude
+		local result = workspace:Raycast(origin, direction, params)
+		if result == nil then
+			return nil
+		end
+		local hit = result.Instance
+		if hit:IsA("BasePart") and hit.Transparency >= 0.95 and not hit.CanCollide then
+			table.insert(exclude, hit)
+		else
+			return result.Position
+		end
+	end
+	return nil
 end
 
--- Pose de la caméra de jeu : derrière le personnage, tournée vers `lookToward` (le village).
-local function computeGameplayPose(lookToward: Vector3): CFrame?
+-- Le personnage tel qu'il est posé par le serveur (tête : Elfe, Nain ou Humain, la taille compte).
+local function buildContext(cameraCFrame: CFrame, focus: Vector3): ArrivalPath.Context?
 	local humanoid = getHumanoid()
 	local rootPart = humanoid and humanoid.RootPart
 	if rootPart == nil then
 		return nil
 	end
-	local subject = rootPart.Position + Vector3.new(0, SUBJECT_HEIGHT, 0)
-	local flat = Vector3.new(lookToward.X - subject.X, 0, lookToward.Z - subject.Z)
-	local direction = if flat.Magnitude > 1e-3 then flat.Unit else rootPart.CFrame.LookVector
-	local pitch = math.rad(RETURN_PITCH)
-	local position = subject - direction * math.cos(pitch) * RETURN_DISTANCE + Vector3.yAxis * math.sin(pitch) * RETURN_DISTANCE
-	return CFrame.lookAt(position, subject)
+	local character = rootPart.Parent
+	local head = character and character:FindFirstChild("Head")
+	local subject = if head and head:IsA("BasePart") then head.Position else rootPart.Position + Vector3.new(0, SUBJECT_HEIGHT, 0)
+	return { cameraAnchor = cameraCFrame, focus = focus, subject = subject, lookToward = focus }
+end
+
+local function isCurrent(token: number): boolean
+	return isPlaying and token == cinematicToken
 end
 
 -- Joue `update(alpha)` à chaque image pendant `duration` secondes (alpha adouci de 0 à 1). YIELD.
@@ -315,8 +329,22 @@ local function playTitle(displayName: string, subtitle: string)
 	task.wait(TITLE_FADE_OUT)
 end
 
--- Déroulé complet. YIELD (environ 9 s).
-local function play(cameraCFrame: CFrame, focus: Vector3, regionName: string)
+-- Parcourt un plan validé : position et point regardé suivent leurs splines. YIELD.
+local function playShot(camera: Camera, shot: ArrivalPath.Shot, blendFieldOfView: boolean)
+	animateCamera(shot.duration, function(alpha: number)
+		camera.CFrame = CFrame.lookAt(ArrivalPath.sample(shot.points, alpha), ArrivalPath.sample(shot.targets, alpha))
+		if blendFieldOfView then
+			camera.FieldOfView = CINEMATIC_FOV + (savedFieldOfView - CINEMATIC_FOV) * alpha
+		end
+	end)
+end
+
+local function placeOnShot(camera: Camera, shot: ArrivalPath.Shot)
+	camera.CFrame = CFrame.lookAt(shot.points[1], shot.targets[1])
+end
+
+-- Déroulé complet. YIELD (environ 16 s).
+local function play(cameraCFrame: CFrame, focus: Vector3, regionName: string, token: number)
 	-- 1. Le créateur doit avoir rendu caméra et écran (la cinématique peut arriver avant CreatorClosed).
 	if CreatorSession.isActive() and not CreatorSession.waitUntilClosed(CREATOR_WAIT_TIMEOUT) then
 		warn("[Arrival] Le créateur de personnage est toujours ouvert : cinématique d'arrivée ignorée")
@@ -330,42 +358,62 @@ local function play(cameraCFrame: CFrame, focus: Vector3, regionName: string)
 	end
 
 	local camera = workspace.CurrentCamera
-	if camera == nil then
+	local context = buildContext(cameraCFrame, focus)
+	if camera == nil or context == nil or not isCurrent(token) then
 		return
 	end
 
-	-- 3. Premier plan, derrière le voile.
+	-- 3. Trajectoires vérifiées contre la géométrie, derrière le voile.
+	local shots = ArrivalPath.buildShots(context, castObstacle)
+	local panorama = ArrivalPath.resolve(shots.panorama, castObstacle)
+	local approach = ArrivalPath.resolve(shots.approach, castObstacle)
+	if panorama == nil then
+		warn("[Arrival] Panorama obstrué : plan ignoré (fondu direct vers le joueur)")
+	end
+	if approach == nil then
+		warn("[Arrival] Approche obstruée : coupe directe sur la caméra de jeu")
+	end
+
 	setControlsEnabled(false)
 	savedFieldOfView = camera.FieldOfView
 	camera.CameraType = Enum.CameraType.Scriptable
 	camera.FieldOfView = CINEMATIC_FOV
-	local startPosition, endPosition = buildTravel(cameraCFrame, focus)
-	camera.CFrame = CFrame.lookAt(startPosition, focus)
 	setBarsShown(true, 0) -- invisibles tant que l'écran est noir
 	screen.gui.Enabled = true
-
-	-- 4. Fondu d'ouverture, travelling et titre (le titre se joue pendant le travelling).
-	Theme.screenFade(0, OPEN_FADE)
 	local displayName, subtitle = describeRegion(regionName)
 	task.delay(TITLE_DELAY, function()
-		if isPlaying then
+		if isCurrent(token) then
 			playTitle(displayName, subtitle)
 		end
 	end)
-	animateCamera(TRAVEL_DURATION, function(alpha: number)
-		camera.CFrame = CFrame.lookAt(startPosition:Lerp(endPosition, alpha), focus)
-	end)
 
-	-- 5. Retour en douceur derrière le personnage, tourné vers le village.
-	local fromCFrame = camera.CFrame
-	setBarsShown(false, BARS_DURATION)
-	animateCamera(RETURN_DURATION, function(alpha: number)
-		local target = computeGameplayPose(focus)
-		if target then
-			camera.CFrame = fromCFrame:Lerp(target, alpha)
+	-- 4. Panorama du village, puis court fondu au noir.
+	if panorama then
+		placeOnShot(camera, panorama)
+		Theme.screenFade(0, OPEN_FADE)
+		playShot(camera, panorama, false)
+		if not isCurrent(token) then
+			return
 		end
-		camera.FieldOfView = CINEMATIC_FOV + (savedFieldOfView - CINEMATIC_FOV) * alpha
-	end)
+		Theme.screenFade(1, CUT_FADE)
+		task.wait(CUT_FADE)
+		if not isCurrent(token) then
+			return
+		end
+	end
+
+	-- 5. Approche du personnage, qui contemple le village, jusqu'à la caméra de jeu.
+	setBarsShown(false, BARS_DURATION)
+	if approach then
+		placeOnShot(camera, approach)
+		Theme.screenFade(0, CUT_OPEN)
+		playShot(camera, approach, true)
+	else
+		camera.CFrame = ArrivalPath.gameplayPose(context.subject, context.lookToward, castObstacle)
+		camera.FieldOfView = savedFieldOfView
+		Theme.screenFade(0, CUT_OPEN)
+		task.wait(CUT_OPEN)
+	end
 end
 
 -- Le serveur vient de poser le personnage debout au belvédère ; c'est ce client qui simule sa
@@ -402,17 +450,53 @@ local function onArrivalCinematic(cameraCFrame: any, focus: any, regionName: any
 	end
 	pendingCloseToken = nil -- la fermeture en attente est servie : pas de repli
 	isPlaying = true
+	cinematicToken += 1
+	local token = cinematicToken
 	settleCharacter()
 	CreatorSession.setArrivalBusy(true)
+	-- Filet : quoi qu'il arrive, le joueur récupère caméra et contrôles.
+	task.delay(MAX_DURATION, function()
+		if isCurrent(token) then
+			warn("[Arrival] Cinématique trop longue : interrompue")
+			cinematicToken += 1
+			restore()
+		end
+	end)
 
 	local name = if type(regionName) == "string" then regionName else ""
 	local isDone, problem = pcall(function()
-		play(cameraCFrame, focus, name)
+		play(cameraCFrame, focus, name, token)
 	end)
 	if not isDone then
 		warn(`[Arrival] Cinématique d'arrivée interrompue : {problem}`)
 	end
-	restore()
+	if token == cinematicToken then
+		restore()
+	end
+end
+
+-- Respawn ou mort pendant la cinématique : on rend tout de suite la caméra et les contrôles.
+local function interrupt()
+	if isPlaying then
+		cinematicToken += 1
+		restore()
+	end
+end
+local function watchCharacter(character: Model)
+	interrupt() -- nouveau personnage : l'ancienne cinématique n'a plus de sens
+	local humanoid = character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid", 5)
+	if humanoid and humanoid:IsA("Humanoid") then
+		humanoid.Died:Connect(interrupt)
+	end
+end
+localPlayer.CharacterAdded:Connect(watchCharacter)
+if localPlayer.Character then
+	task.spawn(function()
+		local humanoid = localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.Died:Connect(interrupt)
+		end
+	end)
 end
 
 --------------------------------------------------------------------------------

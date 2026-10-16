@@ -94,6 +94,11 @@ local RIM_BRIGHTNESS = 1.4
 local RIM_ACCENT_BRIGHTNESS = 2.4
 local LIGHT_RANGE = 16
 local LIGHT_MIN_SPREAD = 4.5
+-- Peau très claire : la clé et le débouchage baissent pour ne pas la saturer en blanc. En dessous de
+-- SKIN_SOFTEN_FROM (teints moyens, foncés, surnaturels), l'éclairage reste exactement le même.
+local SKIN_SOFTEN_FROM = 0.65 -- luminance de la peau à partir de laquelle on adoucit
+local SKIN_SOFTEN_TO = 0.82 -- luminance à laquelle l'adoucissement est maximal
+local SKIN_SOFTEST = 0.55 -- part de la lumière gardée au maximum de l'adoucissement
 local ACCENT_FADE = 0.6
 
 local localPlayer = Players.LocalPlayer
@@ -122,6 +127,8 @@ type Subject = {
 type LightRig = {
 	folder: Folder,
 	keyPart: Part,
+	key: PointLight,
+	fill: PointLight,
 	fillPart: Part,
 	rimPart: Part,
 	rim: PointLight,
@@ -333,11 +340,11 @@ local function createLights(): LightRig
 	-- Créées par un LocalScript : ces pièces n'existent que chez ce joueur.
 	local folder = Instance.new("Folder")
 	folder.Name = "AvatarCreatorStudioLights"
-	local keyPart = newLightPart("KeyLight", KEY_COLOR, KEY_BRIGHTNESS, folder)
-	local fillPart = newLightPart("FillLight", FILL_COLOR, FILL_BRIGHTNESS, folder)
+	local keyPart, key = newLightPart("KeyLight", KEY_COLOR, KEY_BRIGHTNESS, folder)
+	local fillPart, fill = newLightPart("FillLight", FILL_COLOR, FILL_BRIGHTNESS, folder)
 	local rimPart, rim = newLightPart("RimLight", RIM_COLOR, RIM_BRIGHTNESS, folder)
 	folder.Parent = workspace
-	return { folder = folder, keyPart = keyPart, fillPart = fillPart, rimPart = rimPart, rim = rim }
+	return { folder = folder, keyPart = keyPart, key = key, fill = fill, fillPart = fillPart, rimPart = rimPart, rim = rim }
 end
 
 -- Les lumières tournent avec la vue : la clé reste devant à gauche, le contre-jour derrière.
@@ -440,7 +447,18 @@ local function update()
 	local rig = lights
 	if rig then
 		placeLights(rig, framing.center, toCamera, framing.height)
+		local head = rootPart.Parent and rootPart.Parent:FindFirstChild("Head")
+		local factor = if head and head:IsA("BasePart") then AvatarCreatorCamera.skinLightFactor(head.Color) else 1
+		rig.key.Brightness = KEY_BRIGHTNESS * factor
+		rig.fill.Brightness = FILL_BRIGHTNESS * factor
 	end
+end
+
+-- Part de la lumière de studio gardée pour une peau de couleur `skin` (1 = inchangée).
+function AvatarCreatorCamera.skinLightFactor(skin: Color3): number
+	local luminance = 0.2126 * skin.R + 0.7152 * skin.G + 0.0722 * skin.B
+	local t = math.clamp((luminance - SKIN_SOFTEN_FROM) / (SKIN_SOFTEN_TO - SKIN_SOFTEN_FROM), 0, 1)
+	return 1 - t * (1 - SKIN_SOFTEST)
 end
 
 --------------------------------------------------------------------------------

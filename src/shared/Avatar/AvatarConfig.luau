@@ -251,9 +251,11 @@ local OUTFIT_WISHLIST: { { style: string, look: string } } = {
 -- créés avant cette option (leur apparence ne change pas).
 local SKIN_TONES: { SkinToneOption } = {
 	{ id = "native", name = "Teint de votre avatar", color = nil },
-	{ id = "porcelain", name = "Porcelaine", color = Color3.fromRGB(246, 222, 206) },
-	{ id = "fair", name = "Clair", color = Color3.fromRGB(234, 196, 168) },
-	{ id = "rosy", name = "Rosé", color = Color3.fromRGB(226, 180, 158) },
+	-- Les trois teints les plus clairs restent sous ~0,8 de luminance : plus haut, la lumière du
+	-- créateur et le soleil les saturaient en blanc (visage et marques illisibles).
+	{ id = "porcelain", name = "Porcelaine", color = Color3.fromRGB(224, 198, 180) },
+	{ id = "fair", name = "Clair", color = Color3.fromRGB(220, 184, 158) },
+	{ id = "rosy", name = "Rosé", color = Color3.fromRGB(216, 172, 150) },
 	{ id = "olive", name = "Olivâtre", color = Color3.fromRGB(198, 160, 118) },
 	{ id = "golden", name = "Doré", color = Color3.fromRGB(204, 150, 104) },
 	{ id = "tan", name = "Hâlé", color = Color3.fromRGB(176, 124, 86) },

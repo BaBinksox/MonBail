@@ -129,6 +129,12 @@ if button then
 end
 runtime.advance(10)
 flushErrors("confirmation et arrivée sans erreur")
+local CreatorSession = env.require(CLIENT .. "AvatarCreator/CreatorSession")
+check("cinématique d'arrivée en cours (caméra scénarisée)", CreatorSession.isArrivalBusy() and mock.workspace.CurrentCamera.CameraType == Enum.CameraType.Scriptable)
+runtime.advance(14)
+check("fin de cinématique : caméra rendue au jeu (Custom)", mock.workspace.CurrentCamera.CameraType == Enum.CameraType.Custom, tostring(mock.workspace.CurrentCamera.CameraType))
+check("fin de cinématique : plus « occupée », écran rouvert", not CreatorSession.isArrivalBusy())
+flushErrors("cinématique d'arrivée sans erreur")
 
 local ProfileStore = env.require("ServerScriptService/Server/Data/ProfileStore")
 local profile = ProfileStore.get(player)
@@ -157,6 +163,20 @@ else
 	check("ancre spawn_village présente", false, tostring(villageAnchor))
 end
 
+print("== Interruption de la cinématique (réapparition en plein vol)")
+local SpawnRemotes = env.require("ReplicatedStorage/Shared/World/SpawnRemotes")
+local anchorCFrame = WorldAnchors.getCFrame("camera_overlook")
+SpawnRemotes.ArrivalCinematic:FireClient(player, anchorCFrame, villageAnchor and villageAnchor.Position or anchorCFrame.Position, "village")
+runtime.advance(4)
+check("cinématique relancée (caméra scénarisée)", mock.workspace.CurrentCamera.CameraType == Enum.CameraType.Scriptable)
+runtime.spawnCharacter(player)
+runtime.advance(1)
+check("réapparition : caméra rendue aussitôt (Custom)", mock.workspace.CurrentCamera.CameraType == Enum.CameraType.Custom, tostring(mock.workspace.CurrentCamera.CameraType))
+check("réapparition : cinématique terminée", not CreatorSession.isArrivalBusy())
+runtime.advance(20)
+check("aucune reprise de caméra après l'interruption", mock.workspace.CurrentCamera.CameraType == Enum.CameraType.Custom)
+flushErrors("interruption sans erreur")
+
 print("== Réapparition (mort puis respawn)")
 local openBeforeRespawn = countSent("OpenCreator")
 runtime.spawnCharacter(player)
@@ -178,10 +198,11 @@ for _, store in pairs(runtime.cloud) do
 end
 check("profil écrit dans le DataStore simulé", cloudKeys >= 1, cloudKeys)
 local openBefore = countSent("OpenCreator")
+local cinematicsBefore = countSent("ArrivalCinematic")
 local again = runtime.addPlayer("Créatrice", player.UserId) -- même UserId : la sauvegarde est retrouvée
 runtime.spawnCharacter(again)
 runtime.advance(5)
-check("au retour, pas de nouvelle cinématique d'arrivée (déjà vue)", countSent("ArrivalCinematic") == 1, countSent("ArrivalCinematic"))
+check("au retour, pas de nouvelle cinématique d'arrivée (déjà vue)", countSent("ArrivalCinematic") == cinematicsBefore, countSent("ArrivalCinematic") - cinematicsBefore)
 check("au retour, le créateur ne s'ouvre pas", countSent("OpenCreator") == openBefore, countSent("OpenCreator") - openBefore)
 check("au retour, le joueur n'est pas « en création »", again:GetAttribute("IsCustomizing") == false, again:GetAttribute("IsCustomizing"))
 flushErrors("reconnexion sans erreur")
