@@ -2,8 +2,11 @@
 --[[
 	DashController (LocalScript)
 	L'esquive du joueur :
-		- touche DASH_INPUT : propulse le personnage dans la direction où il marche
-		  (ou droit devant lui s'il est immobile), avec un cooldown ;
+		- touche Dash (KeyBindings : C, B à la manette, bouton tactile) : propulse le personnage dans
+		  la direction où il marche (ou droit devant lui s'il est immobile), avec un cooldown ;
+		- DOUBLE APPUI sur une touche de direction (ZQSD / WASD, flèches) en moins de
+		  DASH_DOUBLE_TAP_WINDOW s : dash dans cette direction, relative à la caméra ;
+		  (Maj, l'ancienne touche du dash, sert désormais au sprint : voir MovementController.)
 		- la propulsion est une LinearVelocity temporaire sur le HumanoidRootPart, posée ici car
 		  c'est le client qui simule la physique de son propre personnage ;
 		- annonce le dash au serveur (cooldown vérifié, invulnérabilité accordée) ;
@@ -12,6 +15,7 @@
 	Rien ne tourne en continu : tout part de l'appui sur la touche, dans onDashInput().
 ]]
 
+local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
@@ -19,6 +23,14 @@ local UserInputService = game:GetService("UserInputService")
 local sharedFolder = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Movement")
 local Config = require(sharedFolder:WaitForChild("MovementConfig") :: ModuleScript)
 local Remotes = require(sharedFolder:WaitForChild("MovementRemotes") :: ModuleScript)
+local KeyBindings = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Input"):WaitForChild("KeyBindings") :: ModuleScript)
+
+local clientFolder = script.Parent.Parent
+local CharacterAnimator = require(clientFolder:WaitForChild("Animation"):WaitForChild("CharacterAnimator") :: ModuleScript)
+local SfxPlayer = require(clientFolder:WaitForChild("Audio"):WaitForChild("SfxPlayer") :: ModuleScript)
+local MovementState = require(script.Parent:WaitForChild("MovementState") :: ModuleScript)
+
+local DASH_ACTION = "Dash"
 
 -- Assez de force pour atteindre DASH_SPEED en une frame, quel que soit le poids du personnage.
 local DASH_MAX_FORCE = 1e6
@@ -33,6 +45,8 @@ local TRAIL_COLOR_TAIL = Color3.fromRGB(70, 30, 140)
 
 local localPlayer = Players.LocalPlayer
 local lastDashClock = -math.huge
+local lastTapKey: Enum.KeyCode? = nil
+local lastTapClock = -math.huge
 
 --------------------------------------------------------------------------------
 -- Effet visuel (local à ce client)
@@ -122,8 +136,25 @@ local function propel(rootPart: BasePart, direction: Vector3)
 	end)
 end
 
--- Seul point d'entrée du dash : appelé une fois par appui sur DASH_INPUT.
-local function onDashInput()
+-- Direction d'un double appui : la touche de direction, tournée comme la caméra (à plat).
+local function directionFromKey(keyCode: Enum.KeyCode): Vector3?
+	local localDirection = KeyBindings.DIRECTION_KEYS[keyCode]
+	local camera = workspace.CurrentCamera
+	if localDirection == nil or camera == nil then
+		return nil
+	end
+	local look = camera.CFrame.LookVector
+	local forward = Vector3.new(look.X, 0, look.Z)
+	if forward.Magnitude < 1e-3 then
+		return nil
+	end
+	forward = forward.Unit
+	local right = forward:Cross(Vector3.yAxis)
+	return (right * localDirection.X - forward * localDirection.Z).Unit
+end
+
+-- Seul point d'entrée du dash. `forcedDirection` : dash au double appui.
+local function onDashInput(forcedDirection: Vector3?)
 	local now = os.clock()
 	if now - lastDashClock < Config.DASH_COOLDOWN then
 		return
@@ -140,20 +171,52 @@ local function onDashInput()
 		return
 	end
 
+	if MovementState.concentrating then
+		return -- la Concentration immobilise presque : pas d'esquive pendant la posture
+	end
+
 	lastDashClock = now
-	Remotes.RequestDash:FireServer()
-	propel(rootPart, getDashDirection(humanoid, rootPart))
+	local direction = forcedDirection or getDashDirection(humanoid, rootPart)
+	Remotes.RequestDash:FireServer(direction)
+	propel(rootPart, direction)
 	playDashTrail(character)
+	CharacterAnimator.get(character, true):play("dash")
+	SfxPlayer.play("dodge", rootPart)
 end
 
 --------------------------------------------------------------------------------
 -- Entrées et événements
 --------------------------------------------------------------------------------
 
-UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
-	if not gameProcessed and input.KeyCode == Config.DASH_INPUT then
-		onDashInput()
+local dashBinding = KeyBindings.BINDINGS.Dash
+ContextActionService:BindAction(DASH_ACTION, function(_name: string, state: Enum.UserInputState): Enum.ContextActionResult
+	if state == Enum.UserInputState.Begin then
+		onDashInput(nil)
+		return Enum.ContextActionResult.Sink
 	end
+	return Enum.ContextActionResult.Pass
+end, dashBinding.touch ~= nil, dashBinding.keyCode or dashBinding.fallbackKeyCode, dashBinding.gamepad or Enum.KeyCode.ButtonB)
+ContextActionService:SetTitle(DASH_ACTION, dashBinding.label)
+if dashBinding.touch then
+	ContextActionService:SetPosition(DASH_ACTION, dashBinding.touch)
+end
+
+-- Double appui sur une même touche de direction.
+UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
+	if gameProcessed or KeyBindings.DIRECTION_KEYS[input.KeyCode] == nil then
+		return
+	end
+	local now = os.clock()
+	if lastTapKey == input.KeyCode and now - lastTapClock <= Config.DASH_DOUBLE_TAP_WINDOW then
+		lastTapKey = nil
+		local direction = directionFromKey(input.KeyCode)
+		if direction then
+			onDashInput(direction)
+		end
+		return
+	end
+	lastTapKey = input.KeyCode
+	lastTapClock = now
 end)
 
 -- Un AUTRE joueur dashe : son déplacement est déjà répliqué, il ne manque que sa traînée.

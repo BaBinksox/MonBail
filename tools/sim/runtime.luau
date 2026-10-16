@@ -447,6 +447,26 @@ return function(mock)
 			att.Name = partName == "RightHand" and "RightGripAttachment" or (partName .. "Attachment")
 			att.Parent = p
 		end
+		-- Articulations R15 principales (poses procédurales) : C0 = décalage de la pièce au repos.
+		local joints = {
+			{ "Root", root, "LowerTorso" },
+			{ "Waist", "LowerTorso", "UpperTorso" },
+			{ "Neck", "UpperTorso", "Head" },
+			{ "RightShoulder", "UpperTorso", "RightUpperArm" },
+			{ "LeftShoulder", "UpperTorso", "LeftUpperArm" },
+		}
+		for _, joint in ipairs(joints) do
+			local part0 = if type(joint[2]) == "string" then model:FindFirstChild(joint[2]) else joint[2]
+			local part1 = model:FindFirstChild(joint[3])
+			if part0 and part1 then
+				local motor = Instance.new("Motor6D")
+				motor.Name = joint[1]
+				motor.Part0 = part0
+				motor.Part1 = part1
+				motor.C0 = part0.CFrame:Inverse() * part1.CFrame
+				motor.Parent = part1
+			end
+		end
 		local humanoid = Instance.new("Humanoid")
 		humanoid.Health = 100
 		humanoid.MaxHealth = 100

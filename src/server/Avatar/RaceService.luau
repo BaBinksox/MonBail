@@ -19,6 +19,12 @@ local BASE_SPEED_ATTRIBUTE = "RaceBaseWalkSpeed"
 
 local RaceService = {}
 
+-- Appelé après chaque application (MovementService y recompose la vitesse avec les altérations).
+local afterApply: ((player: Player) -> ())? = nil
+function RaceService.setAfterApply(callback: (player: Player) -> ())
+	afterApply = callback
+end
+
 local function raceOf(player: Player): RaceConfig.Race
 	return RaceConfig.getById(player:GetAttribute(RaceConfig.ATTRIBUTE))
 end
@@ -58,6 +64,11 @@ function RaceService.apply(player: Player)
 	humanoid.MaxHealth = maxHealth
 	humanoid.Health = math.clamp(maxHealth * ratio, 1, maxHealth)
 	humanoid.WalkSpeed = (baseSpeed :: number) * modifiers.walkSpeed
+	humanoid:SetAttribute("MoveSpeedBase", humanoid.WalkSpeed)
+	local callback = afterApply
+	if callback then
+		callback(player)
+	end
 end
 
 -- Multiplicateur des dégâts reçus (jour / nuit pour les Enfants de l'Ombre).

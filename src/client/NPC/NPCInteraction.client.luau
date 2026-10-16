@@ -339,14 +339,14 @@ local function openDialogue(villager: Model)
 		return Enum.ContextActionResult.Sink
 	end, false, ACTION_PRIORITY, Config.INTERACT_KEY, Enum.KeyCode.Space, Enum.KeyCode.Return, Enum.KeyCode.ButtonA)
 
-	-- Touches de jeu neutralisées pendant qu'on parle : ultime, dash, carte. Une entrée "absorbée"
+	-- Touches de jeu neutralisées pendant qu'on parle : ultime, sprint (Maj), dash (C), carte. Une entrée "absorbée"
 	-- arrive aux autres scripts marquée gameProcessed, et ils l'ignorent. (R n'y est pas : une
 	-- anomalie doit toujours pouvoir être rembobinée.)
 	-- La touche de la carte est cherchée par sa lettre : ce n'est pas KeyCode.M sur un clavier AZERTY.
 	local mapKey = KeyboardLayout.findKeyCode(WorldMapConfig.TOGGLE_LETTER, WorldMapConfig.TOGGLE_KEY)
 	ContextActionService:BindActionAtPriority(SINK_ACTION, function()
 		return Enum.ContextActionResult.Sink
-	end, false, ACTION_PRIORITY, Enum.KeyCode.E, Enum.KeyCode.LeftShift, mapKey)
+	end, false, ACTION_PRIORITY, Enum.KeyCode.E, Enum.KeyCode.LeftShift, Enum.KeyCode.C, mapKey)
 
 	task.spawn(typeLine, lines[lineIndex])
 end

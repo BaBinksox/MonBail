@@ -5,8 +5,11 @@
 	Le serveur les crée au premier require ; le client attend leur réplication.
 
 	Sens des événements :
-		RequestDash  client  -> serveur          ()                  le serveur vérifie le cooldown
-		DashStarted  serveur -> autres clients   (character: Model)  pour leurs VFX
+		RequestDash        client  -> serveur          (direction: Vector3?)   le serveur vérifie le cooldown
+		DashStarted        serveur -> autres clients   (character: Model, direction: Vector3?)  VFX et pose
+		RequestSprint      client  -> serveur          (wants: boolean)        attribut Player « Sprinting »
+		RequestDoubleJump  client  -> serveur          ()                      un par passage en l'air
+		DoubleJumped       serveur -> autres clients   (character: Model)      VFX et pose
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -40,4 +43,7 @@ end
 return table.freeze({
 	RequestDash = getRemote("RequestDash"),
 	DashStarted = getRemote("DashStarted"),
+	RequestSprint = getRemote("RequestSprint"),
+	RequestDoubleJump = getRemote("RequestDoubleJump"),
+	DoubleJumped = getRemote("DoubleJumped"),
 })

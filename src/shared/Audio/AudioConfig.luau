@@ -99,6 +99,69 @@ local FEEDBACK_SOUNDS = {
 	regionEnter = { id = "", volume = 0.2 },
 }
 
+--[[
+	EFFETS SONORES DE COMBAT, DE MAGIE ET DE MOBILITÉ (catégorie Effets, joués par SfxPlayer).
+	Deux sortes de sources :
+		- "rbxasset://sounds/..." : sons LIVRÉS AVEC ROBLOX (épée classique, sons du personnage par
+		  défaut), présents dans toute installation, sans ID de catalogue. À confirmer en jeu : un
+		  fichier absent est simplement silencieux (avertissement dans la sortie) ;
+		- "" : emplacement vide, à remplir avec un son vérifié (critères dans `criteria`).
+	pitch / pitchVariance : hauteur de base et variation aléatoire (évite la répétition mécanique) ;
+	minInterval : délai minimal entre deux lectures du même son ; maxConcurrent : copies simultanées.
+]]
+export type Sfx = {
+	id: string,
+	volume: number,
+	pitch: number,
+	pitchVariance: number,
+	minInterval: number,
+	maxConcurrent: number,
+	criteria: string,
+}
+local function sfx(id: string, volume: number, criteria: string, pitch: number?, variance: number?, minInterval: number?, maxConcurrent: number?): Sfx
+	return { id = id, volume = volume, pitch = pitch or 1, pitchVariance = variance or 0.05, minInterval = minInterval or 0.04, maxConcurrent = maxConcurrent or 3, criteria = criteria }
+end
+local CLASSIC_SLASH = "rbxasset://sounds/swordslash.wav"
+local CLASSIC_LUNGE = "rbxasset://sounds/swordlunge.wav"
+local CLASSIC_UNSHEATH = "rbxasset://sounds/unsheath.wav"
+local CHARACTER_JUMP = "rbxasset://sounds/action_jump.mp3"
+
+local SFX: { [string]: Sfx } = {
+	-- Épée
+	swordSwing = sfx(CLASSIC_SLASH, 0.45, "Souffle de lame court (whoosh), sans impact.", 1.05, 0.08),
+	swordSwingHeavy = sfx(CLASSIC_LUNGE, 0.55, "Souffle de lame lourd, plus grave.", 0.9, 0.05),
+	swordHit = sfx("", 0.6, "Lame qui entaille (chair / tissu), court, sans cri.", 1, 0.08),
+	swordBlocked = sfx("", 0.6, "Métal contre métal ou pierre, sec et mat (coup arrêté par une garde).", 1, 0.06),
+	parryPerfect = sfx(CLASSIC_UNSHEATH, 0.65, "Tintement métallique clair et réverbéré (parade parfaite).", 1.35, 0.03, 0.1, 2),
+	postureBreak = sfx("", 0.7, "Craquement sourd + souffle (garde brisée).", 1, 0.05, 0.2, 2),
+	chargeReady = sfx(CLASSIC_UNSHEATH, 0.4, "Montée métallique brève (attaque chargée prête).", 1.6, 0.02, 0.3, 1),
+	-- Mobilité
+	dodge = sfx("", 0.45, "Souffle d'air rapide (esquive / dash).", 1, 0.08),
+	dodgePerfect = sfx("", 0.5, "Souffle + éclat cristallin discret (esquive parfaite).", 1, 0.03, 0.2, 1),
+	doubleJump = sfx(CHARACTER_JUMP, 0.5, "Impulsion d'énergie courte, légèrement magique.", 1.35, 0.05, 0.15, 2),
+	sprintStart = sfx("", 0.25, "Pas qui s'accélèrent / souffle léger (démarrage du sprint).", 1, 0.05, 0.5, 1),
+	-- Ressources
+	manaFull = sfx("", 0.25, "Note cristalline douce (Mana plein).", 1, 0.02, 1, 1),
+	manaEmpty = sfx("", 0.3, "Souffle étouffé (sort impossible : Mana insuffisant).", 1, 0.03, 0.4, 1),
+	concentrate = sfx("", 0.3, "Nappe magique montante, très douce (Concentration).", 1, 0.02, 0.5, 1),
+	ultimateReady = sfx("", 0.4, "Accord bref et lumineux (jauge de Tension pleine).", 1, 0, 2, 1),
+	ultimateActivate = sfx("", 0.7, "Montée puissante + impact (technique ultime).", 1, 0.02, 0.5, 2),
+	-- Sorts : lancement et impact par élément
+	cast_pyromancy = sfx("", 0.5, "Souffle de flamme projeté (whoosh enflammé).", 1, 0.06),
+	impact_pyromancy = sfx("", 0.55, "Explosion de feu courte, crépitement.", 1, 0.06),
+	cast_ice = sfx("", 0.45, "Cristallisation, givre qui se forme (aigu, fin).", 1, 0.05),
+	impact_ice = sfx("", 0.5, "Éclat de glace qui se brise.", 1, 0.06),
+	cast_lightning = sfx("", 0.5, "Crépitement électrique sec.", 1, 0.08),
+	impact_lightning = sfx("", 0.55, "Claquement de foudre court (pas de tonnerre long).", 1, 0.06),
+	cast_shadow = sfx("", 0.45, "Murmure grave, souffle sombre (pas de cri).", 1, 0.05),
+	impact_shadow = sfx("", 0.5, "Impact étouffé et aspirant.", 1, 0.05),
+	cast_antimatter = sfx("", 0.45, "Distorsion, son inversé qui se contracte.", 1, 0.04),
+	impact_antimatter = sfx("", 0.55, "Implosion sourde.", 1, 0.05),
+	cast_gravity = sfx("", 0.5, "Grondement grave, pression.", 1, 0.04),
+	impact_gravity = sfx("", 0.55, "Écrasement lourd, sol qui tremble.", 1, 0.05),
+	reaction = sfx("", 0.55, "Éclat bref, mélange de deux éléments (réaction élémentaire).", 1, 0.05, 0.25, 2),
+}
+
 -- Catégories de volume (multipliées par les réglages du joueur : musique, ambiance, effets).
 local CATEGORIES = table.freeze({
 	music = "Music",
@@ -111,6 +174,7 @@ return table.freeze({
 	REGION_MUSIC = REGION_MUSIC,
 	REWIND_CHOIR = REWIND_CHOIR,
 	FEEDBACK_SOUNDS = FEEDBACK_SOUNDS,
+	SFX = SFX,
 	CATEGORIES = CATEGORIES,
 	-- Volume maximal de chaque catégorie (réglage du joueur à 100 %).
 	CATEGORY_MAX_VOLUME = table.freeze({ Music = 1, Ambience = 1, Sfx = 1 }),

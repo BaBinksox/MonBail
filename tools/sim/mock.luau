@@ -407,6 +407,7 @@ local DEFAULTS = {
 	Attachment = { CFrame = cf(0, 0, 0), Position = v3() },
 	Motor6D = { C0 = cf(0, 0, 0), C1 = cf(0, 0, 0) },
 	Weld = { C0 = cf(0, 0, 0), C1 = cf(0, 0, 0) },
+	Humanoid = { MoveDirection = v3(), JumpHeight = 7.2, AutoRotate = true },
 }
 -- Interfaces : aucune mise en page réelle, des tailles absolues fixes suffisent aux calculs.
 for _, cls in ipairs({ "Frame", "TextLabel", "TextButton", "ImageLabel", "ImageButton", "ScrollingFrame", "TextBox", "ViewportFrame", "CanvasGroup", "VideoFrame" }) do
