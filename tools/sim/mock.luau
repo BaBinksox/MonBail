@@ -570,14 +570,65 @@ function methods.Clone(self)
 	end
 	return copy
 end
-function methods.SetAttribute(self, k, v) rawget(self, "_attrs")[k] = v end
+-- Signaux de changement d'attribut : déclenchés (dans un thread, comme Roblox) quand la valeur change.
+local function attributeSignal(self, k)
+	local signals = rawget(self, "_attrSignals")
+	if signals == nil then
+		signals = {}
+		rawset(self, "_attrSignals", signals)
+	end
+	local s = signals[k]
+	if s == nil then
+		s = { _handlers = {} }
+		function s:Connect(fn)
+			local conn = { Connected = true }
+			function conn:Disconnect()
+				conn.Connected = false
+			end
+			table.insert(self._handlers, { fn = fn, conn = conn })
+			return conn
+		end
+		function s:Once(fn)
+			local conn
+			conn = self:Connect(function(...)
+				conn:Disconnect()
+				fn(...)
+			end)
+			return conn
+		end
+		function s:Fire(...)
+			for _, h in ipairs(table.clone(self._handlers)) do
+				if h.conn.Connected then
+					M.task.spawn(h.fn, ...)
+				end
+			end
+		end
+		function s:Wait()
+			return nil
+		end
+		signals[k] = s
+	end
+	return s
+end
+function methods.SetAttribute(self, k, v)
+	local attrs = rawget(self, "_attrs")
+	local old = attrs[k]
+	attrs[k] = v
+	if old ~= v then
+		local signals = rawget(self, "_attrSignals")
+		local s = signals and signals[k]
+		if s then
+			s:Fire()
+		end
+	end
+end
 function methods.GetAttribute(self, k) return rawget(self, "_attrs")[k] end
 function methods.GetAttributes(self)
 	local t = {}
 	for k, v in pairs(rawget(self, "_attrs")) do t[k] = v end
 	return t
 end
-function methods.GetAttributeChangedSignal() return M.newSignal() end
+function methods.GetAttributeChangedSignal(self, k) return attributeSignal(self, k) end
 function methods.GetPropertyChangedSignal() return M.newSignal() end
 function methods.AddTag(self, t)
 	tags[self] = tags[self] or {}
