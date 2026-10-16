@@ -36,6 +36,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local AvatarConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Avatar"):WaitForChild("AvatarConfig"))
 local MagicConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Magic"):WaitForChild("MagicConfig"))
+local SpellConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Magic"):WaitForChild("SpellConfig"))
+local MagicShowcase = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Magic"):WaitForChild("MagicShowcase"))
 local Theme = require(script.Parent.Parent:WaitForChild("UI"):WaitForChild("Theme"))
 local Catalog = require(script.Parent:WaitForChild("AvatarCreatorCatalog"))
 
@@ -71,6 +73,7 @@ export type MagicCard = {
 	magic: Magic,
 	isHovered: boolean,
 	isLocked: boolean, -- la Roulette du Destin a scellé une autre magie
+	previewButton: Button, -- « Aperçu » : gestes et effets de la magie, purement visuels
 }
 
 -- État de la Roulette du Destin (page Destin).
@@ -377,6 +380,11 @@ local function refreshCard(card: MagicCard, isSelected: boolean)
 	}, Theme.durations.fast)
 end
 
+-- "#RRGGBB" d'une couleur, pour le texte enrichi.
+local function hexOf(color: Color3): string
+	return string.format("#%02X%02X%02X", math.floor(color.R * 255 + 0.5), math.floor(color.G * 255 + 0.5), math.floor(color.B * 255 + 0.5))
+end
+
 local function createMagicCard(magic: Magic, index: number, parent: Instance): MagicCard
 	local button = Instance.new("TextButton")
 	button.Name = "Magic_" .. magic.id
@@ -416,34 +424,102 @@ local function createMagicCard(magic: Magic, index: number, parent: Instance): M
 	textPadding.Parent = texts
 	addListLayout(texts, 3)
 
+	-- En-tête : nom de la magie et bouton d'aperçu (gestes et effets, sans aucun effet de jeu).
+	local header = newFrame("Header", texts)
+	header.Size = UDim2.new(1, 0, 0, 30)
+	header.LayoutOrder = 1
 	Theme.title({
 		name = "Name",
 		text = magic.name,
 		textSize = 24,
 		color = magic.palette.glow,
-		size = UDim2.new(1, 0, 0, 28),
-		layoutOrder = 1,
-		parent = texts,
+		size = UDim2.new(1, -116, 1, 0),
+		parent = header,
 	})
+	local previewButton = Theme.button({
+		name = "Preview",
+		text = "Aperçu",
+		glyph = "▶",
+		textSize = 13,
+		accent = magic.palette.main,
+		anchor = Vector2.new(1, 0),
+		position = UDim2.fromScale(1, 0),
+		size = UDim2.new(0, 108, 1, 0),
+		parent = header,
+	})
+
+	local profile = MagicShowcase.get(magic.id)
+	local order = 1
+	local function nextOrder(): number
+		order += 1
+		return order
+	end
+	local accentHex = hexOf(magic.palette.main)
+
+	if profile then
+		Theme.label({
+			name = "Identity",
+			text = profile.identity,
+			textSize = 15,
+			color = COLORS.text,
+			wrap = true,
+			autoSize = "Y",
+			size = UDim2.new(1, 0, 0, 0),
+			layoutOrder = nextOrder(),
+			parent = texts,
+		})
+		local level = math.clamp(profile.difficulty, 1, #MagicShowcase.DIFFICULTY_LABELS)
+		Theme.caption({
+			name = "Difficulty",
+			text = `Difficulté : {MagicShowcase.DIFFICULTY_LABELS[level]}  {string.rep("●", level)}{string.rep("○", #MagicShowcase.DIFFICULTY_LABELS - level)}`,
+			color = magic.palette.main,
+			size = UDim2.new(1, 0, 0, 16),
+			layoutOrder = nextOrder(),
+			parent = texts,
+		})
+	end
+
+	-- Les deux sorts, tirés de SpellConfig (noms, coûts et descriptions réels).
+	local function spellLine(slot: string, title: string)
+		local spell = SpellConfig.forMagic(magic.id, slot)
+		if spell == nil then
+			return
+		end
+		Theme.label({
+			name = if slot == "base" then "BaseSpell" else "SecondarySpell",
+			text = `<b>{title} · {spell.name}</b>  <font color="{accentHex}">{spell.manaCost} Mana</font>\n{spell.description}`,
+			textSize = 14,
+			color = COLORS.text,
+			rich = true,
+			wrap = true,
+			autoSize = "Y",
+			size = UDim2.new(1, 0, 0, 0),
+			layoutOrder = nextOrder(),
+			parent = texts,
+		})
+	end
+	spellLine("base", "Sort de base (1)")
+	spellLine("secondary", "Sort secondaire (2)")
+
 	Theme.caption({
 		name = "Ultimate",
-		text = `Ultime · {magic.ultimateName}`,
+		text = `Ultime (E) · {magic.ultimateName}`,
 		color = magic.palette.main,
 		size = UDim2.new(1, 0, 0, 16),
 		scaled = true,
 		minTextSize = 9,
-		layoutOrder = 2,
+		layoutOrder = nextOrder(),
 		parent = texts,
 	})
 	Theme.label({
 		name = "Description",
 		text = magic.description,
-		textSize = 15,
+		textSize = 14,
 		color = COLORS.textMuted,
 		wrap = true,
 		autoSize = "Y",
 		size = UDim2.new(1, 0, 0, 0),
-		layoutOrder = 3,
+		layoutOrder = nextOrder(),
 		parent = texts,
 	})
 	Theme.label({
@@ -454,7 +530,7 @@ local function createMagicCard(magic: Magic, index: number, parent: Instance): M
 		wrap = true,
 		autoSize = "Y",
 		size = UDim2.new(1, 0, 0, 0),
-		layoutOrder = 4,
+		layoutOrder = nextOrder(),
 		parent = texts,
 	})
 	Theme.label({
@@ -465,12 +541,61 @@ local function createMagicCard(magic: Magic, index: number, parent: Instance): M
 		wrap = true,
 		autoSize = "Y",
 		size = UDim2.new(1, 0, 0, 0),
-		layoutOrder = 5,
+		layoutOrder = nextOrder(),
 		parent = texts,
 	})
 
+	-- Style tactique : une phrase, puis quatre jauges (dégâts, contrôle, mobilité, soutien).
+	if profile then
+		Theme.label({
+			name = "Playstyle",
+			text = profile.playstyle,
+			textSize = 13,
+			color = COLORS.textMuted,
+			wrap = true,
+			autoSize = "Y",
+			size = UDim2.new(1, 0, 0, 0),
+			layoutOrder = nextOrder(),
+			parent = texts,
+		})
+		local roles = newFrame("Roles", texts)
+		roles.Size = UDim2.new(1, 0, 0, 0)
+		roles.AutomaticSize = Enum.AutomaticSize.Y
+		roles.LayoutOrder = nextOrder()
+		local grid = Instance.new("UIGridLayout")
+		grid.CellSize = UDim2.new(0.5, -6, 0, 16)
+		grid.CellPadding = UDim2.fromOffset(8, 4)
+		grid.SortOrder = Enum.SortOrder.LayoutOrder
+		grid.Parent = roles
+		for roleIndex, role in MagicShowcase.ROLE_ORDER do
+			local value = math.clamp((profile.roles :: any)[role.key] or 0, 0, MagicShowcase.MAX_ROLE)
+			local cell = newFrame("Role_" .. role.key, roles)
+			cell.LayoutOrder = roleIndex
+			Theme.caption({
+				name = "Label",
+				text = role.label,
+				color = if value > 0 then COLORS.text else COLORS.textMuted,
+				size = UDim2.new(0.5, -4, 1, 0),
+				parent = cell,
+			})
+			local track = newFrame("Track", cell)
+			track.BackgroundTransparency = 0.6
+			track.BackgroundColor3 = COLORS.ink
+			track.AnchorPoint = Vector2.new(1, 0.5)
+			track.Position = UDim2.fromScale(1, 0.5)
+			track.Size = UDim2.new(0.5, 0, 0, 6)
+			addCorner(track, UDim.new(0.5, 0))
+			local fill = newFrame("Fill", track)
+			fill.BackgroundTransparency = 0
+			fill.BackgroundColor3 = magic.palette.main
+			fill.Size = UDim2.fromScale(value / MagicShowcase.MAX_ROLE, 1)
+			addCorner(fill, UDim.new(0.5, 0))
+			cell:SetAttribute("Value", value)
+		end
+	end
+
 	button.Parent = parent
-	return { button = button, stroke = stroke, magic = magic, isHovered = false, isLocked = false }
+	return { button = button, stroke = stroke, magic = magic, isHovered = false, isLocked = false, previewButton = previewButton }
 end
 
 --------------------------------------------------------------------------------

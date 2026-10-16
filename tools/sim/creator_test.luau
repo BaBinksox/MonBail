@@ -76,6 +76,102 @@ for _ = 1, destinyStep - 1 do
 end
 flushErrors("navigation jusqu'au Destin sans erreur")
 
+print("== Fiches de magie (page Destin)")
+do
+	local MagicConfigCards = env.require("ReplicatedStorage/Shared/Magic/MagicConfig")
+	local SpellConfig = env.require("ReplicatedStorage/Shared/Magic/SpellConfig")
+	local function named(root, name)
+		for _, d in ipairs(root:GetDescendants()) do
+			if d.Name == name then return d end
+		end
+		return nil
+	end
+	local missing = {}
+	for _, magic in ipairs(MagicConfigCards.MAGICS) do
+		local card = named(C.playerGui, "Magic_" .. magic.id)
+		if card == nil then
+			table.insert(missing, magic.id .. " : fiche absente")
+			continue
+		end
+		local base = SpellConfig.forMagic(magic.id, "base")
+		local secondary = SpellConfig.forMagic(magic.id, "secondary")
+		local function hasText(name, ...)
+			local label = named(card, name)
+			if label == nil then
+				table.insert(missing, magic.id .. " : " .. name .. " absent")
+				return
+			end
+			for _, piece in ipairs({ ... }) do
+				if not string.find(label.Text, piece, 1, true) then
+					table.insert(missing, magic.id .. " : " .. name .. " sans « " .. piece .. " »")
+				end
+			end
+		end
+		hasText("Identity")
+		hasText("Difficulty", "Difficulté")
+		hasText("BaseSpell", "Sort de base", base.name, tostring(base.manaCost) .. " Mana")
+		hasText("SecondarySpell", "Sort secondaire", secondary.name, tostring(secondary.manaCost) .. " Mana")
+		hasText("Ultimate", magic.ultimateName)
+		hasText("Description", magic.description)
+		hasText("Advantage", magic.advantage)
+		hasText("Drawback", magic.drawback)
+		hasText("Playstyle")
+		local roles = named(card, "Roles")
+		local roleCount = 0
+		if roles then
+			for _, key in ipairs({ "damage", "control", "mobility", "support" }) do
+				local cell = named(roles, "Role_" .. key)
+				if cell and named(cell, "Fill") then roleCount += 1 end
+			end
+		end
+		if roleCount ~= 4 then table.insert(missing, magic.id .. " : " .. roleCount .. " jauges tactiques sur 4") end
+		if named(card, "Preview") == nil then table.insert(missing, magic.id .. " : pas de bouton Aperçu") end
+	end
+	check("chaque fiche : identité, difficulté, deux sorts et leur Mana, ultime, avantage, inconvénient, style tactique, aperçu", #missing == 0, table.concat(missing, " ; "))
+
+	print("== Aperçu d'une magie : visuel seulement")
+	local magic = MagicConfigCards.MAGICS[4] -- Glace
+	local card = named(C.playerGui, "Magic_" .. magic.id)
+	local previewButton = card and named(card, "Preview")
+	local sentBefore = #runtime.sent
+	local manaBefore = player:GetAttribute("Mana")
+	local magicBefore = player:GetAttribute("InnateMagic")
+	if previewButton then
+		C.click(previewButton)
+	end
+	runtime.advance(0.15)
+	local CharacterAnimator = env.require(CLIENT .. "Animation/CharacterAnimator")
+	local animator = player.Character and CharacterAnimator.find(player.Character)
+	local base = SpellConfig.forMagic(magic.id, "base")
+	check("aperçu : le personnage fait le geste du sort de base", animator ~= nil and animator:isPlaying(base.action), base.action)
+	local MagicPreview = env.require(CLIENT .. "Magic/MagicPreview")
+	check("aperçu en cours", MagicPreview.isPlaying())
+	runtime.advance(1)
+	local effects = mock.workspace:FindFirstChild("UltimateEffects") or mock.workspace:FindFirstChild("SpellEffects")
+	local effectCount = 0
+	for _, folderName in ipairs({ "UltimateEffects", "SpellEffects" }) do
+		local folder = mock.workspace:FindFirstChild(folderName)
+		if folder then effectCount += #folder:GetChildren() end
+	end
+	check("aperçu : effets visuels du sort affichés", effectCount > 0 or effects ~= nil, effectCount)
+	local sawUltimate = false
+	for _ = 1, 40 do
+		runtime.advance(0.25)
+		if animator and animator:isPlaying("cast_ultimate_" .. magic.id) then sawUltimate = true end
+		if not MagicPreview.isPlaying() then break end
+	end
+	check("aperçu : la pose d'ultime de la magie est jouée", sawUltimate)
+	check("aperçu terminé de lui-même", not MagicPreview.isPlaying())
+	local fired = {}
+	for index = sentBefore + 1, #runtime.sent do
+		local entry = runtime.sent[index]
+		if entry.kind == "FireServer" or entry.kind == "InvokeServer" then table.insert(fired, entry.remote) end
+	end
+	check("aperçu : aucune demande au serveur (ni sort, ni ultime, ni aperçu d'avatar)", #fired == 0, table.concat(fired, ","))
+	check("aperçu : ni Mana ni magie modifiés", player:GetAttribute("Mana") == manaBefore and player:GetAttribute("InnateMagic") == magicBefore)
+	flushErrors("fiches et aperçu sans erreur")
+end
+
 print("== Roulette du Destin (interface)")
 check("panneau « Roulette du Destin » et règles affichés", C.findText("ROULETTE DU DESTIN") ~= nil and C.findText("chances égales") ~= nil)
 local spin = C.findButton("Laisser le destin choisir")

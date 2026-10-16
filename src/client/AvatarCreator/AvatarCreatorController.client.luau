@@ -45,6 +45,7 @@ local CreatorSession = require(script.Parent:WaitForChild("CreatorSession"))
 local Input = require(script.Parent:WaitForChild("AvatarCreatorInput"))
 local View = require(script.Parent:WaitForChild("AvatarCreatorView"))
 local MusicDirector = require(script.Parent.Parent:WaitForChild("Audio"):WaitForChild("MusicDirector"))
+local MagicPreview = require(script.Parent.Parent:WaitForChild("Magic"):WaitForChild("MagicPreview"))
 
 type Selection = AvatarConfig.Selection
 type Step = Catalog.Step
@@ -469,6 +470,7 @@ local function confirmSelection()
 	local token = sessionToken
 
 	cancelPreview() -- inutile : le choix final contient déjà tout
+	MagicPreview.stop()
 	clearSelection()
 	refreshFooter()
 	Remotes.ApplyAvatar:FireServer(selection)
@@ -849,6 +851,7 @@ local function close()
 
 	Input.disable()
 	cancelPreview()
+	MagicPreview.stop()
 	clearSelection()
 	stopWatchingCharacter()
 	stopMusic()
@@ -923,6 +926,27 @@ for index, card in view.magicCards do
 		chooseMagic(index)
 	end)
 end
+
+-- Aperçu d'une magie (bouton « Aperçu » de chaque fiche) : gestes et effets visuels seulement,
+-- sans rien demander au serveur (MagicPreview). Ne change pas la magie choisie.
+local function refreshPreviewButtons()
+	local busy = MagicPreview.isPlaying()
+	for _, card in view.magicCards do
+		card.previewButton:setEnabled(not busy)
+	end
+end
+for _, card in view.magicCards do
+	card.previewButton:onActivated(function()
+		local character = localPlayer.Character
+		if phase ~= "editing" or character == nil then
+			return
+		end
+		if MagicPreview.play(character, card.magic) then
+			refreshPreviewButtons()
+		end
+	end)
+end
+MagicPreview.finished:Connect(refreshPreviewButtons)
 
 view.spinButton:onActivated(function()
 	if phase == "editing" and destinySealedIndex == nil and (destinyState == "idle" or destinyState == "error") then

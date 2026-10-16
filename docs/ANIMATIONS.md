@@ -36,7 +36,7 @@ require(game.ReplicatedStorage.Shared.Animation.KeyframeBuilder).install()
 ```
 
 Cela crée un mannequin R15 `EchosAnimRig` (avec une épée fixée comme en jeu, articulation `SwordGrip`
-vers la pièce `Handle`) et place les 31 séquences dans `EchosAnimRig > AnimSaves` et dans
+vers la pièce `Handle`) et place les 37 séquences dans `EchosAnimRig > AnimSaves` et dans
 `ServerStorage > RBX_ANIMSAVES > EchosAnimRig` (emplacement de l'Animation Editor actuel).
 
 **B. Fichier** : `build/AnimationSequences.rbxmx` (régénéré par `tools/anim/export.sh`). Glissez-le dans
@@ -68,7 +68,7 @@ le jeu publié.
 | `sword_5` Final | 0,70 s | 0,39 s | accroupi lame armée derrière, bond en avant et grande taille plongeante |
 | `sword_charge` / `sword_charged` | boucle / 0,55 s | 0,17 s | lame ramenée haut derrière l'épaule ; frappe chargée |
 | `sword_counter`, `sword_plunge_fall`, `sword_plunge` | | | riposte, chute lame levée, impact au sol |
-| `cast_*` (12), `cast_ultimate`, `concentrate` | | | gestuelle propre à chaque magie |
+| `cast_*` (12), `cast_ultimate` et `cast_ultimate_<magie>` (6), `concentrate` | | | gestuelle propre à chaque magie |
 
 Chaque coup comporte une anticipation, une image clé de frappe en interpolation linéaire (vive), un
 impact placé dans la fenêtre de frappe du serveur, puis une récupération. Les articulations non
