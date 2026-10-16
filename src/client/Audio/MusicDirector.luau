@@ -15,7 +15,8 @@
 	de page dans le créateur ou retraverser une frontière ne la fait pas repartir du début. Une piste
 	quittée puis retrouvée dans les RESUME_MEMORY secondes reprend où elle en était (l'exploration
 	ne repart pas du début après chaque combat). Au plus deux pistes en fondu de sortie : jamais de
-	superposition incontrôlée. Une piste sans ID ("" dans AudioConfig) vaut silence.
+	superposition incontrôlée. Une piste sans ID ("" dans AudioConfig) vaut silence, sauf dans Studio
+	où CandidateResolver essaie les candidats trouvés par recherche (AudioCandidates).
 
 	API :
 		MusicDirector.set(layer, trackKey?)     nil = la couche ne demande plus rien
@@ -28,6 +29,7 @@ local TweenService = game:GetService("TweenService")
 
 local AudioConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Audio"):WaitForChild("AudioConfig") :: ModuleScript)
 local AudioMixer = require(script.Parent:WaitForChild("AudioMixer") :: ModuleScript)
+local CandidateResolver = require(script.Parent:WaitForChild("CandidateResolver") :: ModuleScript)
 
 export type Layer = "override" | "anomaly" | "boss" | "combat" | "victory" | "alert" | "region"
 
@@ -49,12 +51,43 @@ local current: Voice? = nil
 local fading: { Voice } = {}
 local positions: { [string]: { time: number, clock: number } } = {} -- reprise des pistes quittées
 
+-- Piste réglée dans AudioConfig ; sinon, dans Studio, le candidat retenu par CandidateResolver
+-- (essai, voir AudioCandidates). nil = silence (ou candidat encore en cours de chargement).
 local function trackOf(key: string?): Track?
 	if key == nil then
 		return nil
 	end
 	local track = AudioConfig.TRACKS[key]
-	return if track and track.id ~= "" then track else nil
+	if track == nil then
+		return nil
+	end
+	if track.id ~= "" then
+		return track
+	end
+	local candidateId = CandidateResolver.musicId(key)
+	if candidateId == nil then
+		return nil
+	end
+	return { id = candidateId, volume = track.volume, fadeIn = track.fadeIn, fadeOut = track.fadeOut, looped = track.looped }
+end
+
+-- Une piste d'essai a-t-elle vraiment joué ? Vérifié quelques secondes après son lancement :
+-- c'est cette ligne de la sortie, et non le simple chargement, qui vaut « testé en lecture ».
+local function confirmPlayback(key: string, sound: Sound)
+	local candidate = CandidateResolver.describe("music", key)
+	if candidate == nil then
+		return
+	end
+	task.delay(AudioConfig.CANDIDATE_TRIAL.playCheckDelay, function()
+		if sound.Parent == nil then
+			return -- remplacée entre-temps : rien à conclure
+		end
+		if sound.IsPlaying and sound.TimePosition > 0.5 then
+			print(string.format("[Musique] LECTURE CONFIRMÉE : %s ← « %s » (%s), position %.1f s, volume %.2f.", key, candidate.name, candidate.id, sound.TimePosition, sound.Volume))
+		else
+			warn(string.format("[Musique] %s : « %s » (%s) chargée mais pas en lecture (position %.1f s).", key, candidate.name, candidate.id, sound.TimePosition))
+		end
+	end)
 end
 
 local function desiredKey(): string?
@@ -157,6 +190,7 @@ local function refresh()
 		end
 		sound:Play()
 		fadeTo(voice, track.volume, track.fadeIn)
+		confirmPlayback(key, sound)
 	end
 	if delay > 0 then
 		task.delay(delay, start)
@@ -172,6 +206,13 @@ function MusicDirector.set(layer: Layer, trackKey: string?)
 	layers[layer] = trackKey
 	refresh()
 end
+
+-- Un candidat vient d'être trouvé pour la piste demandée : on la lance.
+CandidateResolver.resolved:Connect(function(kind: string, key: string)
+	if kind == "music" and key == desiredKey() then
+		refresh()
+	end
+end)
 
 function MusicDirector.getCurrentKey(): string?
 	local voice = current

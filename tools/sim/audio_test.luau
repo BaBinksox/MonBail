@@ -7,6 +7,50 @@ local mock, runtime, env = H.mock, H.runtime, H.env
 
 H.boot()
 local AudioConfig = H.shared("Audio/AudioConfig")
+local AudioCandidates = H.shared("Audio/AudioCandidates")
+
+print("== Candidats trouvés par recherche (données)")
+do
+	local candidateIds = {}
+	local problems = {}
+	local function scan(group, list)
+		for index, candidate in ipairs(list) do
+			local where = group .. " #" .. index
+			if not string.match(candidate.id, "^%d+$") then table.insert(problems, where .. " : ID non numérique") end
+			if candidate.name == "" or candidate.source == "" or candidate.provider == "" then table.insert(problems, where .. " : nom, fournisseur ou source manquant") end
+			if not ({ roblox = true, store = true, range = true, user = true })[candidate.license] then table.insert(problems, where .. " : licence inconnue") end
+			candidateIds[candidate.id] = true
+		end
+	end
+	local musicContexts = 0
+	for key, list in pairs(AudioCandidates.MUSIC) do
+		musicContexts += 1
+		if AudioConfig.TRACKS[key] == nil then table.insert(problems, key .. " : pas de piste de ce nom dans AudioConfig") end
+		scan(key, list)
+	end
+	for name, list in pairs(AudioCandidates.SFX) do
+		if AudioConfig.SFX[name] == nil then table.insert(problems, name .. " : pas d'effet de ce nom dans AudioConfig") end
+		if AudioConfig.SFX[name] and AudioConfig.SFX[name].id ~= "" then table.insert(problems, name .. " : candidats pour un effet déjà rempli") end
+		scan("sfx:" .. name, list)
+	end
+	scan("choir", AudioCandidates.REWIND_CHOIR)
+	H.check("candidats bien formés (ID numérique, nom, source, licence)", #problems == 0, table.concat(problems, " ; "))
+	H.check("13 contextes musicaux couverts", musicContexts == 13, musicContexts)
+	-- Rien d'invérifié n'est écrit dans la configuration : les candidats restent à part.
+	local written = {}
+	for key, track in pairs(AudioConfig.TRACKS) do
+		if candidateIds[(track.id:match("(%d+)$") or "")] then table.insert(written, key) end
+	end
+	for name, spec in pairs(AudioConfig.SFX) do
+		if candidateIds[(spec.id:match("(%d+)$") or "")] then table.insert(written, name) end
+	end
+	if candidateIds[(AudioConfig.REWIND_CHOIR.id:match("(%d+)$") or "")] then table.insert(written, "choir") end
+	H.check("aucun candidat non vérifié recopié dans AudioConfig", #written == 0, table.concat(written, ","))
+	H.check("les anciennes pistes écartées ne reviennent pas", not candidateIds["1839911004"] and not candidateIds["9125602726"])
+end
+
+-- Essai des candidats coupé pour les tests de mixage ci-dessous (testé à la fin).
+AudioConfig.CANDIDATE_TRIAL.enabled = false
 for key, track in pairs(AudioConfig.TRACKS) do
 	track.id = "rbxassetid://test-" .. key
 end
@@ -189,6 +233,106 @@ fight(1.5)
 H.advance(6)
 count, names = audible()
 H.check("piste de combat vide : silence, sans erreur", count == 0, names)
+
+print("== Essai des candidats (Studio)")
+local CandidateResolver = env.require("StarterPlayer/StarterPlayerScripts/Client/Audio/CandidateResolver")
+local SfxPlayer = env.require("StarterPlayer/StarterPlayerScripts/Client/Audio/SfxPlayer")
+local function printed(pattern)
+	for _, line in ipairs(runtime.prints) do
+		if string.find(line, pattern) then return line end
+	end
+	return nil
+end
+local function preloaded(id)
+	return mock.preloadedIds and mock.preloadedIds[id] == true
+end
+AudioConfig.CANDIDATE_TRIAL.enabled = true
+CandidateResolver.reset()
+-- Le premier candidat du combat ne se charge pas (privé) : le suivant prend le relais.
+mock.failingAssets["1836089842"] = true
+CandidateResolver.musicId("combat") -- en jeu : CandidateResolver.prewarm() au démarrage
+fight(1.5)
+H.advance(2)
+local combatSound = SoundService:FindFirstChild("Music_combat")
+H.check("ID qui ne se charge pas : candidat suivant essayé", combatSound ~= nil and combatSound.SoundId == "rbxassetid://1837779548", combatSound and combatSound.SoundId)
+H.check("l'essai est annoncé comme tel dans la sortie", printed("%[Musique%] combat : ESSAI") ~= nil)
+if combatSound then
+	combatSound.TimePosition = 3 -- la simulation n'avance pas la lecture d'elle-même
+end
+H.advance(AudioConfig.CANDIDATE_TRIAL.playCheckDelay + 0.5)
+H.check("lecture réelle confirmée dans la sortie", printed("LECTURE CONFIRMÉE : combat") ~= nil)
+count, names = audible()
+H.check("toujours une seule musique audible avec un candidat", count == 1, names)
+H.advance(ResourceConfig.COMBAT_TIMEOUT + CM.COMBAT_EXIT_TIME + CM.VICTORY_DURATION + 2)
+
+-- Durée annoncée par la source ≠ durée réelle : l'ID désigne sans doute une autre piste, écarté.
+mock.assetLengths["1843286166"] = 123 -- « Tears Of Sorrow » : 2:03 annoncé
+local creatorId = nil
+CandidateResolver.musicId("creator")
+H.advance(1)
+creatorId = CandidateResolver.musicId("creator")
+H.check("durée différente de la source : candidat écarté, suivant retenu", creatorId == "rbxassetid://1843286166", creatorId)
+
+-- Téléversements de particuliers (droits inconnus) : jamais essayés par défaut.
+mock.failingAssets["1837779548"] = true
+CandidateResolver.musicId("boss")
+H.advance(1)
+H.check("boss : aucun candidat utilisable = silence", CandidateResolver.musicId("boss") == nil)
+H.check("les téléversements « user » ne sont pas même chargés", not preloaded("87773547872492") and not preloaded("78744747224727"))
+H.check("silence signalé dans la sortie", (function()
+	for _, line in ipairs(runtime.warnings) do
+		if string.find(line, "boss : aucun candidat utilisable") then return true end
+	end
+	return false
+end)())
+
+-- Effets et chœur.
+SfxPlayer.play("dodge") -- premier appel : lance la recherche du candidat
+H.advance(1)
+H.check("effet vide : candidat d'essai joué", SfxPlayer.play("dodge") == true)
+local dodgeSound = SoundService:FindFirstChild("Sfx_dodge")
+H.check("le son d'esquive utilise le candidat du Creator Store", dodgeSound ~= nil and dodgeSound.SoundId == "rbxassetid://135315310485417", dodgeSound and dodgeSound.SoundId)
+AudioConfig.REWIND_CHOIR.id = ""
+H.advance(1)
+TimeLoopRemotes.RewindStarted:FireClient(player, 4)
+H.advance(1)
+TimeLoopRemotes.RewindStarted:FireClient(player, 4)
+H.advance(0.5)
+H.check("chœur vide : candidat d'essai", choir.SoundId == "rbxassetid://1840524246", choir.SoundId)
+
+-- Hors Studio (studioOnly) : aucun essai, le jeu publié reste fidèle à AudioConfig.
+local RunService = mock.game:GetService("RunService")
+local isStudio = RunService.IsStudio
+RunService.IsStudio = function() return false end
+CandidateResolver.reset()
+H.check("jeu publié : aucun candidat essayé", CandidateResolver.musicId("lake") == nil)
+H.advance(1)
+H.check("jeu publié : toujours rien après attente", CandidateResolver.musicId("lake") == nil)
+RunService.IsStudio = isStudio
+
+print("== Outil de vérification Studio (AudioAudit)")
+local AudioAudit = H.shared("Audio/AudioAudit")
+mock.assetInfo["1838577168"] = { Name = "Sad Story (Piano & Harp)", Creator = { Name = "Roblox" }, AssetTypeId = 3 }
+local finished = nil
+AudioAudit.run(function(entries) finished = entries end)
+H.advance(30)
+local total = #AudioCandidates.REWIND_CHOIR
+for _, list in pairs(AudioCandidates.MUSIC) do total += #list end
+for _, list in pairs(AudioCandidates.SFX) do total += #list end
+H.check("AudioAudit.run teste chaque candidat", finished ~= nil and #finished == total, finished and #finished)
+local failedEntry, infoLine = nil, nil
+for _, entry in ipairs(finished or {}) do
+	if entry.candidate.id == "1836089842" then failedEntry = entry end
+end
+H.check("un ID qui ne se charge pas est signalé en échec", failedEntry ~= nil and failedEntry.probe and failedEntry.probe.loaded == false)
+H.check("le rapport montre le nom et le créateur enregistrés chez Roblox", printed("« Sad Story %(Piano & Harp%) » par Roblox") ~= nil)
+H.check("le rapport signale une durée qui ne correspond pas à la source", printed("autre piste %?") ~= nil)
+AudioAudit.snippet()
+H.check("snippet : ligne prête à recopier pour un candidat chargé", printed('TRACKS.creator = "rbxassetid://1843286166"') ~= nil)
+H.check("snippet : téléversements de particuliers omis par défaut", printed("téléversement%(s%) de particuliers chargé") ~= nil)
+H.check("snippet : rien pour un contexte sans candidat chargé", printed("TRACKS.boss = ") == nil)
+AudioAudit.listen("creator", 2)
+AudioAudit.stop()
 H.noNewErrors("audio sans erreur")
 H.printWarnings()
 H.finish()

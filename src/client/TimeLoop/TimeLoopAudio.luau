@@ -20,6 +20,7 @@ local TweenService = game:GetService("TweenService")
 
 local AudioConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Audio"):WaitForChild("AudioConfig") :: ModuleScript)
 local AudioMixer = require(script.Parent.Parent:WaitForChild("Audio"):WaitForChild("AudioMixer") :: ModuleScript)
+local CandidateResolver = require(script.Parent.Parent:WaitForChild("Audio"):WaitForChild("CandidateResolver") :: ModuleScript)
 
 local CHOIR = AudioConfig.REWIND_CHOIR
 
@@ -60,8 +61,13 @@ end
 
 -- Lance le chœur pour un rembobinage de `duration` secondes.
 function TimeLoopAudio.playRewind(duration: number)
-	if CHOIR.id == "" then
+	-- Vide dans AudioConfig : dans Studio, chœur d'essai (AudioCandidates) s'il se charge.
+	local id = if CHOIR.id ~= "" then CHOIR.id else CandidateResolver.choirId()
+	if id == nil or id == "" then
 		return
+	end
+	if sound.SoundId ~= id then
+		sound.SoundId = id
 	end
 	local now = os.clock()
 	if sound.IsPlaying and now - lastPlayClock < CHOIR.minInterval then

@@ -17,6 +17,8 @@
 		   cette expérience. Si elle ne joue pas, la console affiche un échec de chargement.
 		3. Copier l'ID dans `id` au format "rbxassetid://123456". "" = silence (aucune erreur).
 	Aucun ID n'est inventé ici : les champs vides attendent une piste choisie et ÉCOUTÉE en jeu.
+	En attendant, dans Studio, les pistes trouvées par recherche (AudioCandidates) sont ESSAYÉES
+	automatiquement (CANDIDATE_TRIAL ci-dessous) ; AudioAudit les vérifie (docs/MUSIQUE.md).
 ]]
 
 export type Track = {
@@ -201,6 +203,25 @@ return table.freeze({
 	-- Une piste interrompue (exploration coupée par un combat) reprend où elle en était si on y
 	-- revient dans ce délai (s), au lieu de repartir du début.
 	RESUME_MEMORY = 180,
+	--[[
+		ESSAI DES CANDIDATS (AudioCandidates, docs/MUSIQUE.md) : tant qu'une piste ou un son est
+		vide ici, le client essaie les candidats trouvés par recherche, dans l'ordre, et garde le
+		premier qui se CHARGE vraiment (et dont la durée correspond à celle annoncée). La sortie
+		l'annonce (« [Musique] … ESSAI ») puis confirme la lecture réelle (« LECTURE CONFIRMÉE »).
+		Ce n'est pas une validation : une piste acceptée à l'écoute se recopie dans `id` ci-dessus.
+			studioOnly : true = l'essai n'a lieu que dans Studio ; le jeu publié reste silencieux
+			             pour ces emplacements tant qu'aucun ID n'est recopié.
+			licenses   : catégories essayées (voir AudioCandidates). "user" (téléversements de
+			             particuliers, droits inconnus) reste désactivé par défaut.
+	]]
+	CANDIDATE_TRIAL = {
+		enabled = true,
+		studioOnly = true,
+		licenses = { roblox = true, store = true, range = true, user = false },
+		loadTimeout = 8, -- s d'attente du chargement de chaque candidat
+		durationTolerance = 0.2, -- écart relatif admis avec la durée annoncée (au moins 5 s)
+		playCheckDelay = 4, -- s après le lancement : la piste joue-t-elle vraiment ?
+	},
 	-- Musique dynamique de combat (CombatMusicController) : priorités
 	-- créateur > anomalie > boss > combat > victoire > présence hostile > région.
 	COMBAT_MUSIC = table.freeze({

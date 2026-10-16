@@ -122,7 +122,13 @@ return function(mock)
 			print("[warn] " .. line)
 		end
 	end
+	R.prints = {}
 	mock.print = function(...)
+		local parts = {}
+		for _, v in ipairs({ ... }) do
+			table.insert(parts, tostring(v))
+		end
+		table.insert(R.prints, table.concat(parts, " "))
 		if R.echoPrints then
 			print(...)
 		end

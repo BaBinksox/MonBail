@@ -15,6 +15,11 @@ local sharedFolder = ReplicatedStorage:WaitForChild("Shared")
 local AudioConfig = require(sharedFolder:WaitForChild("Audio"):WaitForChild("AudioConfig") :: ModuleScript)
 local WorldConfig = require(sharedFolder:WaitForChild("World"):WaitForChild("WorldConfig") :: ModuleScript)
 local MusicDirector = require(script.Parent:WaitForChild("MusicDirector") :: ModuleScript)
+local CandidateResolver = require(script.Parent:WaitForChild("CandidateResolver") :: ModuleScript)
+
+-- Studio : prépare les pistes d'essai des emplacements vides (la musique du créateur, demandée
+-- tout de suite, passe en premier ; les autres se chargent ensuite en fond).
+task.delay(2, CandidateResolver.prewarm)
 
 local REGION_ATTRIBUTE = "Region"
 local NIGHT_CHECK_INTERVAL = 5 -- secondes : la bascule jour / nuit n'a pas besoin d'être plus fine

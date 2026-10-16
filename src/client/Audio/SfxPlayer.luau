@@ -15,6 +15,7 @@ local SoundService = game:GetService("SoundService")
 
 local AudioConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Audio"):WaitForChild("AudioConfig") :: ModuleScript)
 local AudioMixer = require(script.Parent:WaitForChild("AudioMixer") :: ModuleScript)
+local CandidateResolver = require(script.Parent:WaitForChild("CandidateResolver") :: ModuleScript)
 
 export type Options = { pitch: number?, volume: number? }
 
@@ -47,10 +48,10 @@ local function getAnchorPart(): Part
 	return part
 end
 
-local function newSound(name: string, spec: any): Sound
+local function newSound(name: string, spec: any, id: string): Sound
 	local sound = Instance.new("Sound")
 	sound.Name = "Sfx_" .. name
-	sound.SoundId = spec.id
+	sound.SoundId = id
 	sound.Volume = spec.volume
 	sound.RollOffMaxDistance = MAX_DISTANCE
 	sound.RollOffMinDistance = 8
@@ -60,7 +61,12 @@ end
 
 function SfxPlayer.play(name: string, at: (Vector3 | BasePart)?, options: Options?): boolean
 	local spec = AudioConfig.SFX[name]
-	if spec == nil or spec.id == "" then
+	if spec == nil then
+		return false
+	end
+	-- Vide dans AudioConfig : dans Studio, candidat d'essai s'il y en a un qui se charge.
+	local id = if spec.id ~= "" then spec.id else CandidateResolver.sfxId(name)
+	if id == nil or id == "" then
 		return false
 	end
 	local now = os.clock()
@@ -85,7 +91,7 @@ function SfxPlayer.play(name: string, at: (Vector3 | BasePart)?, options: Option
 		if #pool.sounds >= spec.maxConcurrent then
 			return false
 		end
-		sound = newSound(name, spec)
+		sound = newSound(name, spec, id)
 		table.insert(pool.sounds, sound :: Sound)
 	end
 	local chosen = sound :: Sound

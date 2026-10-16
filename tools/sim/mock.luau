@@ -902,8 +902,43 @@ local HttpService = {
 	GenerateGUID = function() nextId += 1 return "guid-" .. nextId end,
 	JSONEncode = function() return "{}" end,
 }
+-- Chargement des assets audio (simulation) : M.failingAssets[id] = true fait échouer un ID ;
+-- M.assetLengths[id] fixe la durée réelle du son chargé ; M.assetInfo[id] = { Name, Creator }.
+M.failingAssets = {}
+M.assetLengths = {}
+M.assetInfo = {}
+M.preloadCount = 0
+M.preloadedIds = {}
+local function numericId(contentId)
+	return tostring(contentId):match("(%d+)$") or tostring(contentId)
+end
+local ContentProvider = {
+	PreloadAsync = function(_, list, callback)
+		for _, inst in ipairs(list) do
+			M.preloadCount += 1
+			local contentId = inst.SoundId
+			local id = numericId(contentId)
+			M.preloadedIds[id] = true
+			local failed = M.failingAssets[id] == true
+			inst.IsLoaded = not failed
+			inst.TimeLength = if failed then 0 else (M.assetLengths[id] or 10)
+			if callback then
+				callback(contentId, if failed then Enum.AssetFetchStatus.Failure else Enum.AssetFetchStatus.Success)
+			end
+		end
+	end,
+}
+local MarketplaceService = {
+	GetProductInfo = function(_, id)
+		local info = M.assetInfo[tostring(id)]
+		if info == nil then error("asset inconnu (simulation)") end
+		return info
+	end,
+}
 function game.GetService(_, name)
 	if services[name] then return services[name] end
+	if name == "ContentProvider" then return ContentProvider end
+	if name == "MarketplaceService" then return MarketplaceService end
 	if name == "CollectionService" then return CollectionService end
 	if name == "RunService" then return RunService end
 	if name == "ChangeHistoryService" then return ChangeHistoryService end

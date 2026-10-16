@@ -113,6 +113,7 @@ ainsi que les modules `*Remotes`.
 | `Magic/SpellController`, `Magic/SpellEffects` | sorts (1 / 2), visée souris ou automatique, effets |
 | `Movement/*`, `Animation/*` | sprint, double saut, dash ; poses procédurales (CharacterAnimator, PoseLibrary, AnimationDirector) |
 | `Audio/CombatMusicController` | musique dynamique : présence hostile, combat, boss, anomalie, victoire |
+| `Audio/CandidateResolver` | Studio : essaie les pistes candidates (`Shared/Audio/AudioCandidates`) des emplacements vides d'AudioConfig ; vérification avec `Shared/Audio/AudioAudit` (docs/MUSIQUE.md) |
 | `UI/CombatHud`, `Input/TouchLayout` | PV, Mana, Tension, sorts, Concentration, altérations ; boutons tactiles adaptés à l'écran |
 | `Enemy/EnemyEffectsController` | barres de vie, télégraphes au sol recalés sur l'heure serveur, actions visibles des ennemis |
 | `World/EchoRenderer` | rendu local des échos (silhouette, sous-titres, rune touchée) |
