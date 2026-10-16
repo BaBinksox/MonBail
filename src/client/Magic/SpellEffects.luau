@@ -23,6 +23,7 @@ local StatusConfig = require(sharedFolder:WaitForChild("Combat"):WaitForChild("S
 local clientFolder = script.Parent.Parent
 local ClientSettings = require(clientFolder:WaitForChild("State"):WaitForChild("ClientSettings") :: ModuleScript)
 local CombatEffects = require(clientFolder:WaitForChild("Combat"):WaitForChild("CombatEffects") :: ModuleScript)
+local MagicFx = require(script.Parent:WaitForChild("MagicFx") :: ModuleScript)
 
 local SPARK_TEXTURE = "rbxasset://textures/particles/sparkles_main.dds"
 local SMOKE_TEXTURE = "rbxasset://textures/particles/smoke_main.dds"
@@ -145,6 +146,171 @@ local function removeProjectile(castId: number): Vector3?
 end
 
 --------------------------------------------------------------------------------
+-- Effets propres à certains sorts (le reste utilise les effets communs ci-dessous)
+--------------------------------------------------------------------------------
+
+type ProjectileLook = (palette: any, spell: any) -> BasePart
+type Telegraph = (spell: any, aimPoint: Vector3, palette: any) -> ()
+type ImpactPlayer = (spell: any, position: Vector3, targets: { Model }, caster: Model?, palette: any) -> ()
+
+local PROJECTILE_LOOKS: { [string]: ProjectileLook } = {}
+local TELEGRAPHS: { [string]: Telegraph } = {}
+local IMPACTS: { [string]: ImpactPlayer } = {}
+
+local function glow(target: BasePart, color: Color3, range: number, brightness: number)
+	local light = Instance.new("PointLight")
+	light.Color = color
+	light.Range = range
+	light.Brightness = brightness
+	light.Parent = target
+end
+
+-- GLACE ------------------------------------------------------------------------
+
+-- Éclat de Givre : un vrai cristal effilé, orienté dans sa course.
+PROJECTILE_LOOKS.frost_shard = function(palette: any): BasePart
+	local shard = newPart("FrostShard", Enum.PartType.Block, Vector3.new(0.35, 0.35, 2.1), palette.glow, MAX_PROJECTILE_LIFETIME)
+	shard.Material = Enum.Material.Glass
+	shard.Transparency = 0.1
+	glow(shard, palette.main, 8, 1.5)
+	return shard
+end
+-- À l'impact : le cristal éclate en éclats et laisse une plaque de givre.
+IMPACTS.frost_shard = function(_spell: any, position: Vector3, targets: { Model }, _caster: Model?, palette: any)
+	for _ = 1, MagicFx.scaled(6) do
+		local splinter = MagicFx.part("Splinter", Enum.PartType.Block, Vector3.new(0.18, 0.18, 0.6), palette.glow, Enum.Material.Glass, 0.6)
+		splinter.CFrame = CFrame.new(position) * CFrame.Angles(MagicFx.random:NextNumber(0, 6.28), MagicFx.random:NextNumber(0, 6.28), 0)
+		splinter.Parent = MagicFx.getFolder()
+		local flung = position + MagicFx.random:NextUnitVector() * MagicFx.random:NextNumber(1.5, 3)
+		MagicFx.tween(splinter, 0.45, { Position = flung, Transparency = 1 })
+	end
+	burst(position, palette.glow, 10, 6, SMOKE_TEXTURE)
+	local plate = MagicFx.disc("FrostPlate", MagicFx.groundBelow(position, targets :: { any }), 1, palette.glow, Enum.Material.Ice, 2.5)
+	plate.Transparency = 0.4
+	MagicFx.tween(plate, 0.2, { Size = Vector3.new(0.12, 4, 4) })
+	task.delay(1, function()
+		MagicFx.tween(plate, 1.2, { Transparency = 1 })
+	end)
+end
+-- Prison Cristalline : un cercle de givre se dessine et se resserre, des pointes affleurent.
+TELEGRAPHS.crystal_prison = function(spell: any, aimPoint: Vector3, palette: any)
+	local duration = math.max(spell.castTime, 0.2)
+	local circle = MagicFx.disc("PrisonCircle", aimPoint, spell.radius * 2.4, palette.main, Enum.Material.Ice, duration + 0.1)
+	circle.Transparency = 0.85
+	MagicFx.tween(circle, duration, { Size = Vector3.new(0.12, spell.radius * 2, spell.radius * 2), Transparency = 0.35 })
+	for index = 1, MagicFx.scaled(6) do
+		local angle = index / 6 * math.pi * 2
+		local base = aimPoint + Vector3.new(math.cos(angle), 0, math.sin(angle)) * spell.radius * 0.9
+		task.delay(duration * index / 8, function()
+			MagicFx.crystal(base, Vector3.yAxis, 0.8, 0.4, palette.glow, duration)
+		end)
+	end
+end
+-- À l'impact : la glace jaillit et emprisonne chaque cible gelée ; le sol reste givré.
+IMPACTS.crystal_prison = function(spell: any, position: Vector3, targets: { Model }, _caster: Model?, palette: any)
+	local floor = MagicFx.disc("PrisonFloor", position, spell.radius * 2, palette.glow, Enum.Material.Ice, 4)
+	floor.Transparency = 0.3
+	task.delay(2.2, function()
+		MagicFx.tween(floor, 1.5, { Transparency = 1 })
+	end)
+	for _, target in targets do
+		local targetRoot = MagicFx.rootOf(target)
+		if targetRoot then
+			local ground = MagicFx.groundBelow(targetRoot.Position, { target })
+			for index = 1, MagicFx.scaled(5) do
+				local angle = index / 5 * math.pi * 2
+				local base = ground + Vector3.new(math.cos(angle), 0, math.sin(angle)) * 1.5
+				MagicFx.crystal(base, Vector3.yAxis - Vector3.new(math.cos(angle), 0, math.sin(angle)) * 0.35, MagicFx.random:NextNumber(3, 4.2), 0.75, palette.glow, 1.8)
+			end
+		end
+	end
+	burst(position, palette.glow, 24, 12)
+	CombatEffects.shake(0.2, 0.25)
+end
+
+-- ANTIMATIÈRE --------------------------------------------------------------------
+
+-- Fragment du Vide : un cœur noir cerclé de violet, qui éclaire autour de lui.
+PROJECTILE_LOOKS.void_fragment = function(palette: any): BasePart
+	local orb = newPart("VoidFragment", Enum.PartType.Ball, Vector3.one * 1.3, palette.void, MAX_PROJECTILE_LIFETIME)
+	orb.Material = Enum.Material.SmoothPlastic
+	local rim = Instance.new("Highlight")
+	rim.FillTransparency = 1
+	rim.OutlineColor = palette.main
+	rim.OutlineTransparency = 0
+	rim.DepthMode = Enum.HighlightDepthMode.Occluded
+	rim.Parent = orb
+	glow(orb, palette.main, 10, 2)
+	return orb
+end
+-- À l'impact : l'espace se replie (sphère qui se contracte), puis éclate.
+IMPACTS.void_fragment = function(spell: any, position: Vector3, targets: { Model }, _caster: Model?, palette: any)
+	local fold = MagicFx.part("VoidFold", Enum.PartType.Ball, Vector3.one * spell.radius * 2, palette.main, Enum.Material.ForceField, 0.6)
+	fold.Transparency = 0.5
+	fold.CFrame = CFrame.new(position)
+	fold.Parent = MagicFx.getFolder()
+	MagicFx.tween(fold, 0.12, { Size = Vector3.one * 0.4, Transparency = 0.1 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+	task.delay(0.12, function()
+		ring(position - Vector3.new(0, 1.5, 0), spell.radius, palette.main, 0.35, 0.3)
+		burst(position, palette.main, 26, spell.radius * 4)
+		for _, target in targets do
+			CombatEffects.playHitImpact(target, nil, palette.main, 8)
+		end
+	end)
+end
+-- Singularité Mineure : un point de vide naît au point visé...
+TELEGRAPHS.minor_singularity = function(spell: any, aimPoint: Vector3, palette: any)
+	local duration = math.max(spell.castTime, 0.2)
+	local seed = MagicFx.part("SingularitySeed", Enum.PartType.Ball, Vector3.one * 0.2, palette.void, Enum.Material.SmoothPlastic, duration + 0.1)
+	seed.CFrame = CFrame.new(aimPoint + Vector3.new(0, 2, 0))
+	seed.Parent = MagicFx.getFolder()
+	MagicFx.tween(seed, duration, { Size = Vector3.one * 1.6 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+	local circle = MagicFx.disc("SingularityCircle", aimPoint, spell.radius * 2, palette.main, Enum.Material.Neon, duration + 0.1)
+	circle.Transparency = 0.85
+	MagicFx.tween(circle, duration, { Size = Vector3.new(0.12, spell.radius * 1.2, spell.radius * 1.2), Transparency = 0.5 })
+end
+-- ... puis aspire en tourbillon pendant l'aspiration, et se referme d'un coup.
+IMPACTS.minor_singularity = function(spell: any, position: Vector3, targets: { Model }, _caster: Model?, palette: any)
+	local center = position + Vector3.new(0, 2, 0)
+	local pull = 0.8
+	local core = MagicFx.part("Singularity", Enum.PartType.Ball, Vector3.one * 1.6, palette.void, Enum.Material.SmoothPlastic, pull + 0.3)
+	core.CFrame = CFrame.new(center)
+	core.Parent = MagicFx.getFolder()
+	local shell = MagicFx.part("SingularityShell", Enum.PartType.Ball, Vector3.one * 6, palette.main, Enum.Material.ForceField, pull + 0.3)
+	shell.Transparency = 0.4
+	shell.CFrame = CFrame.new(center)
+	shell.Parent = MagicFx.getFolder()
+	local vortex = MagicFx.disc("Vortex", position, spell.radius * 2, palette.main, Enum.Material.Neon, pull + 0.3)
+	vortex.Transparency = 0.55
+	MagicFx.tween(vortex, pull, { Size = Vector3.new(0.12, 2, 2), Transparency = 0.2 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+	local stream = MagicFx.inwardStream(center, spell.radius * 0.8, ColorSequence.new(palette.glow, palette.main), SPARK_TEXTURE, 50, pull)
+	local startClock = os.clock()
+	local spin = RunService.Heartbeat:Connect(function()
+		local t = os.clock() - startClock
+		if shell.Parent then
+			shell.CFrame = CFrame.new(center) * CFrame.Angles(0, t * 9, math.sin(t * 30) * 0.08)
+		end
+	end)
+	for _, target in targets do
+		CombatEffects.playHitImpact(target, nil, palette.main, 6)
+	end
+	task.delay(pull, function()
+		spin:Disconnect()
+		stream.Enabled = false
+		MagicFx.tween(core, 0.08, { Size = Vector3.one * 0.1 })
+		MagicFx.tween(shell, 0.08, { Size = Vector3.one * 0.3 })
+		task.delay(0.08, function()
+			local wave = MagicFx.part("SingularityWave", Enum.PartType.Ball, Vector3.one, palette.glow, Enum.Material.ForceField, 0.6)
+			wave.CFrame = CFrame.new(center)
+			wave.Parent = MagicFx.getFolder()
+			MagicFx.tween(wave, 0.4, { Size = Vector3.one * spell.radius * 1.6, Transparency = 1 }, Enum.EasingStyle.Quart)
+			burst(center, palette.main, 30, 20)
+			CombatEffects.shake(0.25, 0.35)
+		end)
+	end)
+end
+
+--------------------------------------------------------------------------------
 -- API
 --------------------------------------------------------------------------------
 
@@ -152,6 +318,11 @@ end
 function SpellEffects.castStarted(caster: Model?, spell: any, castId: number, origin: Vector3, aimPoint: Vector3)
 	local magic = MagicConfig.getById(spell.magic)
 	local palette = magic.palette
+	local telegraph = TELEGRAPHS[spell.id]
+	if telegraph and (spell.kind == "zone" or spell.kind == "field") then
+		telegraph(spell, aimPoint, palette)
+		return
+	end
 	if spell.kind == "zone" or spell.kind == "field" then
 		-- Le point d'effet est annoncé pendant l'incantation : un cercle qui se resserre.
 		local duration = math.max(spell.castTime, 0.15)
@@ -187,8 +358,9 @@ function SpellEffects.castStarted(caster: Model?, spell: any, castId: number, or
 		local start = if root and root:IsA("BasePart") then root.Position + Vector3.new(0, PROJECTILE_HEIGHT, 0) else origin
 		local offset = aimPoint - start
 		local direction = if offset.Magnitude > 1e-3 then offset.Unit else Vector3.zAxis
-		local orb = newPart("SpellProjectile", Enum.PartType.Ball, Vector3.one * math.clamp(spell.radius * 0.6, 0.8, 1.8), palette.main, MAX_PROJECTILE_LIFETIME)
-		orb.CFrame = CFrame.new(start)
+		local look = PROJECTILE_LOOKS[spell.id]
+		local orb: BasePart = if look then look(palette, spell) else newPart("SpellProjectile", Enum.PartType.Ball, Vector3.one * math.clamp(spell.radius * 0.6, 0.8, 1.8), palette.main, MAX_PROJECTILE_LIFETIME)
+		orb.CFrame = CFrame.lookAt(start, start + direction)
 		orb.Parent = getFolder()
 		local light = Instance.new("PointLight")
 		light.Color = palette.main
@@ -217,7 +389,8 @@ function SpellEffects.castStarted(caster: Model?, spell: any, castId: number, or
 				removeProjectile(castId)
 				return
 			end
-			orb.CFrame = CFrame.new(orb.Position + direction * step)
+			local nextPosition = orb.Position + direction * step
+			orb.CFrame = CFrame.lookAt(nextPosition, nextPosition + direction)
 		end)
 		projectiles[castId] = { part = orb, connection = connection }
 	end)
@@ -228,6 +401,17 @@ function SpellEffects.impact(castId: number, spell: any, position: Vector3, targ
 	local magic = MagicConfig.getById(spell.magic)
 	local palette = magic.palette
 	local projectilePosition = removeProjectile(castId)
+	local custom = IMPACTS[spell.id]
+	if custom then
+		if spell.kind == "projectile" and projectilePosition == nil then
+			pendingImpacts[castId] = true
+			task.delay(MAX_PROJECTILE_LIFETIME, function()
+				pendingImpacts[castId] = nil
+			end)
+		end
+		custom(spell, position, targets, caster, palette)
+		return
+	end
 	if spell.kind == "projectile" and projectilePosition == nil then
 		pendingImpacts[castId] = true -- l'impact est arrivé avant le départ visuel : pas de projectile fantôme
 		task.delay(MAX_PROJECTILE_LIFETIME, function()

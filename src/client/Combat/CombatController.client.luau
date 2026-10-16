@@ -45,6 +45,19 @@ local SfxPlayer = require(clientFolder:WaitForChild("Audio"):WaitForChild("SfxPl
 local MovementState = require(clientFolder:WaitForChild("Movement"):WaitForChild("MovementState") :: ModuleScript)
 local UIBus = require(clientFolder:WaitForChild("UI"):WaitForChild("UIBus") :: ModuleScript)
 local CombatEffects = require(script.Parent:WaitForChild("CombatEffects") :: ModuleScript)
+local UltimateChoreographies = require(clientFolder:WaitForChild("Magic"):WaitForChild("UltimateChoreographies") :: ModuleScript)
+
+-- Chorégraphies d'ultime dédiées (les autres magies gardent l'éruption commune à leurs couleurs).
+CombatEffects.registerUltimate("ice", UltimateChoreographies.ice)
+CombatEffects.registerUltimate("antimatter", UltimateChoreographies.antimatter)
+
+local AnimationConfig = require(sharedFolder:WaitForChild("Animation"):WaitForChild("AnimationConfig") :: ModuleScript)
+
+-- Pose d'ultime propre à la magie (cast_ultimate_<id>) si elle existe, sinon la pose commune.
+local function ultimateAction(magicId: string): string
+	local dedicated = `cast_ultimate_{magicId}`
+	return if AnimationConfig.ACTIONS[dedicated] then dedicated else "cast_ultimate"
+end
 local SoftLock = require(script.Parent:WaitForChild("SoftLock") :: ModuleScript)
 
 local ATTACK_ACTION = "SwordAttack"
@@ -453,7 +466,8 @@ local function onUltimateInput()
 	cancelCharge()
 	local character = localPlayer.Character
 	if character then
-		animatorOf(character):play("cast_ultimate")
+		local magicId = MagicConfig.getById(localPlayer:GetAttribute(MagicConfig.ATTRIBUTE)).id
+		animatorOf(character):play(ultimateAction(magicId))
 	end
 	Remotes.RequestUltimate:FireServer()
 end
@@ -578,7 +592,11 @@ end)
 -- aux couleurs de la magie du lanceur.
 Remotes.UltimateFired.OnClientEvent:Connect(function(caster: Model?, origin: Vector3, targets: { Model }, magicId: string)
 	if typeof(origin) == "Vector3" and type(targets) == "table" then
+		local magic = MagicConfig.getById(magicId)
+		if caster and caster ~= localPlayer.Character then
+			CharacterAnimator.get(caster, false):play(ultimateAction(magic.id)) -- posture vue par les autres
+		end
 		SfxPlayer.play("ultimateActivate", origin)
-		CombatEffects.playUltimate(caster, origin, targets, MagicConfig.getById(magicId))
+		CombatEffects.playUltimate(caster, origin, targets, magic)
 	end
 end)

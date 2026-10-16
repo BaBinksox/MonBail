@@ -84,6 +84,8 @@ local ACTIONS: { [string]: Action } = {
 	cast_gravity_base = action("cast_gravity_press"),
 	cast_gravity_secondary = action("cast_gravity_field"),
 	cast_ultimate = action("cast_ultimate", 0.05, 0.25),
+	cast_ultimate_ice = action("cast_ultimate_ice", 0.06, 0.25),
+	cast_ultimate_antimatter = action("cast_ultimate_antimatter", 0.06, 0.25),
 }
 
 --[[
@@ -122,6 +124,8 @@ local PUBLISHED: { [string]: string } = {
 	cast_gravity_base = "",
 	cast_gravity_secondary = "",
 	cast_ultimate = "",
+	cast_ultimate_ice = "",
+	cast_ultimate_antimatter = "",
 }
 for actionName, animationId in PUBLISHED do
 	local entry = ACTIONS[actionName]

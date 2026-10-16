@@ -174,6 +174,10 @@ function CFrame.new(a, b, c, ...)
 	end
 	return cf(a.X, a.Y, a.Z)
 end
+function CFrame.fromMatrix(pos, right, up, back)
+	back = back or Vector3.Cross(right, up)
+	return cf(pos.X, pos.Y, pos.Z, { right.X, up.X, back.X, right.Y, up.Y, back.Y, right.Z, up.Z, back.Z })
+end
 function CFrame.lookAt(pos, target, up) return cf(pos.X, pos.Y, pos.Z, lookAtR(pos, target, up)) end
 function CFrame.Angles(x, y, z) return cf(0, 0, 0, mulR(mulR(rx(x), ry(y)), rz(z))) end
 CFrame.fromEulerAnglesXYZ = CFrame.Angles

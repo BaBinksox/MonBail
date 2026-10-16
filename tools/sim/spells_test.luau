@@ -88,7 +88,9 @@ local function health(model)
 end
 local function heal(model)
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
-	humanoid.Health = humanoid.MaxHealth
+	if humanoid and humanoid.Health > 0 then
+		humanoid.Health = humanoid.MaxHealth
+	end
 end
 local function denials(player, reason)
 	local n = 0
@@ -349,11 +351,31 @@ H.check("Jugement Céleste : paralysie (immobile, sans attaque)", StatusService.
 mock.task.spawn(UltimateBehaviors.run, { caster = pyro, casterHumanoid = humanoidOf(pyro), origin = center, targets = { third }, magic = MagicConfig.getById("pyromancy"), damageDealt = 0 })
 H.check("Brasier du Parjure : brûlure à 2 crans", StatusService.getLevel(third, "burn") == 2)
 clearAll()
+print("== Ultimes Glace et Antimatière : impact à la fin de la préparation")
+local CombatRemotes = H.shared("Combat/CombatRemotes")
+for _, magicId in ipairs({ "ice", "antimatter" }) do
+	local mage = mages[magicId]
+	local magic = MagicConfig.getById(magicId)
+	clearAll()
+	H.teleport(mage, root(target).Position + V3.new(0, 0, 6), root(target).Position)
+	ResourceService.setTension(mage, 100)
+	local hpBefore = health(target)
+	CombatRemotes.RequestUltimate.OnServerEvent:Fire(mage)
+	H.advance(magic.ultimateWindup * 0.6)
+	H.check(string.format("%s : rien avant la fin de la préparation (%.2f s)", magic.ultimateName, magic.ultimateWindup), health(target) == hpBefore)
+	H.advance(magic.ultimateWindup * 0.4 + 0.15)
+	H.check(magic.ultimateName .. " : dégâts appliqués à l'impact", health(target) < hpBefore, hpBefore - health(target))
+	if magicId == "ice" then
+		H.check("Hiver Éternel : gel (frostbite) posé au même instant", StatusService.has(target, "frostbite"))
+	end
+	H.advance(2)
+end
+clearAll()
 H.noNewErrors("sorts serveur sans erreur")
 
 print("== Client : lancer, Mana insuffisant, altérations visibles")
 local C = require("./client")(mock, runtime, pyro)
-for _, path in ipairs({ "Magic/SpellController", "Combat/StatusEffects", "UI/CombatHud" }) do
+for _, path in ipairs({ "Magic/SpellController", "Combat/StatusEffects", "UI/CombatHud", "Combat/CombatController" }) do
 	mock.task.spawn(function()
 		env.run("StarterPlayer/StarterPlayerScripts/Client/" .. path)
 	end)
@@ -420,6 +442,78 @@ H.check("brûlure visible sur l'ennemi (braises)", target:FindFirstChild("Status
 StatusService.clear(target)
 C.frames(5)
 H.check("effet retiré avec l'altération", target:FindFirstChild("StatusFx_burn", true) == nil)
+print("== Client : chorégraphies Glace et Antimatière")
+local function effects(name)
+	local found = 0
+	local holder = mock.workspace:FindFirstChild("UltimateEffects")
+	if holder then
+		for _, child in ipairs(holder:GetChildren()) do
+			if child.Name == name then
+				found += 1
+			end
+		end
+	end
+	return found
+end
+local iceMagic = MagicConfig.getById("ice")
+CombatRemotes.UltimateFired.OnClientEvent:Fire(mages.ice.Character, root(target).Position + V3.new(0, 0, 6), { target }, "ice")
+C.frames(20)
+H.check("Glace, préparation : le sol gèle et le froid se rassemble", effects("FrostFloor") == 1 and effects("InwardShell") >= 1)
+H.check("Glace, préparation : le givre gagne les pieds des cibles", effects("FrostMark") >= 1)
+H.check("Glace, préparation : aucun cristal avant l'impact", effects("Crystal") == 0)
+C.frames(math.ceil(iceMagic.ultimateWindup * 60))
+H.check("Glace, impact : couronne de cristaux et cible emprisonnée", effects("Crystal") >= 6, effects("Crystal"))
+C.frames(240)
+local amMagic = MagicConfig.getById("antimatter")
+CombatRemotes.UltimateFired.OnClientEvent:Fire(mages.antimatter.Character, root(target).Position + V3.new(0, 0, 6), { target }, "antimatter")
+C.frames(15)
+H.check("Antimatière, préparation : cœur de vide, coque déformante, anneau qui se resserre", effects("VoidCore") == 1 and effects("Distortion") == 1 and effects("CompressionRing") == 1)
+H.check("Antimatière, préparation : lien d'énergie vers la cible", root(target):FindFirstChild("VoidTether") ~= nil)
+C.frames(math.ceil(amMagic.ultimateWindup * 60) + 10)
+H.check("Antimatière, impact : implosion puis onde", effects("VoidCore") == 0 and effects("VoidWave") == 1)
+C.frames(120)
+local function spellFx(name)
+	local found = 0
+	for _, holderName in ipairs({ "SpellEffects", "UltimateEffects" }) do
+		local holder = mock.workspace:FindFirstChild(holderName)
+		if holder then
+			for _, child in ipairs(holder:GetChildren()) do
+				if child.Name == name then
+					found += 1
+				end
+			end
+		end
+	end
+	return found
+end
+local origin = root(target).Position + V3.new(0, 1.5, 12)
+SpellRemotes.SpellCast.OnClientEvent:Fire(mages.ice.Character, "frost_shard", 9001, origin, root(target).Position)
+C.frames(math.ceil(SpellConfig.get("frost_shard").castTime * 60) + 3)
+H.check("Éclat de Givre : projectile en forme de cristal", spellFx("FrostShard") == 1)
+SpellRemotes.SpellImpact.OnClientEvent:Fire(9001, "frost_shard", root(target).Position, { target })
+C.frames(3)
+H.check("Éclat de Givre : éclats et plaque de givre à l'impact", spellFx("FrostShard") == 0 and spellFx("FrostPlate") == 1 and spellFx("Splinter") >= 3)
+SpellRemotes.SpellCast.OnClientEvent:Fire(mages.ice.Character, "crystal_prison", 9002, origin, root(target).Position)
+C.frames(5)
+H.check("Prison Cristalline : cercle de givre annoncé au sol", spellFx("PrisonCircle") == 1)
+SpellRemotes.SpellImpact.OnClientEvent:Fire(9002, "crystal_prison", root(target).Position, { target })
+C.frames(10)
+H.check("Prison Cristalline : cristaux autour de la cible gelée", spellFx("Crystal") >= 3)
+SpellRemotes.SpellCast.OnClientEvent:Fire(mages.antimatter.Character, "void_fragment", 9003, origin, root(target).Position)
+C.frames(math.ceil(SpellConfig.get("void_fragment").castTime * 60) + 3)
+H.check("Fragment du Vide : cœur noir cerclé de violet", spellFx("VoidFragment") == 1)
+SpellRemotes.SpellImpact.OnClientEvent:Fire(9003, "void_fragment", root(target).Position, { target })
+C.frames(2)
+H.check("Fragment du Vide : l'espace se replie à l'impact", spellFx("VoidFold") == 1)
+SpellRemotes.SpellCast.OnClientEvent:Fire(mages.antimatter.Character, "minor_singularity", 9004, origin, root(target).Position)
+C.frames(5)
+H.check("Singularité Mineure : point de vide qui naît au point visé", spellFx("SingularitySeed") == 1)
+SpellRemotes.SpellImpact.OnClientEvent:Fire(9004, "minor_singularity", root(target).Position, { target })
+C.frames(10)
+H.check("Singularité Mineure : tourbillon pendant l'aspiration", spellFx("Singularity") == 1 and spellFx("Vortex") == 1)
+C.frames(60)
+H.check("Singularité Mineure : se referme en onde", spellFx("SingularityWave") == 1)
+C.frames(120)
 H.noNewErrors("sorts client sans erreur")
 H.printWarnings()
 H.finish()

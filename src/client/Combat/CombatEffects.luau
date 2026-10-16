@@ -618,12 +618,13 @@ local function playEruption(caster: Model?, origin: Vector3, targets: { Model },
 		setScreenLook(blendLook(IMPACT_FRAME_LOOK, intensity), 0)
 	end
 
-	local core = newEffectPart("VoidCore", Enum.PartType.Ball, Vector3.one, palette.void, Config.ULTIMATE_HIT_STOP + 1)
+	local windup = magic.ultimateWindup or Config.ULTIMATE_HIT_STOP
+	local core = newEffectPart("VoidCore", Enum.PartType.Ball, Vector3.one, palette.void, windup + 1)
 	core.CFrame = CFrame.new(origin)
 	core.Parent = getEffectsFolder()
-	tween(core, Config.ULTIMATE_HIT_STOP, { Size = Vector3.one * CORE_SIZE })
+	tween(core, windup, { Size = Vector3.one * CORE_SIZE })
 
-	task.wait(Config.ULTIMATE_HIT_STOP)
+	task.wait(windup)
 
 	-- Phase 2 : éruption ---------------------------------------------------------
 	resumeAnimations()
@@ -659,10 +660,36 @@ type UltimatePlayer = (caster: Model?, origin: Vector3, targets: { Model }, magi
 ]]
 local ULTIMATE_PLAYERS: { [string]: UltimatePlayer } = {}
 
--- Joue l'ultime de `magic` (une entrée de MagicConfig.MAGICS). YIELD pendant l'arrêt sur image.
+-- Enregistre une chorégraphie dédiée (Client/Magic/UltimateChoreographies), rangée par id de magie.
+function CombatEffects.registerUltimate(magicId: string, player: UltimatePlayer)
+	ULTIMATE_PLAYERS[magicId] = player
+end
+
+-- Joue l'ultime de `magic` (une entrée de MagicConfig.MAGICS). YIELD pendant la préparation.
 function CombatEffects.playUltimate(caster: Model?, origin: Vector3, targets: { Model }, magic: any)
 	local play: UltimatePlayer = ULTIMATE_PLAYERS[magic.id] or playEruption :: any
 	play(caster, origin, targets, magic)
+end
+
+-- Outils publics pour les chorégraphies de magie (même réglages « effets réduits » que le reste).
+function CombatEffects.shake(duration: number, amplitude: number)
+	shakeCamera(duration, amplitude)
+end
+
+-- Voile de couleur sur l'écran : intensité 0..1, d'un coup puis retour en `fade` secondes.
+-- Ignoré en mode « effets réduits » au-delà d'un léger voile.
+function CombatEffects.tintScreen(color: Color3, intensity: number, rise: number, fade: number)
+	local strength = if ClientSettings.isReducedEffects() then intensity * 0.35 else intensity
+	local look: ScreenLook = { Brightness = 0.05 * strength, Contrast = 0.15 * strength, Saturation = -0.35 * strength, TintColor = COLOR_WHITE:Lerp(color, strength) }
+	setScreenLook(look, rise)
+	task.delay(rise, function()
+		setScreenLook(NEUTRAL_LOOK, fade)
+	end)
+end
+
+-- Force (0..1) avec laquelle ce client ressent un effet de rayon `radius` centré sur `origin`.
+function CombatEffects.intensityAt(origin: Vector3, radius: number): number
+	return getIntensity(origin, radius)
 end
 
 return CombatEffects

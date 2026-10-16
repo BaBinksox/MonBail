@@ -32,11 +32,15 @@ export type Magic = {
 	radius: number, -- studs autour du lanceur
 	damage: number,
 	palette: Palette,
+	-- Préparation de l'ultime (s) : posture et accumulation visibles ; les dégâts et l'effet propre
+	-- à la magie tombent exactement à la fin (CombatService), quand la chorégraphie frappe.
+	ultimateWindup: number,
 }
 
 local MAGICS: { Magic } = {
 	{
 		id = "antimatter",
+		ultimateWindup = 0.75,
 		name = "Antimatière",
 		ultimateName = "Éruption d'Antimatière",
 		description = "Le vide qui dévore. L'explosion aspire les survivants jusqu'à vous, à portée de lame.",
@@ -52,6 +56,7 @@ local MAGICS: { Magic } = {
 	},
 	{
 		id = "pyromancy",
+		ultimateWindup = 0.2,
 		name = "Pyromancie",
 		ultimateName = "Brasier du Parjure",
 		description = "Une colère qui ne s'éteint pas. Zone resserrée ; les survivants continuent de brûler.",
@@ -67,6 +72,7 @@ local MAGICS: { Magic } = {
 	},
 	{
 		id = "lightning",
+		ultimateWindup = 0.2,
 		name = "Foudre",
 		ultimateName = "Jugement Céleste",
 		description = "Le ciel répond à votre appel. Frappe très loin, moins fort, et paralyse un instant.",
@@ -82,6 +88,7 @@ local MAGICS: { Magic } = {
 	},
 	{
 		id = "ice",
+		ultimateWindup = 0.85,
 		name = "Glace",
 		ultimateName = "Hiver Éternel",
 		description = "Un froid venu d'avant le monde. Ceux qu'il touche avancent comme dans un rêve.",
@@ -97,6 +104,7 @@ local MAGICS: { Magic } = {
 	},
 	{
 		id = "shadow",
+		ultimateWindup = 0.2,
 		name = "Ombre",
 		ultimateName = "Marée d'Ombres",
 		description = "Ce qui rampe sous vos pas vous obéit. Courte portée, dégâts dévastateurs, et leur vie devient la vôtre.",
@@ -112,6 +120,7 @@ local MAGICS: { Magic } = {
 	},
 	{
 		id = "gravity",
+		ultimateWindup = 0.2,
 		name = "Gravité",
 		ultimateName = "Effondrement Stellaire",
 		description = "Le poids du monde vous obéit. Les survivants sont arrachés au sol puis écrasés, et restent cloués un instant.",

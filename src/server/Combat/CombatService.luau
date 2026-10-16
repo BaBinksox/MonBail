@@ -634,8 +634,8 @@ local function onUltimateRequested(player: Player)
 		print(`[Combat] {player.Name} déclenche {magic.ultimateName} : {#targets} cible(s)`)
 	end
 
-	-- Les dégâts tombent à la fin de l'arrêt sur image des clients, quand l'onde de choc part.
-	task.wait(Config.ULTIMATE_HIT_STOP)
+	-- Les dégâts tombent à la fin de la préparation jouée par les clients, quand l'onde de choc part.
+	task.wait(magic.ultimateWindup or Config.ULTIMATE_HIT_STOP) -- préparation propre à la magie
 	if TimeLoopService.isRewindingFor(player) or isOutOfCombat(player) or getLivingParts(caster) == nil then
 		return -- rembobinage, anomalie ou mort du lanceur entre-temps : l'explosion n'a "pas eu lieu"
 	end
