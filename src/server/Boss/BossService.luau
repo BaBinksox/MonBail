@@ -41,6 +41,7 @@ local STATES = Config.STATES
 local POLL_INTERVAL = 0.1 -- secondes entre deux vérifications pendant une attente (rewind)
 local CHARGE_ANCHOR_REASON = "boss_charge"
 local RETURN_HOME_DISTANCE = 8 -- studs : sans cible, il rentre à son point d'apparition s'il en est plus loin
+local STATUS_SPEED_ATTRIBUTE = "StatusSpeedMultiplier" -- = StatusConfig.SPEED_ATTRIBUTE (froid, pression...)
 
 type Boss = {
 	model: Model,
@@ -291,9 +292,14 @@ local function runBoss(boss: Boss)
 		local healthRatio = boss.humanoid.Health / boss.humanoid.MaxHealth
 		local isUltimateReady = healthRatio <= Config.ULTIMATE_HEALTH_RATIO and os.clock() >= boss.ultimateReadyClock
 
+		-- Altérations (froid, pression... : StatusService) : la vitesse de marche suit leur multiplicateur.
+		local statusSpeed = boss.model:GetAttribute(STATUS_SPEED_ATTRIBUTE)
+		local speedMultiplier = if type(statusSpeed) == "number" then statusSpeed else 1
+		boss.humanoid.WalkSpeed = Config.WALK_SPEED * speedMultiplier
+
 		if TimeLoopService.isEncounterRewinding(boss.encounterId) then
 			-- Le temps se rembobine : le boss est entre les mains du Time-Loop, on ne décide rien.
-		elseif CombatStatus.isStunned(boss.model) then
+		elseif CombatStatus.isStunned(boss.model) or speedMultiplier <= 0.05 then
 			-- Paré, paralysé ou écrasé : il reste sur place, sans attaquer.
 			stopMoving(boss)
 		elseif target == nil or targetRoot == nil then

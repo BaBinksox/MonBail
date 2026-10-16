@@ -116,7 +116,8 @@ local ALIGN_MAX_TORQUE = 1e7
 local ALIGN_RESPONSIVENESS = 40
 local STAND_STEP_LIMIT = 10 -- studs de dénivelé maximal pour une téléportation
 local STAND_CLEARANCE = 1.5 -- rayon libre exigé à l'arrivée d'une téléportation
-local BASE_SPEED_ATTRIBUTE = "BaseWalkSpeed" -- posé par UltimateBehaviors pendant un ralentissement
+local BASE_SPEED_ATTRIBUTE = "BaseWalkSpeed" -- ancien ralentissement posé sur le Humanoid (compatibilité)
+local STATUS_SPEED_ATTRIBUTE = "StatusSpeedMultiplier" -- = StatusConfig.SPEED_ATTRIBUTE
 
 local EnemyBrain = {}
 
@@ -358,14 +359,22 @@ end
 -- Vitesse et animations
 --------------------------------------------------------------------------------
 
--- Réapplique la vitesse de base, sauf pendant un ralentissement d'ultime (qui la rendra lui-même).
+-- Multiplicateur de vitesse des altérations (froid, gel, pression... : StatusService), 1 sinon.
+local function getStatusSpeed(enemy: Enemy): number
+	local multiplier = enemy.model:GetAttribute(STATUS_SPEED_ATTRIBUTE)
+	return if type(multiplier) == "number" then multiplier else 1
+end
+
+-- Réapplique la vitesse de base, multipliée par les altérations en cours (StatusService), sauf
+-- pendant un ancien ralentissement posé directement sur le Humanoid (qui la rendra lui-même).
 function EnemyBrain.refreshSpeed(enemy: Enemy)
 	local humanoid = enemy.humanoid
 	if humanoid:GetAttribute(BASE_SPEED_ATTRIBUTE) ~= nil then
 		return
 	end
-	if math.abs(humanoid.WalkSpeed - enemy.baseSpeed) > 0.01 then
-		humanoid.WalkSpeed = enemy.baseSpeed
+	local speed = enemy.baseSpeed * getStatusSpeed(enemy)
+	if math.abs(humanoid.WalkSpeed - speed) > 0.01 then
+		humanoid.WalkSpeed = speed
 	end
 end
 
@@ -374,10 +383,10 @@ function EnemyBrain.setBaseSpeed(enemy: Enemy, speed: number)
 	EnemyBrain.refreshSpeed(enemy)
 end
 
--- Paralysé par un effet de vitesse (Foudre) : ni déplacement ni attaque.
+-- Immobilisé par une altération (gel, paralysie, cloué au sol) : ni déplacement ni attaque.
 function EnemyBrain.isImmobilized(enemy: Enemy): boolean
 	local humanoid = enemy.humanoid
-	return humanoid:GetAttribute(BASE_SPEED_ATTRIBUTE) ~= nil and humanoid.WalkSpeed <= 0.05
+	return getStatusSpeed(enemy) <= 0.05 or (humanoid:GetAttribute(BASE_SPEED_ATTRIBUTE) ~= nil and humanoid.WalkSpeed <= 0.05)
 end
 
 local function loadTrack(enemy: Enemy, animationId: string, isLooped: boolean): AnimationTrack?

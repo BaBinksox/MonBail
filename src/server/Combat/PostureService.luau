@@ -26,6 +26,7 @@ local RunService = game:GetService("RunService")
 
 local BossConfig = require(ReplicatedStorage.Shared.Boss.BossConfig)
 local CombatConfig = require(ReplicatedStorage.Shared.Combat.CombatConfig)
+local StatusConfig = require(ReplicatedStorage.Shared.Combat.StatusConfig)
 local Signal = require(ReplicatedStorage.Shared.Util.Signal)
 
 local CombatStatus = require(script.Parent.CombatStatus)
@@ -118,6 +119,11 @@ function PostureService.damage(model: Model, amount: number, player: Player?): b
 	local now = os.clock()
 	if now < state.brokenUntil then
 		return false -- déjà sans défense : rien à briser de plus
+	end
+	-- Pression de la Gravité (altération) : la posture cède plus vite.
+	local pressureUntil = model:GetAttribute(StatusConfig.ATTRIBUTE_PREFIX .. "pressure")
+	if type(pressureUntil) == "number" and pressureUntil > workspace:GetServerTimeNow() then
+		amount *= StatusConfig.STATUSES.pressure.postureTakenMultiplier or 1
 	end
 	state.lastHitClock = now
 	state.value += amount

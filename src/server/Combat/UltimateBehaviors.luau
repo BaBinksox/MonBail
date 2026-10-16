@@ -12,7 +12,9 @@
 		shadow     : drain       - le lanceur récupère une part des dégâts infligés ;
 		gravity    : effondrement - les survivants sont arrachés du sol puis écrasés, et restent cloués un instant.
 	Les dégâts secondaires (brûlure, écrasement) passent par DamageService : ils sont attribués au lanceur
-	(contributions, élimination) ; les immobilisations passent par CombatStatus : les IA les respectent.
+	(contributions, élimination). Brûlure, paralysie, gel et immobilisation sont des ALTÉRATIONS du
+	système commun (StatusService : durée bornée, boss, rendement décroissant, nettoyage au
+	rembobinage), les mêmes que celles des sorts : elles peuvent donc déclencher des réactions.
 
 	Ajouter ou changer un effet : une fonction dans BEHAVIORS, rangée sous l'`id` de la magie.
 	Une magie sans entrée n'a simplement pas d'effet secondaire.
@@ -26,6 +28,7 @@ local MagicConfig = require(ReplicatedStorage.Shared.Magic.MagicConfig)
 
 local CombatStatus = require(script.Parent.CombatStatus)
 local DamageService = require(script.Parent.DamageService)
+local StatusService = require(script.Parent.StatusService)
 local TimeLoopService = require(script.Parent.Parent.TimeLoop.TimeLoopService)
 
 export type Context = {
@@ -41,15 +44,10 @@ export type Context = {
 local PULL_SPEED = 45 -- studs/s
 local PULL_DURATION = 0.3
 local PULL_STOP_DISTANCE = 5 -- studs : on n'aspire pas une cible déjà au contact
--- Pyromancie
-local BURN_TICKS = 5
-local BURN_TICK_INTERVAL = 1
-local BURN_TICK_DAMAGE = 6
--- Foudre
-local STUN_DURATION = 1.5
--- Glace
-local SLOW_FACTOR = 0.35 -- vitesse restante
-local SLOW_DURATION = 5
+-- Pyromancie : brûlure à 2 crans pendant 4 s (8 dégâts par seconde, ~32 au total)
+local BURN_STACKS = 2
+local BURN_DURATION = 4
+-- Foudre : paralysie (StatusConfig.paralysis, 1,5 s) ; Glace : Hiver Éternel (frostbite, x 0,35, 5 s)
 -- Ombre
 local DRAIN_RATIO = 0.4 -- part des dégâts rendue au lanceur
 -- Gravité
@@ -59,10 +57,6 @@ local SLAM_SPEED = 90 -- studs/s vers le bas
 local SLAM_DURATION = 0.2
 local SLAM_DAMAGE = 12
 local PIN_DURATION = 1.2 -- secondes cloué au sol après l'écrasement
-
--- Attributs posés sur le Humanoid ralenti, pour que deux effets de vitesse ne se marchent pas dessus.
-local BASE_SPEED_ATTRIBUTE = "BaseWalkSpeed"
-local SPEED_TOKEN_ATTRIBUTE = "SpeedEffectToken"
 
 local UltimateBehaviors = {}
 
@@ -81,27 +75,6 @@ local function getAffectableParts(target: Model): (Humanoid?, BasePart?)
 		return nil, nil
 	end
 	return humanoid, rootPart
-end
-
--- Multiplie la vitesse de marche de `humanoid` par `factor` pendant `duration` secondes.
--- Un effet plus récent remplace le précédent ; la vitesse d'origine est toujours rendue à la fin.
-local function applySpeedFactor(humanoid: Humanoid, factor: number, duration: number)
-	local baseSpeed = humanoid:GetAttribute(BASE_SPEED_ATTRIBUTE)
-	if type(baseSpeed) ~= "number" then
-		baseSpeed = humanoid.WalkSpeed
-		humanoid:SetAttribute(BASE_SPEED_ATTRIBUTE, baseSpeed)
-	end
-
-	local token = ((humanoid:GetAttribute(SPEED_TOKEN_ATTRIBUTE) :: number?) or 0) + 1
-	humanoid:SetAttribute(SPEED_TOKEN_ATTRIBUTE, token)
-	humanoid.WalkSpeed = (baseSpeed :: number) * factor
-
-	task.delay(duration, function()
-		if humanoid:GetAttribute(SPEED_TOKEN_ATTRIBUTE) == token then
-			humanoid.WalkSpeed = baseSpeed :: number
-			humanoid:SetAttribute(BASE_SPEED_ATTRIBUTE, nil)
-		end
-	end)
 end
 
 --------------------------------------------------------------------------------
@@ -136,38 +109,24 @@ local BEHAVIORS: { [string]: (Context) -> () } = {
 		end
 	end,
 
-	-- Brûlure : des dégâts répétés, attribués au lanceur. Ils s'interrompent si le temps est rembobiné.
+	-- Brûlure : dégâts répétés attribués au lanceur (suspendus pendant son rembobinage).
 	pyromancy = function(context: Context)
-		local source: DamageService.DamageSource = { player = context.caster, model = context.casterHumanoid.Parent :: Model?, kind = "burn" }
-		for _ = 1, BURN_TICKS do
-			task.wait(BURN_TICK_INTERVAL)
-			if TimeLoopService.isRewindingFor(context.caster) then
-				return
-			end
-			for _, target in context.targets do
-				DamageService.dealDamage(target, BURN_TICK_DAMAGE, source)
-			end
+		for _, target in context.targets do
+			StatusService.apply(target, "burn", { source = context.caster, stacks = BURN_STACKS, duration = BURN_DURATION })
 		end
 	end,
 
-	-- Paralysie : vitesse nulle ET étourdissement (les IA n'attaquent plus) un court instant.
+	-- Paralysie : immobile ET sans attaque un court instant.
 	lightning = function(context: Context)
 		for _, target in context.targets do
-			local humanoid = getAffectableParts(target)
-			if humanoid then
-				applySpeedFactor(humanoid, 0, STUN_DURATION)
-				CombatStatus.stun(target, STUN_DURATION)
-			end
+			StatusService.apply(target, "paralysis", { source = context.caster })
 		end
 	end,
 
 	-- Gel : fort ralentissement, plus long.
 	ice = function(context: Context)
 		for _, target in context.targets do
-			local humanoid = getAffectableParts(target)
-			if humanoid then
-				applySpeedFactor(humanoid, SLOW_FACTOR, SLOW_DURATION)
-			end
+			StatusService.apply(target, "frostbite", { source = context.caster })
 		end
 	end,
 
@@ -219,10 +178,7 @@ local BEHAVIORS: { [string]: (Context) -> () } = {
 		local source: DamageService.DamageSource = { player = context.caster, model = context.casterHumanoid.Parent :: Model?, kind = "ultimate" }
 		for _, target in lifted do
 			DamageService.dealDamage(target, SLAM_DAMAGE, source)
-			local humanoid = getAffectableParts(target)
-			if humanoid then
-				applySpeedFactor(humanoid, 0, PIN_DURATION)
-			end
+			StatusService.apply(target, "pinned", { source = context.caster, duration = PIN_DURATION })
 		end
 	end,
 }
