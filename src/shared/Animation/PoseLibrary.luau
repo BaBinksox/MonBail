@@ -211,16 +211,18 @@ local POSES: { [string]: Pose } = {
 		{ t = 1, j = { RS = { 65, 0, 18 }, RE = { 45, 0, 0 }, LS = { 65, 0, -18 }, LE = { 45, 0, 0 }, Neck = { 10, 0, 0 } }, pos = V(0, 0.15, 0) },
 	}, true),
 	-- Pyromancie : gestes amples, projection énergique.
-	cast_fire_throw = pose(0.55, 0.5, {
+	cast_fire_throw = pose(0.55, 0.46, {
 		{ t = 0, j = NEUTRAL },
-		{ t = 0.4, j = { Waist = { 6, -28, 0 }, RS = { -25, 0, 45 }, RE = { 60, 0, 0 }, LS = { 50, 0, -25 } }, pos = V(0, -0.2, 0.15) },
-		{ t = 0.52, j = { Waist = { -14, 22, 0 }, RS = { 92, 0, 5 }, RE = { 0, 0, 0 }, LS = { -20, 0, -20 } }, pos = V(0, -0.25, -0.45) },
+		{ t = 0.3, j = { Root = { 0, -15, 0 }, Waist = { 6, -32, 0 }, RS = { -30, 0, 50 }, RE = { 70, 0, 0 }, RW = { 30, 0, 0 }, LS = { 60, 0, -25 }, LE = { 20, 0, 0 } }, pos = V(0, -0.25, 0.15) },
+		{ t = 0.46, e = "linear", j = { Root = { 0, 15, 0 }, Waist = { -16, 25, 0 }, RS = { 95, 0, 5 }, RE = { 0, 0, 0 }, RW = { -15, 0, 0 }, LS = { -25, 0, -25 }, RH = { 20, 0, 0 } }, pos = V(0, -0.3, -0.5) },
+		{ t = 0.68, j = { Root = { 0, 12, 0 }, Waist = { -12, 20, 0 }, RS = { 85, 0, 0 }, LS = { -15, 0, -20 } }, pos = V(0, -0.25, -0.4) },
 		{ t = 1, j = NEUTRAL },
 	}),
-	cast_fire_slam = pose(0.8, 0.55, {
+	cast_fire_slam = pose(0.8, 0.56, {
 		{ t = 0, j = NEUTRAL },
-		{ t = 0.4, j = { Waist = { 12, 0, 0 }, RS = { 160, 0, 15 }, LS = { 30, 0, -30 } }, pos = V(0, 0.15, 0) },
-		{ t = 0.56, j = { Waist = { -32, 0, 0 }, RS = { 35, 0, 10 }, RE = { 10, 0, 0 }, LS = { 10, 0, -40 }, RK = { -45, 0, 0 }, LK = { -45, 0, 0 } }, pos = V(0, -1, -0.3) },
+		{ t = 0.38, j = { Waist = { 14, 0, 0 }, Neck = { -10, 0, 0 }, RS = { 165, 0, 20 }, LS = { 165, 0, -20 }, RE = { 15, 0, 0 }, LE = { 15, 0, 0 } }, pos = V(0, 0.25, 0) },
+		{ t = 0.56, e = "linear", j = { Waist = { -35, 0, 0 }, Neck = { 15, 0, 0 }, RS = { 30, 0, 35 }, LS = { 30, 0, -35 }, RE = { 0, 0, 0 }, LE = { 0, 0, 0 }, RW = { -50, 0, 0 }, LW = { -50, 0, 0 }, RK = { -50, 0, 0 }, LK = { -50, 0, 0 } }, pos = V(0, -1.05, -0.2) },
+		{ t = 0.78, j = { Waist = { -28, 0, 0 }, RS = { 25, 0, 40 }, LS = { 25, 0, -40 }, RK = { -40, 0, 0 }, LK = { -40, 0, 0 } }, pos = V(0, -0.85, -0.15) },
 		{ t = 1, j = NEUTRAL },
 	}),
 	-- Glace : lent, précis, fluide.
@@ -245,23 +247,25 @@ local POSES: { [string]: Pose } = {
 		{ t = 0.45, j = { Waist = { -10, 25, 0 }, RS = { 96, 0, 0 }, RE = { 0, 0, 0 }, LS = { -30, 0, -25 } }, pos = V(0, -0.1, -0.3) },
 		{ t = 1, j = NEUTRAL },
 	}),
-	cast_lightning_call = pose(0.55, 0.55, {
+	cast_lightning_call = pose(0.55, 0.62, {
 		{ t = 0, j = NEUTRAL },
-		{ t = 0.35, j = { RS = { 170, 0, 5 }, RE = { 0, 0, 0 }, Neck = { -15, 0, 0 }, Waist = { 8, 0, 0 } } },
-		{ t = 0.55, j = { RS = { 92, 0, 0 }, Waist = { -12, 0, 0 }, LS = { -30, 0, -30 } }, pos = V(0, -0.2, -0.3) },
+		{ t = 0.4, j = { RS = { 175, 0, 8 }, RE = { 0, 0, 0 }, RW = { 20, 0, 0 }, Neck = { -18, 0, 0 }, Waist = { 10, 0, 0 }, LS = { 20, 0, -30 } }, pos = V(0, 0.2, 0) },
+		{ t = 0.62, e = "linear", j = { RS = { 95, 0, 0 }, RW = { -20, 0, 0 }, Waist = { -14, 0, 0 }, LS = { -35, 0, -30 } }, pos = V(0, -0.2, -0.35) },
 		{ t = 1, j = NEUTRAL },
 	}),
 	-- Ombre : lent, souple, enveloppant.
-	cast_shadow_sweep = pose(0.7, 0.55, {
+	cast_shadow_sweep = pose(0.55, 0.46, {
 		{ t = 0, j = NEUTRAL },
-		{ t = 0.4, j = { Waist = { -6, 30, 0 }, RS = { 70, 0, -45 }, RE = { 40, 0, 0 }, LS = { 30, 0, -40 } } },
-		{ t = 0.58, j = { Waist = { -10, -20, 0 }, RS = { 85, 0, 40 }, RE = { 10, 0, 0 }, LS = { 20, 0, -50 } }, pos = V(0, -0.2, -0.2) },
+		{ t = 0.28, j = { Waist = { -6, 32, 0 }, RS = { 70, 0, -50 }, RE = { 45, 0, 0 }, RW = { 25, 0, 0 }, LS = { 30, 0, -40 } }, pos = V(0, -0.15, 0.05) },
+		{ t = 0.46, e = "linear", j = { Waist = { -12, -22, 0 }, RS = { 88, 0, 45 }, RE = { 5, 0, 0 }, RW = { -10, 0, 0 }, LS = { 20, 0, -55 } }, pos = V(0, -0.25, -0.25) },
+		{ t = 0.7, j = { Waist = { -8, -28, 0 }, RS = { 80, 0, 55 }, LS = { 15, 0, -50 } }, pos = V(0, -0.2, -0.2) },
 		{ t = 1, j = NEUTRAL },
 	}),
-	cast_shadow_veil = pose(0.85, 0.55, {
+	cast_shadow_veil = pose(0.75, 0.4, {
 		{ t = 0, j = NEUTRAL },
-		{ t = 0.45, j = { RS = { 60, 0, -45 }, LS = { 60, 0, 45 }, RE = { 60, 0, 0 }, LE = { 60, 0, 0 }, Waist = { -10, 0, 0 }, Neck = { 12, 0, 0 } }, pos = V(0, -0.35, 0) },
-		{ t = 0.6, j = { RS = { 40, 0, 80 }, LS = { 40, 0, -80 }, Waist = { 4, 0, 0 } }, pos = V(0, 0, 0) },
+		{ t = 0.25, j = { RS = { 60, 0, -45 }, LS = { 60, 0, 45 }, RE = { 70, 0, 0 }, LE = { 70, 0, 0 }, Waist = { -12, 0, 0 }, Neck = { 14, 0, 0 } }, pos = V(0, -0.4, 0) },
+		{ t = 0.4, e = "linear", j = { RS = { 40, 0, 85 }, LS = { 40, 0, -85 }, Waist = { 6, 0, 0 }, Neck = { -6, 0, 0 } }, pos = V(0, 0.05, 0) },
+		{ t = 0.65, j = { RS = { 30, 0, 75 }, LS = { 30, 0, -75 }, Waist = { 4, 0, 0 } }, pos = V(0, 0, 0) },
 		{ t = 1, j = NEUTRAL },
 	}),
 	-- Antimatière : maîtrisé, mains en suspension, contraction de l'espace.
@@ -280,16 +284,18 @@ local POSES: { [string]: Pose } = {
 		{ t = 1, j = NEUTRAL },
 	}),
 	-- Gravité : imposant, vers le sol ou vers la cible.
-	cast_gravity_press = pose(0.75, 0.6, {
+	cast_gravity_press = pose(0.6, 0.5, {
 		{ t = 0, j = NEUTRAL },
-		{ t = 0.45, j = { RS = { 125, 0, 10 }, RE = { 10, 0, 0 }, Waist = { 8, 0, 0 } }, pos = V(0, 0.1, 0) },
-		{ t = 0.62, j = { RS = { 35, 0, 5 }, RE = { 0, 0, 0 }, Waist = { -14, 0, 0 } }, pos = V(0, -0.4, -0.15) },
+		{ t = 0.32, j = { RS = { 140, 0, 10 }, RE = { 15, 0, 0 }, RW = { 30, 0, 0 }, Waist = { 10, 0, 0 }, LS = { 30, 0, -25 } }, pos = V(0, 0.15, 0) },
+		{ t = 0.5, e = "linear", j = { RS = { 40, 0, 5 }, RE = { 0, 0, 0 }, RW = { -45, 0, 0 }, Waist = { -18, 0, 0 }, LS = { 15, 0, -30 }, RK = { -20, 0, 0 }, LK = { -20, 0, 0 } }, pos = V(0, -0.45, -0.2) },
+		{ t = 0.72, j = { RS = { 35, 0, 5 }, RW = { -35, 0, 0 }, Waist = { -14, 0, 0 }, RK = { -15, 0, 0 }, LK = { -15, 0, 0 } }, pos = V(0, -0.35, -0.15) },
 		{ t = 1, j = NEUTRAL },
 	}),
-	cast_gravity_field = pose(1, 0.62, {
+	cast_gravity_field = pose(0.85, 0.59, {
 		{ t = 0, j = NEUTRAL },
-		{ t = 0.45, j = { RS = { 155, 0, 20 }, LS = { 155, 0, -20 }, Waist = { 10, 0, 0 }, Neck = { -10, 0, 0 } }, pos = V(0, 0.2, 0) },
-		{ t = 0.64, j = { RS = { 15, 0, 25 }, LS = { 15, 0, -25 }, Waist = { -26, 0, 0 }, RK = { -40, 0, 0 }, LK = { -40, 0, 0 } }, pos = V(0, -0.9, 0) },
+		{ t = 0.4, j = { RS = { 158, 0, 22 }, LS = { 158, 0, -22 }, Waist = { 10, 0, 0 }, Neck = { -12, 0, 0 } }, pos = V(0, 0.25, 0) },
+		{ t = 0.59, e = "linear", j = { RS = { 15, 0, 30 }, LS = { 15, 0, -30 }, RW = { -50, 0, 0 }, LW = { -50, 0, 0 }, Waist = { -28, 0, 0 }, RK = { -45, 0, 0 }, LK = { -45, 0, 0 } }, pos = V(0, -0.95, 0) },
+		{ t = 0.8, j = { RS = { 15, 0, 28 }, LS = { 15, 0, -28 }, Waist = { -22, 0, 0 }, RK = { -35, 0, 0 }, LK = { -35, 0, 0 } }, pos = V(0, -0.75, 0) },
 		{ t = 1, j = NEUTRAL },
 	}),
 	-- Ultime Glace « Hiver Éternel » : accroupi, bras croisés qui rassemblent le froid, montée,
@@ -311,6 +317,38 @@ local POSES: { [string]: Pose } = {
 		{ t = 0.56, j = { Waist = { 13, -2, 0 }, Neck = { 9, 0, 0 }, RS = { 82, 0, -10 }, LS = { 82, 0, 10 }, RE = { 88, 0, 0 }, LE = { 88, 0, 0 }, RW = { 28, 0, 0 }, LW = { 28, 0, 0 }, RK = { -20, 0, 0 }, LK = { -20, 0, 0 } }, pos = V(0, -0.28, 0.1) },
 		{ t = 0.625, e = "linear", j = { Waist = { -20, 0, 0 }, Neck = { -14, 0, 0 }, RS = { 100, 0, 95 }, LS = { 100, 0, -95 }, RE = { 0, 0, 0 }, LE = { 0, 0, 0 }, RW = { -20, 0, 0 }, LW = { -20, 0, 0 } }, pos = V(0, 0.15, 0.2) },
 		{ t = 0.85, j = { Waist = { -14, 0, 0 }, RS = { 90, 0, 85 }, LS = { 90, 0, -85 } }, pos = V(0, 0.1, 0.15) },
+		{ t = 1, j = NEUTRAL },
+	}),
+	-- Ultime Pyromancie : poings serrés près du corps, le feu monte, bras projetés vers le ciel (0,6 s).
+	cast_ultimate_pyromancy = pose(1.0, 0.6, {
+		{ t = 0, j = NEUTRAL },
+		{ t = 0.3, j = { Waist = { 12, 0, 0 }, RS = { 30, 0, 20 }, LS = { 30, 0, -20 }, RE = { 120, 0, 0 }, LE = { 120, 0, 0 }, RK = { -25, 0, 0 }, LK = { -25, 0, 0 } }, pos = V(0, -0.45, 0) },
+		{ t = 0.6, e = "linear", j = { Waist = { -10, 0, 0 }, Neck = { -20, 0, 0 }, RS = { 170, 0, 40 }, LS = { 170, 0, -40 }, RE = { 0, 0, 0 }, LE = { 0, 0, 0 } }, pos = V(0, 0.4, 0) },
+		{ t = 0.82, j = { Waist = { -6, 0, 0 }, Neck = { -14, 0, 0 }, RS = { 160, 0, 45 }, LS = { 160, 0, -45 } }, pos = V(0, 0.3, 0) },
+		{ t = 1, j = NEUTRAL },
+	}),
+	-- Ultime Foudre : un bras pointé au ciel qui appelle l'orage, puis rabattu vers les cibles (0,45 s).
+	cast_ultimate_lightning = pose(0.85, 0.53, {
+		{ t = 0, j = NEUTRAL },
+		{ t = 0.35, j = { Waist = { 12, 0, 0 }, Neck = { -22, 0, 0 }, RS = { 178, 0, 5 }, RE = { 0, 0, 0 }, RW = { 25, 0, 0 }, LS = { 25, 0, -40 } }, pos = V(0, 0.25, 0) },
+		{ t = 0.53, e = "linear", j = { Waist = { -20, 0, 0 }, Neck = { 10, 0, 0 }, RS = { 70, 0, 20 }, RW = { -30, 0, 0 }, LS = { -30, 0, -35 }, RK = { -25, 0, 0 }, LK = { -25, 0, 0 } }, pos = V(0, -0.45, -0.25) },
+		{ t = 0.78, j = { Waist = { -14, 0, 0 }, RS = { 65, 0, 20 }, LS = { -20, 0, -30 }, RK = { -18, 0, 0 }, LK = { -18, 0, 0 } }, pos = V(0, -0.3, -0.2) },
+		{ t = 1, j = NEUTRAL },
+	}),
+	-- Ultime Ombre : se replie sur soi, puis bras écartés au ras du sol comme une marée (0,6 s).
+	cast_ultimate_shadow = pose(1.0, 0.6, {
+		{ t = 0, j = NEUTRAL },
+		{ t = 0.32, j = { Waist = { 25, 0, 0 }, Neck = { 20, 0, 0 }, RS = { 40, 0, -40 }, LS = { 40, 0, 40 }, RE = { 110, 0, 0 }, LE = { 110, 0, 0 }, RK = { -40, 0, 0 }, LK = { -40, 0, 0 } }, pos = V(0, -0.8, 0.1) },
+		{ t = 0.6, e = "linear", j = { Waist = { -28, 0, 0 }, Neck = { 12, 0, 0 }, RS = { 20, 0, 95 }, LS = { 20, 0, -95 }, RE = { 0, 0, 0 }, LE = { 0, 0, 0 }, RW = { -30, 0, 0 }, LW = { -30, 0, 0 }, RK = { -45, 0, 0 }, LK = { -45, 0, 0 } }, pos = V(0, -0.9, -0.2) },
+		{ t = 0.82, j = { Waist = { -20, 0, 0 }, RS = { 15, 0, 90 }, LS = { 15, 0, -90 }, RK = { -35, 0, 0 }, LK = { -35, 0, 0 } }, pos = V(0, -0.7, -0.15) },
+		{ t = 1, j = NEUTRAL },
+	}),
+	-- Ultime Gravité : bras levés qui soulèvent le monde, puis abattus vers le sol (0,7 s).
+	cast_ultimate_gravity = pose(1.1, 0.636, {
+		{ t = 0, j = NEUTRAL },
+		{ t = 0.4, j = { Waist = { 16, 0, 0 }, Neck = { -20, 0, 0 }, RS = { 165, 0, 25 }, LS = { 165, 0, -25 }, RE = { 30, 0, 0 }, LE = { 30, 0, 0 }, RW = { 40, 0, 0 }, LW = { 40, 0, 0 } }, pos = V(0, 0.35, 0) },
+		{ t = 0.636, e = "linear", j = { Waist = { -42, 0, 0 }, Neck = { 20, 0, 0 }, RS = { 20, 0, 20 }, LS = { 20, 0, -20 }, RE = { 0, 0, 0 }, LE = { 0, 0, 0 }, RW = { -60, 0, 0 }, LW = { -60, 0, 0 }, RH = { 30, 0, 0 }, RK = { -65, 0, 0 }, LK = { -55, 0, 0 } }, pos = V(0, -1.2, -0.1) },
+		{ t = 0.85, j = { Waist = { -34, 0, 0 }, RS = { 20, 0, 20 }, LS = { 20, 0, -20 }, RW = { -50, 0, 0 }, LW = { -50, 0, 0 }, RK = { -55, 0, 0 }, LK = { -45, 0, 0 } }, pos = V(0, -1.0, -0.1) },
 		{ t = 1, j = NEUTRAL },
 	}),
 	cast_ultimate = pose(0.9, 0.3, {

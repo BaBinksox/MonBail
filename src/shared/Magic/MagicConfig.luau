@@ -56,7 +56,7 @@ local MAGICS: { Magic } = {
 	},
 	{
 		id = "pyromancy",
-		ultimateWindup = 0.2,
+		ultimateWindup = 0.6,
 		name = "Pyromancie",
 		ultimateName = "Brasier du Parjure",
 		description = "Une colère qui ne s'éteint pas. Zone resserrée ; les survivants continuent de brûler.",
@@ -72,7 +72,7 @@ local MAGICS: { Magic } = {
 	},
 	{
 		id = "lightning",
-		ultimateWindup = 0.2,
+		ultimateWindup = 0.45,
 		name = "Foudre",
 		ultimateName = "Jugement Céleste",
 		description = "Le ciel répond à votre appel. Frappe très loin, moins fort, et paralyse un instant.",
@@ -104,7 +104,7 @@ local MAGICS: { Magic } = {
 	},
 	{
 		id = "shadow",
-		ultimateWindup = 0.2,
+		ultimateWindup = 0.6,
 		name = "Ombre",
 		ultimateName = "Marée d'Ombres",
 		description = "Ce qui rampe sous vos pas vous obéit. Courte portée, dégâts dévastateurs, et leur vie devient la vôtre.",
@@ -120,7 +120,7 @@ local MAGICS: { Magic } = {
 	},
 	{
 		id = "gravity",
-		ultimateWindup = 0.2,
+		ultimateWindup = 0.7,
 		name = "Gravité",
 		ultimateName = "Effondrement Stellaire",
 		description = "Le poids du monde vous obéit. Les survivants sont arrachés au sol puis écrasés, et restent cloués un instant.",

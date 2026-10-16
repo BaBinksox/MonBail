@@ -39,6 +39,21 @@ for _, magic in ipairs(MagicConfig.MAGICS) do
 	end
 end
 
+print("== Gestes calés sur le serveur")
+local PoseLibrary = H.shared("Animation/PoseLibrary")
+local AnimationConfig = H.shared("Animation/AnimationConfig")
+for _, spell in ipairs(SpellConfig.SPELLS) do
+	local pose = PoseLibrary.get(AnimationConfig.ACTIONS[spell.action].pose)
+	local gesture = pose.impact * pose.duration
+	H.check(string.format("%s : geste à %.2f s, sort lancé à %.2f s", spell.name, gesture, spell.castTime), math.abs(gesture - spell.castTime) <= 0.06)
+end
+for _, magic in ipairs(MagicConfig.MAGICS) do
+	local action = AnimationConfig.ACTIONS["cast_ultimate_" .. magic.id]
+	local pose = action and PoseLibrary.get(action.pose)
+	local gesture = pose and pose.impact * pose.duration or -1
+	H.check(string.format("%s : pose dédiée, frappe à %.2f s pour un impact serveur à %.2f s", magic.ultimateName, gesture, magic.ultimateWindup), pose ~= nil and math.abs(gesture - magic.ultimateWindup) <= 0.03)
+end
+
 local mages = {}
 for index, magic in ipairs(MagicConfig.MAGICS) do
 	local player = H.join("Mage_" .. magic.id, 9800 + index, index)
@@ -472,6 +487,22 @@ H.check("Antimatière, préparation : lien d'énergie vers la cible", root(targe
 C.frames(math.ceil(amMagic.ultimateWindup * 60) + 10)
 H.check("Antimatière, impact : implosion puis onde", effects("VoidCore") == 0 and effects("VoidWave") == 1)
 C.frames(120)
+-- Les quatre autres ultimes : préparation visible, puis impact.
+local others = {
+	{ id = "pyromancy", before = "EmberFloor", after = "FireWall" },
+	{ id = "lightning", before = "StrikeMark", after = "Bolt" },
+	{ id = "shadow", before = "ShadowPool", after = "ShadowWave" },
+	{ id = "gravity", before = "GravityRing", after = "GravityDome" },
+}
+for _, entry in ipairs(others) do
+	local magic = MagicConfig.getById(entry.id)
+	CombatRemotes.UltimateFired.OnClientEvent:Fire(mages[entry.id].Character, root(target).Position + V3.new(0, 0, 6), { target }, entry.id)
+	C.frames(math.ceil(magic.ultimateWindup * 60 * 0.6))
+	H.check(string.format("%s, préparation : %s visible, pas encore d'impact", magic.ultimateName, entry.before), effects(entry.before) >= 1 and effects(entry.after) == 0)
+	C.frames(math.ceil(magic.ultimateWindup * 60 * 0.4) + 4)
+	H.check(magic.ultimateName .. ", impact : " .. entry.after, effects(entry.after) >= 1)
+	C.frames(240)
+end
 local function spellFx(name)
 	local found = 0
 	for _, holderName in ipairs({ "SpellEffects", "UltimateEffects" }) do
@@ -513,6 +544,35 @@ C.frames(10)
 H.check("Singularité Mineure : tourbillon pendant l'aspiration", spellFx("Singularity") == 1 and spellFx("Vortex") == 1)
 C.frames(60)
 H.check("Singularité Mineure : se referme en onde", spellFx("SingularityWave") == 1)
+local spellLooks = {
+	{ id = "ember", magic = "pyromancy", projectile = "Ember", impact = "Scorch" },
+	{ id = "dark_bolt", magic = "shadow", projectile = "DarkBolt", impact = "LifeWisp" },
+}
+for index, entry in ipairs(spellLooks) do
+	local spell = SpellConfig.get(entry.id)
+	SpellRemotes.SpellCast.OnClientEvent:Fire(mages[entry.magic].Character, entry.id, 9100 + index, origin, root(target).Position)
+	C.frames(math.ceil(spell.castTime * 60) + 3)
+	H.check(spell.name .. " : projectile propre à la magie", spellFx(entry.projectile) == 1)
+	SpellRemotes.SpellImpact.OnClientEvent:Fire(9100 + index, entry.id, root(target).Position, { target })
+	C.frames(3)
+	H.check(spell.name .. " : impact propre à la magie", spellFx(entry.impact) >= 1)
+	C.frames(120)
+end
+SpellRemotes.SpellCast.OnClientEvent:Fire(mages.lightning.Character, "electric_arc", 9201, origin, root(target).Position)
+SpellRemotes.SpellImpact.OnClientEvent:Fire(9201, "electric_arc", root(target).Position, { target })
+C.frames(2)
+H.check("Arc Électrique : double éclair et éclat lumineux", spellFx("SpellBeam") >= 4 and spellFx("BoltFlash") == 1)
+SpellRemotes.SpellCast.OnClientEvent:Fire(mages.gravity.Character, "gravity_press", 9202, origin, root(target).Position)
+C.frames(math.ceil(SpellConfig.get("gravity_press").castTime * 60))
+SpellRemotes.SpellImpact.OnClientEvent:Fire(9202, "gravity_press", root(target).Position, { target })
+C.frames(2)
+H.check("Pression Gravitationnelle : colonne de pression qui s'abat", spellFx("PressureColumn") == 1)
+SpellRemotes.SpellCast.OnClientEvent:Fire(mages.pyromancy.Character, "blazing_circle", 9203, origin, root(target).Position)
+C.frames(5)
+SpellRemotes.SpellImpact.OnClientEvent:Fire(9203, "blazing_circle", root(target).Position, { target })
+C.frames(2)
+H.check("Cercle Incandescent : anneau annoncé puis mur de flammes", spellFx("BlazeCircle") >= 1 and spellFx("FlameRing") == 1)
+C.frames(120)
 C.frames(120)
 H.noNewErrors("sorts client sans erreur")
 H.printWarnings()

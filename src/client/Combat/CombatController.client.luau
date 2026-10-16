@@ -47,9 +47,13 @@ local UIBus = require(clientFolder:WaitForChild("UI"):WaitForChild("UIBus") :: M
 local CombatEffects = require(script.Parent:WaitForChild("CombatEffects") :: ModuleScript)
 local UltimateChoreographies = require(clientFolder:WaitForChild("Magic"):WaitForChild("UltimateChoreographies") :: ModuleScript)
 
--- Chorégraphies d'ultime dédiées (les autres magies gardent l'éruption commune à leurs couleurs).
+-- Chorégraphies d'ultime dédiées, une par Magie Innée (l'éruption commune reste le repli).
 CombatEffects.registerUltimate("ice", UltimateChoreographies.ice)
 CombatEffects.registerUltimate("antimatter", UltimateChoreographies.antimatter)
+CombatEffects.registerUltimate("pyromancy", UltimateChoreographies.pyromancy)
+CombatEffects.registerUltimate("lightning", UltimateChoreographies.lightning)
+CombatEffects.registerUltimate("shadow", UltimateChoreographies.shadow)
+CombatEffects.registerUltimate("gravity", UltimateChoreographies.gravity)
 
 local AnimationConfig = require(sharedFolder:WaitForChild("Animation"):WaitForChild("AnimationConfig") :: ModuleScript)
 
