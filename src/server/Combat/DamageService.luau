@@ -29,6 +29,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local BossConfig = require(ReplicatedStorage.Shared.Boss.BossConfig)
 local CombatConfig = require(ReplicatedStorage.Shared.Combat.CombatConfig)
+local Signal = require(ReplicatedStorage.Shared.Util.Signal)
 local TimeLoopConfig = require(ReplicatedStorage.Shared.TimeLoop.TimeLoopConfig)
 
 local AvatarService = require(script.Parent.Parent.Avatar.AvatarService)
@@ -41,9 +42,13 @@ local TimeLoopService = require(script.Parent.Parent.TimeLoop.TimeLoopService)
 export type DamageSource = {
 	player: Player?, -- joueur responsable (nil pour un ennemi ou l'environnement)
 	model: Model?, -- Model attaquant (personnage du joueur, ennemi, boss)
-	kind: string, -- "melee" | "ultimate" | "burn" | "enemy" | "environment"
+	kind: string, -- "melee" | "ultimate" | "spell" | "status" | "burn" | "enemy" | "environment"
 	unblockable: boolean?, -- attaque de zone : ne se pare pas (elle s'esquive)
-	heavy: boolean?, -- coup lourd (dernier coup du combo) : brise les gardes
+	heavy: boolean?, -- coup lourd (dernier coup du combo, charge pleine) : brise les gardes
+	element: string?, -- élément d'un sort ou d'une altération (id de magie)
+	-- Posé par un modificateur (garde frontale d'un Gardien) quand une garde a absorbé le coup :
+	-- l'attaquant voit alors un impact « bloqué » au lieu d'un impact franc.
+	blocked: boolean?,
 }
 
 export type HitResult = "hit" | "parried" | "dodged" | "immune"
@@ -76,10 +81,17 @@ DamageService.DEFEATED_ATTRIBUTE = DEFEATED_ATTRIBUTE
 DamageService.ELITE_ATTRIBUTE = ELITE_ATTRIBUTE
 
 type Modifier = (target: Model, amount: number, source: DamageSource) -> number
+type PlayerModifier = (player: Player, amount: number, source: DamageSource) -> number
 type EligibilityExtender = (eligible: { Player }, position: Vector3) -> { Player }
 
 local records: { [Model]: EnemyRecord } = setmetatable({}, { __mode = "k" }) :: any
 local modifiers: { Modifier } = {}
+local playerModifiers: { PlayerModifier } = {}
+
+-- Damaged(target: Model, applied: number, source, targetPlayer: Player?) : dégâts réellement appliqués
+-- (ennemi ou joueur). Dodged(player, isPerfect) : un coup ennemi esquivé par un dash.
+DamageService.Damaged = Signal.new()
+DamageService.Dodged = Signal.new()
 local eligibilityExtender: EligibilityExtender? = nil
 
 --------------------------------------------------------------------------------
@@ -246,6 +258,9 @@ function DamageService.dealDamage(target: Model, amount: number, source: DamageS
 		contribution.lastHitClock = os.clock()
 	end
 
+	if applied > 0 then
+		DamageService.Damaged:Fire(target, applied, source, nil)
+	end
 	if humanoid.Health <= 0 then
 		finalize(target, record, player)
 	end
@@ -255,6 +270,12 @@ end
 -- Ajoute un modificateur de dégâts infligés aux ennemis (garde, résistance...). Ne doit pas yield.
 function DamageService.addModifier(modifier: Modifier)
 	table.insert(modifiers, modifier)
+end
+
+-- Ajoute un modificateur de dégâts SUBIS par les joueurs (vulnérabilité pendant une charge, une
+-- Concentration...). Ne doit pas yield.
+function DamageService.addPlayerModifier(modifier: PlayerModifier)
+	table.insert(playerModifiers, modifier)
 end
 
 -- Permet à un système (les groupes) d'élargir la liste des éligibles d'une élimination.
@@ -303,6 +324,9 @@ function DamageService.damagePlayer(player: Player, amount: number, source: Dama
 		return "immune", 0
 	end
 	if MovementService.isDashing(player) then
+		local dashClock = MovementService.getLastDashClock(player)
+		local isPerfect = source.kind == "enemy" and dashClock ~= nil and os.clock() - dashClock <= CombatConfig.PERFECT_DODGE_WINDOW
+		DamageService.Dodged:Fire(player, isPerfect)
 		return "dodged", 0
 	end
 	if not source.unblockable and ParryService.resolve(player, source.model) then
@@ -318,9 +342,21 @@ function DamageService.damagePlayer(player: Player, amount: number, source: Dama
 		return "dodged", 0
 	end
 	local before = humanoid.Health
-	-- Peuple du joueur (RaceConfig) : un petit pourcentage en plus ou en moins.
-	humanoid:TakeDamage(amount * RaceService.getDamageTakenMultiplier(player)) -- respecte le ForceField d'apparition
-	return "hit", before - humanoid.Health
+	-- Peuple du joueur (RaceConfig) : un petit pourcentage en plus ou en moins ; puis les
+	-- vulnérabilités du moment (charge, Concentration...).
+	local finalAmount = amount * RaceService.getDamageTakenMultiplier(player)
+	for _, modifier in playerModifiers do
+		local isApplied, modified = pcall(modifier, player, finalAmount, source)
+		if isApplied and type(modified) == "number" and modified == modified then
+			finalAmount = math.max(0, modified)
+		end
+	end
+	humanoid:TakeDamage(finalAmount) -- respecte le ForceField d'apparition
+	local applied = before - humanoid.Health
+	if applied > 0 and player.Character then
+		DamageService.Damaged:Fire(player.Character, applied, source, player)
+	end
+	return "hit", applied
 end
 
 return DamageService

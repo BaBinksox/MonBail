@@ -66,6 +66,10 @@ local TimeLoopService = {}
 
 -- AnomalyResolved(player, outcome: Outcome, rewoundBy: Player?, timelineId: string)
 TimeLoopService.AnomalyResolved = Signal.new()
+-- Rewound(timelineId: string, characters: { Model }, members: { Player }) : un rembobinage vient de
+-- se terminer. Les états de combat qui ne sont pas enregistrés dans les instantanés (posture,
+-- altérations) s'y remettent à zéro pour les personnages et joueurs concernés.
+TimeLoopService.Rewound = Signal.new()
 
 local timelines: { [string]: Timeline } = {}
 local playerTimeline: { [Player]: Timeline } = {}
@@ -293,9 +297,11 @@ local function rewindTimeline(timeline: Timeline, requestedBy: Player)
 	end
 	timeline.session:rewind(Config.REWIND_WINDOW, Config.REWIND_PLAYBACK_DURATION) -- yield
 	timeline.lastRewindEndClock = os.clock()
-	for _, member in getTimelinePlayers(timeline) do
+	local finalMembers = getTimelinePlayers(timeline)
+	for _, member in finalMembers do
 		Remotes.RewindEnded:FireClient(member)
 	end
+	TimeLoopService.Rewound:Fire(timeline.id, timeline.session:getCharacters(), finalMembers)
 
 	if Config.DEBUG_LOGS then
 		print(`[TimeLoop] Rewind terminé sur {timeline.id} (déclenché par {requestedBy.Name}, {#members} joueur(s))`)

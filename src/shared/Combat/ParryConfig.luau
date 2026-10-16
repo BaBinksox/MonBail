@@ -22,7 +22,7 @@ return table.freeze({
 	-- Une demande de parade ne peut pas être renouvelée avant ce délai (pas de parade en rafale).
 	COOLDOWN = 0.55,
 
-	PARRY_TENSION = 25, -- Tension gagnée par parade réussie
+	PARRY_TENSION = 25, -- (référence historique : la valeur appliquée est ResourceConfig.TENSION_SOURCES.perfectParry)
 	STAGGER_DURATION = 1.6, -- secondes d'étourdissement de l'attaquant paré
 
 	-- Attribut (number = workspace:GetServerTimeNow() de fin) posé par le serveur sur un Model étourdi.

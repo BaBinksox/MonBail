@@ -113,9 +113,17 @@ local POSES: { [string]: Pose } = {
 		{ t = 0.4, j = { Waist = { -20, 20, 0 }, RS = { 92, 0, 5 }, LS = { -25, 0, -10 } }, pos = V(0, -0.3, -0.9) },
 		{ t = 1, j = NEUTRAL },
 	}),
-	plunge_strike = pose(0.45, 0.55, {
-		{ t = 0, j = { RS = { 170, 0, 0 }, LS = { 150, 0, 0 }, Waist = { 10, 0, 0 } } },
-		{ t = 0.55, j = { RS = { 10, 0, 0 }, LS = { 20, 0, 0 }, Waist = { -35, 0, 0 }, RK = { -50, 0, 0 }, LK = { -50, 0, 0 } }, pos = V(0, -0.9, -0.3) },
+	-- Plongée : lame levée à deux mains au-dessus de la tête, jambes repliées, pendant la chute...
+	plunge_dive = pose(0.4, 0, {
+		{ t = 0, j = { RS = { 170, 0, 0 }, LS = { 150, 0, 10 }, RE = { 20, 0, 0 }, Waist = { 10, 0, 0 }, RH = { 30, 0, 0 }, LH = { 30, 0, 0 }, RK = { -50, 0, 0 }, LK = { -50, 0, 0 } } },
+		{ t = 0.5, j = { RS = { 172, 0, 0 }, LS = { 152, 0, 10 }, RE = { 22, 0, 0 }, Waist = { 12, 0, 0 }, RH = { 32, 0, 0 }, LH = { 32, 0, 0 }, RK = { -52, 0, 0 }, LK = { -52, 0, 0 } } },
+		{ t = 1, j = { RS = { 170, 0, 0 }, LS = { 150, 0, 10 }, RE = { 20, 0, 0 }, Waist = { 10, 0, 0 }, RH = { 30, 0, 0 }, LH = { 30, 0, 0 }, RK = { -50, 0, 0 }, LK = { -50, 0, 0 } } },
+	}, true),
+	-- ...puis, à l'atterrissage, la lame s'abat d'un coup et le corps s'écrase dans un genou fléchi.
+	plunge_strike = pose(0.5, 0.15, {
+		{ t = 0, j = { RS = { 170, 0, 0 }, LS = { 150, 0, 10 }, Waist = { 10, 0, 0 } } },
+		{ t = 0.15, j = { RS = { 10, 0, 0 }, LS = { 20, 0, 0 }, Waist = { -35, 0, 0 }, RK = { -50, 0, 0 }, LK = { -50, 0, 0 } }, pos = V(0, -0.9, -0.3) },
+		{ t = 0.6, j = { RS = { 15, 0, 0 }, LS = { 22, 0, 0 }, Waist = { -30, 0, 0 }, RK = { -45, 0, 0 }, LK = { -45, 0, 0 } }, pos = V(0, -0.8, -0.3) },
 		{ t = 1, j = NEUTRAL },
 	}),
 

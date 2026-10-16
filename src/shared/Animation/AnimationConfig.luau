@@ -52,7 +52,8 @@ local ACTIONS: { [string]: Action } = {
 	sword_charge = action("charge_hold", 0.12, 0.08),
 	sword_charged = action("charged_release", 0.03, 0.18),
 	sword_counter = action("counter_thrust", 0.03, 0.12),
-	sword_plunge = action("plunge_strike", 0.05, 0.15),
+	sword_plunge_fall = action("plunge_dive", 0.05, 0.05), -- maintenue pendant la chute
+	sword_plunge = action("plunge_strike", 0.02, 0.15), -- impact à l'atterrissage
 	-- Défense, réactions
 	parry = action("parry_guard", 0.03, 0.15),
 	parry_perfect = action("parry_riposte", 0.02, 0.15),

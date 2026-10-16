@@ -6,8 +6,9 @@
 		  (KeyBindings.Parry). Manette : L1. Tactile : bouton « Parade » (ContextActionService).
 		- Appui : ParryRemotes.RequestParry (le serveur horodate), posture visuelle STANCE_DURATION
 		  (contour acier sur le personnage), recharge locale ParryConfig.COOLDOWN.
-		- ParryResult (pour tous) : étincelle à l'endroit du choc ; pour le défenseur, éclair blanc et
-		  « Parade parfaite ».
+		- ParryResult (pour tous) : étincelle à l'endroit du choc ; pour le défenseur, éclair blanc,
+		  « Parade parfaite », pose de riposte et son ; la fenêtre de riposte (CounterUntil) est
+		  annoncée par le HUD de combat (CombatHud).
 		- Ennemis étourdis (attribut StunnedUntil) : un contour ambré tant que dure l'ouverture.
 	Aucune image ni aucun son d'asset : tout est construit avec des Parts et des effets intégrés.
 ]]
@@ -28,6 +29,8 @@ local EnemyDefinitions = require(sharedFolder:WaitForChild("Enemy"):WaitForChild
 local clientFolder = script.Parent.Parent
 local Theme = require(clientFolder:WaitForChild("UI"):WaitForChild("Theme") :: ModuleScript)
 local UIBus = require(clientFolder:WaitForChild("UI"):WaitForChild("UIBus") :: ModuleScript)
+local CharacterAnimator = require(clientFolder:WaitForChild("Animation"):WaitForChild("CharacterAnimator") :: ModuleScript)
+local SfxPlayer = require(clientFolder:WaitForChild("Audio"):WaitForChild("SfxPlayer") :: ModuleScript)
 
 local ACTION_NAME = "Parry"
 local CUSTOMIZING_ATTRIBUTE = "IsCustomizing"
@@ -103,6 +106,12 @@ local function spark(position: Vector3)
 end
 
 local function celebrate()
+	local character = localPlayer.Character
+	if character then
+		CharacterAnimator.get(character, true):play("parry_perfect")
+		local root = character:FindFirstChild("HumanoidRootPart")
+		SfxPlayer.play("parryPerfect", if root and root:IsA("BasePart") then root else nil)
+	end
 	flash.BackgroundTransparency = 0.55
 	TweenService:Create(flash, TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play()
 	perfect.TextTransparency = 0
@@ -138,6 +147,7 @@ local function onParryAction(_name: string, state: Enum.UserInputState): Enum.Co
 	local character = localPlayer.Character
 	if character then
 		showStance(character)
+		CharacterAnimator.get(character, true):play("parry")
 	end
 	return Enum.ContextActionResult.Sink
 end

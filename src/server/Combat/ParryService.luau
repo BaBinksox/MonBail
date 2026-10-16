@@ -20,14 +20,23 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local CombatConfig = require(ReplicatedStorage.Shared.Combat.CombatConfig)
 local Config = require(ReplicatedStorage.Shared.Combat.ParryConfig)
 local Remotes = require(ReplicatedStorage.Shared.Combat.ParryRemotes)
+local Signal = require(ReplicatedStorage.Shared.Util.Signal)
 
 local AvatarService = require(script.Parent.Parent.Avatar.AvatarService)
 local CombatStatus = require(script.Parent.CombatStatus)
 
 local ParryService = {}
+
+-- Parried(player, attacker: Model?) : une parade parfaite vient de réussir (validée par le serveur).
+ParryService.Parried = Signal.new()
+
+-- Bloqueurs de parade (pendant une frappe chargée, une Concentration...).
+local blockers: { (player: Player) -> boolean } = {}
+function ParryService.addBlocker(blocker: (player: Player) -> boolean)
+	table.insert(blockers, blocker)
+end
 
 local lastRequestClock: { [Player]: number } = {}
 local cooldownUntil: { [Player]: number } = {}
@@ -51,6 +60,12 @@ local function onParryRequested(player: Player)
 	if getLivingCharacter(player) == nil or AvatarService.isCustomizing(player) then
 		return
 	end
+	for _, blocker in blockers do
+		local isOk, blocked = pcall(blocker, player)
+		if isOk and blocked then
+			return
+		end
+	end
 	lastRequestClock[player] = now
 	cooldownUntil[player] = now + Config.COOLDOWN
 	player:SetAttribute(Config.PARRY_STANCE_ATTRIBUTE, workspace:GetServerTimeNow())
@@ -72,9 +87,8 @@ local function onParrySucceeded(player: Player, attacker: Model?)
 	if attacker then
 		CombatStatus.stun(attacker, Config.STAGGER_DURATION)
 	end
-	local tension = player:GetAttribute(CombatConfig.TENSION_ATTRIBUTE)
-	local current = if type(tension) == "number" then tension else 0
-	player:SetAttribute(CombatConfig.TENSION_ATTRIBUTE, math.clamp(current + Config.PARRY_TENSION, 0, CombatConfig.TENSION_MAX))
+	-- Tension, posture de l'attaquant et fenêtre de riposte : ResourceService et CombatService.
+	ParryService.Parried:Fire(player, attacker)
 	Remotes.ParryResult:FireAllClients(character, attacker, rootPart.Position)
 end
 

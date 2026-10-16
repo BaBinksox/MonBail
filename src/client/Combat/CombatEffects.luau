@@ -2,11 +2,17 @@
 --[[
 	CombatEffects
 	Tous les effets visuels du combat, joués localement par chaque client :
-		- playBladeTrail : allume la traînée de la lame pendant la fenêtre de frappe ;
-		- playHitImpact  : flash de la cible + gerbe d'étincelles ;
-		- playSwordHit   : coup d'épée qui porte = impact + hit-stop + légère secousse de caméra ;
-		- playUltimate   : le pouvoir ultime, aux couleurs de la Magie Innée du lanceur
-		                   (arrêt sur image, onde de choc, flash, secousse).
+		- playBladeTrail  : allume la traînée de la lame pendant la fenêtre de frappe (plus large si lourd) ;
+		- playHitImpact   : flash de la cible + gerbe d'étincelles ;
+		- playSwordHit    : coup d'épée qui porte = impact + arrêt sur image (durée propre à chaque
+		                    coup) + légère secousse de caméra ;
+		- playHitResult   : ce que seul le serveur sait : coup BLOQUÉ par une garde (étincelles
+		                    métalliques, son mat) ou posture BRISÉE (onde, éclat, son sourd) ;
+		- setChargeGlow / playChargeReady : lueur de la lame pendant l'attaque chargée ;
+		- playPlungeImpact : onde au sol de l'attaque plongeante ;
+		- playUltimate    : le pouvoir ultime, aux couleurs de la Magie Innée du lanceur
+		                    (arrêt sur image, onde de choc, flash, secousse).
+	Mode « effets réduits » : secousses à 30 %, gerbes de particules réduites de moitié.
 
 	Rien ici n'a d'effet sur le jeu : pas de dégâts, pas de collision. Toutes les pièces créées
 	sont locales (invisibles pour le serveur et les autres joueurs), ancrées, intangibles,
@@ -15,6 +21,7 @@
 
 local Debris = game:GetService("Debris")
 local Lighting = game:GetService("Lighting")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
@@ -22,6 +29,8 @@ local TweenService = game:GetService("TweenService")
 local sharedFolder = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Combat")
 local Config = require(sharedFolder:WaitForChild("CombatConfig") :: ModuleScript)
 local ClientSettings = require(script.Parent.Parent:WaitForChild("State"):WaitForChild("ClientSettings") :: ModuleScript)
+local CharacterAnimator = require(script.Parent.Parent:WaitForChild("Animation"):WaitForChild("CharacterAnimator") :: ModuleScript)
+local SfxPlayer = require(script.Parent.Parent:WaitForChild("Audio"):WaitForChild("SfxPlayer") :: ModuleScript)
 
 local REDUCED_SHAKE = 0.3 -- « effets réduits » : secousses de caméra à 30 %
 
@@ -38,6 +47,12 @@ local HIT_FLASH_DURATION = 0.2
 local HIT_SPARK_COUNT = 14
 local HIT_SHAKE_DURATION = 0.15 -- secousse très courte...
 local HIT_SHAKE_AMPLITUDE = 0.22 -- ...et légère (l'ultime monte à SHAKE_AMPLITUDE)
+local HEAVY_SHAKE_AMPLITUDE = 0.45 -- coup final, frappe chargée, riposte
+local BLOCKED_SPARK_COLOR = Color3.fromRGB(255, 196, 120) -- métal contre pierre
+local BREAK_COLOR = Color3.fromRGB(255, 226, 150) -- posture brisée : éclat doré
+local CHARGE_COLOR_LOW = Color3.fromRGB(190, 200, 255)
+local CHARGE_COLOR_FULL = Color3.fromRGB(255, 240, 200)
+local TRAIL_HEAVY_WIDTH_SCALE = 1.6 -- traînée plus ample pour les coups lourds
 
 -- Ultime -----------------------------------------------------------------------
 local CORE_SIZE = 11 -- diamètre de la sphère de vide à la fin de l'arrêt sur image
@@ -320,13 +335,27 @@ end
 -- API publique : épée
 --------------------------------------------------------------------------------
 
+local function particleCount(count: number): number
+	return if ClientSettings.isReducedEffects() then math.max(1, math.floor(count / 2)) else count
+end
+
 -- Allume la traînée de lame de `sword` pendant `duration` secondes (la fenêtre de frappe).
-function CombatEffects.playBladeTrail(sword: Instance, duration: number)
+-- `heavy` : traînée plus ample et plus durable (coup final, frappe chargée, riposte, plongée).
+function CombatEffects.playBladeTrail(sword: Instance, duration: number, heavy: boolean?)
 	local trail = sword:FindFirstChild(Config.BLADE_TRAIL_NAME, true)
 	if trail == nil or not trail:IsA("Trail") then
 		return
 	end
 
+	local baseWidth = trail:GetAttribute("BaseWidthScale")
+	if type(baseWidth) ~= "number" then
+		local current = trail.WidthScale
+		local scale = if typeof(current) == "NumberSequence" then current.Keypoints[1].Value else 1
+		trail:SetAttribute("BaseWidthScale", scale)
+		baseWidth = scale
+	end
+	local width = (baseWidth :: number) * (if heavy then TRAIL_HEAVY_WIDTH_SCALE else 1)
+	trail.WidthScale = NumberSequence.new(width, 0)
 	trail.Enabled = true
 	task.delay(duration, function()
 		trail.Enabled = false -- le sillage déjà tracé finit de s'estomper tout seul
@@ -335,7 +364,7 @@ end
 
 -- Impact sur `target` : flash du personnage et gerbe d'étincelles.
 -- `position` : point d'impact précis s'il est connu, sinon le centre de la cible.
-function CombatEffects.playHitImpact(target: Model, position: Vector3?, color: Color3?)
+function CombatEffects.playHitImpact(target: Model, position: Vector3?, color: Color3?, sparkCount: number?)
 	local flashColor = color or COLOR_WHITE
 
 	local highlight = Instance.new("Highlight")
@@ -347,7 +376,7 @@ function CombatEffects.playHitImpact(target: Model, position: Vector3?, color: C
 	tween(highlight, HIT_FLASH_DURATION, { FillTransparency = 1 })
 	Debris:AddItem(highlight, HIT_FLASH_DURATION)
 
-	emitBurst(position or target:GetPivot().Position, HIT_SPARK_COUNT, 0.35, function(emitter: ParticleEmitter)
+	emitBurst(position or target:GetPivot().Position, particleCount(sparkCount or HIT_SPARK_COUNT), 0.35, function(emitter: ParticleEmitter)
 		emitter.Texture = SPARK_TEXTURE
 		emitter.Color = ColorSequence.new(COLOR_WHITE, flashColor)
 		emitter.Speed = NumberRange.new(12, 28)
@@ -357,21 +386,146 @@ function CombatEffects.playHitImpact(target: Model, position: Vector3?, color: C
 	end)
 end
 
+-- Fige les poses (procédurales et clips) de `characters` pendant `seconds`.
+local function hitStop(characters: { Model }, seconds: number)
+	if seconds <= 0 then
+		return
+	end
+	for _, character in characters do
+		local animator = CharacterAnimator.find(character)
+		if animator then
+			animator:freeze(seconds)
+		end
+	end
+	local resumeAnimations = freezeAnimations(characters)
+	task.delay(seconds, resumeAnimations)
+end
+
+export type HitOptions = {
+	hitStop: number?, -- arrêt sur image (s) ; défaut : HIT_STOP_DURATION
+	heavy: boolean?, -- coup lourd : secousse et gerbe plus fortes
+}
+
 --[[
-	Coup d'épée qui porte : impact, hit-stop et, si demandé, légère secousse de caméra.
-	Le hit-stop fige les animations de l'attaquant et de la cible pendant HIT_STOP_DURATION :
-	la lame "accroche" un instant dans la cible avant de finir sa course.
+	Coup d'épée qui porte : impact, arrêt sur image et, si demandé, légère secousse de caméra.
+	L'arrêt sur image fige les poses de l'attaquant et de la cible : la lame « accroche » un instant
+	dans la cible avant de finir sa course.
 	`shouldShake` : true pour le client qui donne le coup ou qui le reçoit.
 ]]
-function CombatEffects.playSwordHit(attacker: Model?, target: Model, position: Vector3?, shouldShake: boolean)
-	CombatEffects.playHitImpact(target, position)
+function CombatEffects.playSwordHit(attacker: Model?, target: Model, position: Vector3?, shouldShake: boolean, options: HitOptions?)
+	local opts: HitOptions = options or {}
+	local isHeavy = opts.heavy == true
+	CombatEffects.playHitImpact(target, position, nil, if isHeavy then HIT_SPARK_COUNT * 2 else HIT_SPARK_COUNT)
+	hitStop(if attacker then { attacker, target } else { target }, opts.hitStop or Config.HIT_STOP_DURATION)
 
-	local resumeAnimations = freezeAnimations(if attacker then { attacker, target } else { target })
-	task.delay(Config.HIT_STOP_DURATION, resumeAnimations)
-
+	local root = target:FindFirstChild("HumanoidRootPart")
+	SfxPlayer.play("swordHit", if root and root:IsA("BasePart") then root else position, { pitch = if isHeavy then 0.85 else 1 })
 	if shouldShake then
-		shakeCamera(HIT_SHAKE_DURATION, HIT_SHAKE_AMPLITUDE)
+		shakeCamera(HIT_SHAKE_DURATION * (if isHeavy then 1.6 else 1), if isHeavy then HEAVY_SHAKE_AMPLITUDE else HIT_SHAKE_AMPLITUDE)
 	end
+end
+
+-- Résultat que seul le serveur connaît : "blocked" (garde) ou "broken" (posture brisée).
+function CombatEffects.playHitResult(target: Model, result: string, isAttacker: boolean)
+	local position = target:GetPivot().Position
+	if result == "blocked" then
+		emitBurst(position, particleCount(18), 0.3, function(emitter: ParticleEmitter)
+			emitter.Texture = SPARK_TEXTURE
+			emitter.Color = ColorSequence.new(COLOR_WHITE, BLOCKED_SPARK_COLOR)
+			emitter.Speed = NumberRange.new(16, 34)
+			emitter.Drag = 6
+			emitter.Acceleration = Vector3.new(0, -40, 0)
+			emitter.Size = NumberSequence.new(0.35, 0)
+			emitter.Transparency = NumberSequence.new(0, 1)
+		end)
+		SfxPlayer.play("swordBlocked", position)
+		if isAttacker then
+			-- Le bras de l'attaquant « rebondit » : un court sursaut de son personnage.
+			local localCharacter = Players.LocalPlayer.Character
+			if localCharacter then
+				CharacterAnimator.get(localCharacter, true):play("hit_react", { speed = 1.6 })
+			end
+			shakeCamera(0.12, HIT_SHAKE_AMPLITUDE * 0.6)
+		end
+	elseif result == "broken" then
+		CombatEffects.playHitImpact(target, position, BREAK_COLOR, HIT_SPARK_COUNT * 2)
+		local folder = getEffectsFolder()
+		local ring = newEffectPart("PostureBreakRing", Enum.PartType.Cylinder, Vector3.new(0.2, 3, 3), BREAK_COLOR, 0.5)
+		ring.Transparency = 0.2
+		ring.CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.rad(90))
+		ring.Parent = folder
+		tween(ring, 0.45, { Size = Vector3.new(0.2, 14, 14), Transparency = 1 }, Enum.EasingStyle.Quart)
+		SfxPlayer.play("postureBreak", position)
+		if isAttacker then
+			shakeCamera(0.3, HEAVY_SHAKE_AMPLITUDE)
+		end
+	end
+end
+
+-- Lueur de la lame pendant l'attaque chargée. `ratio` : 0..1, nil = éteinte.
+function CombatEffects.setChargeGlow(character: Model, ratio: number?)
+	local sword = character:FindFirstChild(Config.SWORD_NAME)
+	local bladeEnd = sword and sword:FindFirstChild(Config.BLADE_END_NAME, true)
+	if bladeEnd == nil or not bladeEnd:IsA("Attachment") then
+		return
+	end
+	local light = bladeEnd:FindFirstChild("ChargeGlow")
+	if ratio == nil then
+		if light then
+			light:Destroy()
+		end
+		return
+	end
+	if light == nil then
+		local newLight = Instance.new("PointLight")
+		newLight.Name = "ChargeGlow"
+		newLight.Range = 6
+		newLight.Shadows = false
+		newLight.Parent = bladeEnd
+		light = newLight
+	end
+	if light and light:IsA("PointLight") then
+		light.Color = CHARGE_COLOR_LOW:Lerp(CHARGE_COLOR_FULL, ratio)
+		light.Brightness = 0.5 + ratio * 2.5
+		light.Range = 5 + ratio * 5
+	end
+end
+
+-- Charge pleine : un éclat bref sur la lame.
+function CombatEffects.playChargeReady(character: Model)
+	local sword = character:FindFirstChild(Config.SWORD_NAME)
+	local bladeEnd = sword and sword:FindFirstChild(Config.BLADE_END_NAME, true)
+	if bladeEnd and bladeEnd:IsA("Attachment") then
+		emitBurst(bladeEnd.WorldPosition, particleCount(10), 0.35, function(emitter: ParticleEmitter)
+			emitter.Texture = SPARK_TEXTURE
+			emitter.Color = ColorSequence.new(CHARGE_COLOR_FULL)
+			emitter.Speed = NumberRange.new(4, 9)
+			emitter.Size = NumberSequence.new(0.6, 0)
+			emitter.Transparency = NumberSequence.new(0, 1)
+		end)
+	end
+end
+
+-- Atterrissage de l'attaque plongeante : anneau au sol, poussière, secousse.
+function CombatEffects.playPlungeImpact(_character: Model, groundPosition: Vector3)
+	local folder = getEffectsFolder()
+	local diameter = (Config.HITBOX_SIZE.X + Config.PLUNGE.widthBonus) * 1.2
+	local ring = newEffectPart("PlungeRing", Enum.PartType.Cylinder, Vector3.new(0.3, 2, 2), CHARGE_COLOR_LOW, 0.6)
+	ring.Transparency = 0.25
+	ring.CFrame = CFrame.new(groundPosition + Vector3.new(0, 0.15, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	ring.Parent = folder
+	tween(ring, 0.5, { Size = Vector3.new(0.3, diameter, diameter), Transparency = 1 }, Enum.EasingStyle.Quart)
+	emitBurst(groundPosition + Vector3.new(0, 0.5, 0), particleCount(24), 0.9, function(emitter: ParticleEmitter)
+		emitter.Texture = SMOKE_TEXTURE
+		emitter.LightEmission = 0
+		emitter.Color = ColorSequence.new(Color3.fromRGB(170, 160, 150))
+		emitter.SpreadAngle = Vector2.new(80, 10)
+		emitter.Speed = NumberRange.new(8, 16)
+		emitter.Drag = 3
+		emitter.Size = NumberSequence.new(1.5, 4)
+		emitter.Transparency = NumberSequence.new(0.4, 1)
+	end)
+	shakeCamera(0.25, HEAVY_SHAKE_AMPLITUDE)
 end
 
 --------------------------------------------------------------------------------

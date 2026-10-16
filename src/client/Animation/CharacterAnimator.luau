@@ -58,7 +58,7 @@ type Layer = {
 type JointState = { base: CFrame, written: CFrame }
 
 local CHANNELS = { "action", "hold", "react" }
-local HOLD_ACTIONS: { [string]: boolean } = { sword_charge = true, concentrate = true }
+local HOLD_ACTIONS: { [string]: boolean } = { sword_charge = true, sword_plunge_fall = true, concentrate = true }
 local REACT_ACTIONS: { [string]: boolean } = { hit_react = true, stagger = true }
 
 local CharacterAnimator = {}

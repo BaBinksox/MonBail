@@ -122,6 +122,7 @@ local function modifyDamage(enemy: Enemy, amount: number, source: DamageService.
 		local towards = EnemyBrain.flatUnit(attackerPosition - rootPosition, enemy.rootPart.CFrame.LookVector)
 		EnemyBrain.action(enemy, "guard_block", rootPosition + towards * (1.5 * enemy.def.appearance.modelScale))
 	end
+	source.blocked = true -- l'épée « rebondit » chez l'attaquant (CombatService : résultat "blocked")
 	return amount * (1 - guard.reduction)
 end
 

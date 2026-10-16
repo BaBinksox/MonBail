@@ -30,6 +30,8 @@ local MovementState = require(clientFolder:WaitForChild("Movement"):WaitForChild
 
 local AIRBORNE_SPEED = 3 -- studs/s verticaux : au-delà, un personnage distant est « en l'air »
 local CONCENTRATING_ATTRIBUTE = "Concentrating"
+local CHARGING_ATTRIBUTE = "Charging" -- = CombatConfig.CHARGING_ATTRIBUTE
+local PLUNGE_REMOTE_TIMEOUT = 1.5 -- s : au-delà, la plongée d'un autre joueur est considérée finie
 
 local localPlayer = Players.LocalPlayer
 
@@ -108,8 +110,38 @@ end)
 -- Événements du serveur (actions des autres joueurs, impacts)
 --------------------------------------------------------------------------------
 
+-- Plongée d'un autre joueur : lame levée pendant sa chute, frappe quand il touche le sol.
+local function playRemotePlunge(character: Model)
+	if character == localPlayer.Character or not isNearCamera(character) then
+		return
+	end
+	local animator = animatorFor(character)
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if animator == nil or root == nil or not root:IsA("BasePart") then
+		return
+	end
+	animator:play("sword_plunge_fall")
+	local startClock = os.clock()
+	local hasFallen = false
+	while character.Parent and os.clock() - startClock < PLUNGE_REMOTE_TIMEOUT do
+		local verticalSpeed = root.AssemblyLinearVelocity.Y
+		if verticalSpeed < -20 then
+			hasFallen = true
+		elseif hasFallen and verticalSpeed > -3 then
+			break -- la chute vient de s'arrêter : il est au sol
+		end
+		RunService.Heartbeat:Wait()
+	end
+	animator:stop("hold")
+	animator:play("sword_plunge")
+end
+
 CombatRemotes.AttackStarted.OnClientEvent:Connect(function(attacker: Model?, comboIndex: any, kind: any)
-	if type(kind) == "string" and kind ~= "" then
+	if kind == "sword_plunge" then
+		if attacker then
+			task.spawn(playRemotePlunge, attacker)
+		end
+	elseif type(kind) == "string" and kind ~= "" then
 		playRemote(attacker, kind)
 	elseif type(comboIndex) == "number" then
 		playRemote(attacker, `sword_{comboIndex}`)
@@ -134,7 +166,23 @@ MovementRemotes.DoubleJumped.OnClientEvent:Connect(function(character: Model?)
 	playRemote(character, "double_jump")
 end)
 
--- Parade et Concentration des autres joueurs : attributs posés par le serveur.
+-- Postures maintenues d'un autre joueur (Concentration, charge) : attribut booléen posé par le serveur.
+local function watchHold(player: Player, attribute: string, actionName: string)
+	player:GetAttributeChangedSignal(attribute):Connect(function()
+		local character = player.Character
+		if character == nil or not isNearCamera(character) then
+			return
+		end
+		local animator = animatorFor(character)
+		if player:GetAttribute(attribute) == true then
+			animator:play(actionName)
+		elseif animator:isPlaying(actionName) then
+			animator:stop("hold")
+		end
+	end)
+end
+
+-- Parade, Concentration et charge des autres joueurs : attributs posés par le serveur.
 local function watchPlayer(player: Player)
 	if player == localPlayer then
 		return
@@ -142,18 +190,8 @@ local function watchPlayer(player: Player)
 	player:GetAttributeChangedSignal(ParryConfig.PARRY_STANCE_ATTRIBUTE):Connect(function()
 		playRemote(player.Character, "parry")
 	end)
-	player:GetAttributeChangedSignal(CONCENTRATING_ATTRIBUTE):Connect(function()
-		local character = player.Character
-		if character == nil or not isNearCamera(character) then
-			return
-		end
-		local animator = animatorFor(character)
-		if player:GetAttribute(CONCENTRATING_ATTRIBUTE) == true then
-			animator:play("concentrate")
-		else
-			animator:stop("hold")
-		end
-	end)
+	watchHold(player, CONCENTRATING_ATTRIBUTE, "concentrate")
+	watchHold(player, CHARGING_ATTRIBUTE, "sword_charge")
 end
 Players.PlayerAdded:Connect(watchPlayer)
 for _, player in Players:GetPlayers() do

@@ -23,6 +23,7 @@ SpatialHitbox.__index = SpatialHitbox
 type HitboxData = {
 	_rootPart: BasePart,
 	_size: Vector3,
+	_centered: boolean,
 	_overlapParams: OverlapParams,
 	_raycastParams: RaycastParams,
 	_hitCharacters: { [Model]: boolean },
@@ -44,8 +45,11 @@ function SpatialHitbox.getCharacterFromPart(part: Instance): Model?
 end
 
 -- Position de la boîte de taille `size` pour un personnage dont le RootPart est en `rootCFrame` :
--- collée devant lui, centrée sur sa hauteur.
-function SpatialHitbox.getBoxCFrame(rootCFrame: CFrame, size: Vector3): CFrame
+-- collée devant lui, centrée sur sa hauteur. `centered` : centrée sur lui (coup tournoyant, plongée).
+function SpatialHitbox.getBoxCFrame(rootCFrame: CFrame, size: Vector3, centered: boolean?): CFrame
+	if centered then
+		return rootCFrame
+	end
 	return rootCFrame * CFrame.new(0, 0, -size.Z / 2)
 end
 
@@ -66,7 +70,7 @@ local function isReachable(self: SpatialHitbox, character: Model, part: BasePart
 end
 
 local function step(self: SpatialHitbox, onHit: HitCallback)
-	local boxCFrame = SpatialHitbox.getBoxCFrame(self._rootPart.CFrame, self._size)
+	local boxCFrame = SpatialHitbox.getBoxCFrame(self._rootPart.CFrame, self._size, self._centered)
 
 	for _, part in workspace:GetPartBoundsInBox(boxCFrame, self._size, self._overlapParams) do
 		local character = SpatialHitbox.getCharacterFromPart(part)
@@ -92,6 +96,7 @@ function SpatialHitbox.new(rootPart: BasePart, ignoreList: { Instance }): Spatia
 	local data: HitboxData = {
 		_rootPart = rootPart,
 		_size = Vector3.one,
+		_centered = false,
 		_overlapParams = overlapParams,
 		_raycastParams = raycastParams,
 		_hitCharacters = {},
@@ -103,9 +108,11 @@ end
 -- Active une zone de taille `size` (largeur, hauteur, profondeur) pour `duration` secondes, puis
 -- elle se coupe TOUTE SEULE : aucune détection n'a lieu en dehors de cette fenêtre.
 -- `onHit` est appelé une fois par personnage touché, avec la position de la pièce atteinte.
-function SpatialHitbox.start(self: SpatialHitbox, duration: number, size: Vector3, onHit: HitCallback)
+-- `centered` : la boîte est centrée sur le personnage au lieu d'être posée devant lui.
+function SpatialHitbox.start(self: SpatialHitbox, duration: number, size: Vector3, onHit: HitCallback, centered: boolean?)
 	self:stop()
 	self._size = size
+	self._centered = centered == true
 	self._hitCharacters = {}
 
 	local stopClock = os.clock() + duration

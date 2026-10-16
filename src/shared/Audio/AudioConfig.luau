@@ -135,6 +135,7 @@ local SFX: { [string]: Sfx } = {
 	parryPerfect = sfx(CLASSIC_UNSHEATH, 0.65, "Tintement métallique clair et réverbéré (parade parfaite).", 1.35, 0.03, 0.1, 2),
 	postureBreak = sfx("", 0.7, "Craquement sourd + souffle (garde brisée).", 1, 0.05, 0.2, 2),
 	chargeReady = sfx(CLASSIC_UNSHEATH, 0.4, "Montée métallique brève (attaque chargée prête).", 1.6, 0.02, 0.3, 1),
+	plungeImpact = sfx("", 0.6, "Impact lourd au sol + poussière (attaque plongeante).", 1, 0.05, 0.2, 2),
 	-- Mobilité
 	dodge = sfx("", 0.45, "Souffle d'air rapide (esquive / dash).", 1, 0.08),
 	dodgePerfect = sfx("", 0.5, "Souffle + éclat cristallin discret (esquive parfaite).", 1, 0.03, 0.2, 1),

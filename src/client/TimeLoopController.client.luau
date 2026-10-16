@@ -2,7 +2,7 @@
 --[[
 	TimeLoopController (LocalScript)
 	Côté client du Time-Loop :
-		- envoie la demande de rewind au serveur (touche REWIND_KEY) ;
+		- envoie la demande de rewind au serveur (touche REWIND_KEY, croix bas à la manette) ;
 		- met en scène l'anomalie et le rembobinage en réaction aux RemoteEvents du serveur :
 		  l'image avec GlitchOverlay, le son avec TimeLoopAudio.
 
@@ -21,6 +21,7 @@ local UserInputService = game:GetService("UserInputService")
 local sharedFolder = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("TimeLoop")
 local Config = require(sharedFolder:WaitForChild("TimeLoopConfig") :: ModuleScript)
 local Remotes = require(sharedFolder:WaitForChild("TimeLoopRemotes") :: ModuleScript)
+local KeyBindings = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Input"):WaitForChild("KeyBindings") :: ModuleScript)
 
 local modulesFolder = script.Parent:WaitForChild("TimeLoop")
 local GlitchOverlay = require(modulesFolder:WaitForChild("GlitchOverlay") :: ModuleScript)
@@ -55,11 +56,13 @@ end
 -- Entrée joueur
 --------------------------------------------------------------------------------
 
+-- Clavier (REWIND_KEY) et manette (KeyBindings.Rewind : croix bas).
+local rewindGamepad = KeyBindings.BINDINGS.Rewind.gamepad
 UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
 	if gameProcessed then
 		return
 	end
-	if input.KeyCode == Config.REWIND_KEY then
+	if input.KeyCode == Config.REWIND_KEY or (rewindGamepad ~= nil and input.KeyCode == rewindGamepad) then
 		Remotes.RequestRewind:FireServer()
 	end
 end)

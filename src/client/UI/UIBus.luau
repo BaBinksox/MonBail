@@ -17,6 +17,8 @@
 		Feedback(kind: string)
 			Petit retour sonore discret : "secret", "mechanism", "regionEnter" (WorldFeedback,
 			sons réglés dans AudioConfig.FEEDBACK_SOUNDS).
+		ManaDenied(spellId: string?)
+			Un sort n'a pas pu partir faute de Mana : le HUD de combat le signale.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -29,4 +31,5 @@ return table.freeze({
 	ShowText = Signal.new(),
 	DialogueStateChanged = Signal.new(),
 	Feedback = Signal.new(),
+	ManaDenied = Signal.new(),
 })

@@ -1,22 +1,29 @@
 --!strict
 --[[
 	CombatService
-	Façade serveur du combat (singleton).
+	Façade serveur du combat à l'épée (singleton), Combat 2.0.
 		- équipe chaque personnage de son épée (Motor6D, voir SwordFactory) ;
-		- valide les demandes d'attaque : état du joueur, ordre et cadence du combo ;
-		- valide chaque impact signalé par le client : fenêtre de frappe, cible autorisée, distance,
-		  ligne de vue (raycast serveur), une seule touche par cible et par coup ;
-		- applique les dégâts (via DamageService : contributions, élimination unique, parade en PvP)
-		  et l'éjection. C'est le SEUL endroit du jeu où un coup d'épée blesse ;
-		- tient la Tension de chaque joueur (gagnée à chaque impact validé) et déclenche le pouvoir
-		  ultime de sa Magie Innée : jauge vérifiée ici, vidée ici, dégâts de zone infligés ici.
+		- valide les demandes d'attaque (RequestAttack) selon leur nature :
+			1..5       coup du combo : ordre, cadence (un coup ne part pas avant la fin du précédent),
+			           délai d'enchaînement (COMBO_RESET_DELAY) ;
+			"charged"  frappe chargée : une charge doit avoir commencé (RequestChargeStart) ; sa
+			           PUISSANCE (0..1) est calculée ICI, d'après la durée de charge vue par le serveur.
+			           Pendant la charge : ralenti, ni sprint, ni parade, ni Concentration, plus de
+			           dégâts reçus ; recharge CHARGE_COOLDOWN après la frappe ;
+			"counter"  riposte : seulement dans la fenêtre ouverte par une parade parfaite ;
+			"plunge"   attaque plongeante : seulement en l'air (raycast serveur), avec recharge ;
+		- valide chaque impact signalé par le client (ReportHit) : fenêtre de frappe, cible autorisée,
+		  portée (zone devant le joueur ou centrée sur lui), ligne de vue, une touche par cible et par coup ;
+		- applique les dégâts (DamageService : contributions, élimination unique, garde, parade PvP),
+		  la posture (PostureService), l'éjection et la Tension (ResourceService, une fois par coup).
+		  C'est le SEUL endroit du jeu où un coup d'épée blesse ;
+		- élan d'esquive parfaite (MOMENTUM : coups un peu plus forts quelques secondes) ;
+		- déclenche le pouvoir ultime de la Magie Innée (Tension pleine, vérifiée et vidée ici).
 
-	Le client détecte les impacts (zone de frappe devant lui, sans latence), mais il ne fait que
-	DEMANDER : il n'envoie ni dégâts ni position, seulement "j'ai touché ce Model".
-
-	Le serveur ne vérifie pas l'orientation de l'attaquant : avec le soft-lock, il se tourne
-	instantanément vers sa cible, et cette rotation n'est pas encore répliquée quand l'impact
-	arrive. Ce qui compte, et qui est vérifié, c'est que la cible soit à portée de sa zone de frappe.
+	Le client détecte les impacts (zone de frappe, sans latence), mais il ne fait que DEMANDER :
+	il n'envoie ni dégâts, ni position, ni puissance de charge, seulement « j'ai touché ce Model ».
+	Le serveur ne vérifie pas l'orientation de l'attaquant (le soft-lock le tourne instantanément
+	vers sa cible, rotation pas encore répliquée) : il vérifie que la cible était à portée.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
@@ -31,25 +38,51 @@ local SpatialHitbox = require(ReplicatedStorage.Shared.Combat.SpatialHitbox)
 local TimeLoopConfig = require(ReplicatedStorage.Shared.TimeLoop.TimeLoopConfig)
 
 local AvatarService = require(script.Parent.Parent.Avatar.AvatarService)
-local RaceService = require(script.Parent.Parent.Avatar.RaceService)
 local DamageService = require(script.Parent.DamageService)
+local MovementService = require(script.Parent.Parent.Movement.MovementService)
+local ParryService = require(script.Parent.ParryService)
+local PostureService = require(script.Parent.PostureService)
+local RateLimiter = require(script.Parent.Parent.Net.RateLimiter)
+local ResourceService = require(script.Parent.ResourceService)
 local SwordFactory = require(script.Parent.SwordFactory)
 local TimeLoopService = require(script.Parent.Parent.TimeLoop.TimeLoopService)
 local UltimateBehaviors = require(script.Parent.UltimateBehaviors)
 
--- Dernier coup accepté d'un joueur.
+-- Dernière attaque acceptée d'un joueur.
 type AttackState = {
-	comboIndex: number,
+	kind: string, -- "combo" | "charged" | "counter" | "plunge"
+	comboIndex: number, -- 1..5 pour le combo, 0 sinon
+	step: Config.AttackStep,
 	startClock: number,
-	hitTargets: { [Model]: boolean }, -- cibles déjà blessées par ce coup
+	power: number, -- 0..1 (charge) ; 1 pour les autres attaques
+	hitTargets: { [Model]: boolean }, -- cibles déjà touchées par cette attaque
+	tensionGiven: boolean, -- la Tension n'est gagnée qu'une fois par attaque, pas par cible
+}
+
+type PlayerState = {
+	attack: AttackState?,
+	chargeStart: number?, -- os.clock() du début de la charge en cours
+	chargeToken: number, -- identifie la charge en cours (annulation automatique)
+	chargeReadyAt: number,
+	plungeReadyAt: number,
+	counterUntil: number,
+	momentumUntil: number,
 }
 
 local HAND_READY_TIMEOUT = 10 -- secondes d'attente maximum pour qu'une main (ou son point de prise) existe
 local KNOCKBACK_MAX_FORCE = 1e6 -- assez pour imposer la vitesse d'éjection malgré le Humanoid de la cible
+local FULL_CHARGE_TOLERANCE = 0.1 -- s : une charge relâchée à peine avant le plein est comptée pleine
+local PLUNGE_MIN_HEIGHT = 2.5 -- studs de vide sous les pieds pour accepter une plongée
+local BLOCKED_POSTURE_FACTOR = 0.5 -- un coup bloqué par une garde n'entame que la moitié de la posture
+local BLOCKED_TENSION_FACTOR = 0.5
 
 local CombatService = {}
 
-local attacks: { [Player]: AttackState } = {}
+local states: { [Player]: PlayerState } = {}
+local attackLimiter = RateLimiter.new(8, 10)
+local hitLimiter = RateLimiter.new(30, 40) -- plusieurs cibles par coup
+local chargeLimiter = RateLimiter.new(3, 4)
+local ultimateLimiter = RateLimiter.new(2, 3)
 local isStarted = false
 
 --------------------------------------------------------------------------------
@@ -60,6 +93,23 @@ local function logRejection(player: Player, reason: string)
 	if Config.DEBUG_LOGS then
 		print(`[Combat] Refusé pour {player.Name} : {reason}`)
 	end
+end
+
+local function getState(player: Player): PlayerState
+	local state = states[player]
+	if state == nil then
+		state = {
+			attack = nil,
+			chargeStart = nil,
+			chargeToken = 0,
+			chargeReadyAt = 0,
+			plungeReadyAt = 0,
+			counterUntil = 0,
+			momentumUntil = 0,
+		}
+		states[player] = state
+	end
+	return state
 end
 
 -- Retourne le Humanoid et le RootPart d'un personnage vivant, sinon nil.
@@ -82,19 +132,14 @@ local function isInvulnerable(target: Model): boolean
 	return target:GetAttribute(Config.INVULNERABLE_ATTRIBUTE) == true
 end
 
---------------------------------------------------------------------------------
--- Tension
---------------------------------------------------------------------------------
--- La Tension vit dans un attribut du Player : écrite ici, répliquée automatiquement au client
--- pour sa jauge. Une modification faite par un client reste chez lui, le serveur ne la voit pas.
-
-local function getTension(player: Player): number
-	local tension = player:GetAttribute(Config.TENSION_ATTRIBUTE)
-	return if type(tension) == "number" then tension else 0
+local function lerp(a: number, b: number, t: number): number
+	return a + (b - a) * t
 end
 
-local function setTension(player: Player, tension: number)
-	player:SetAttribute(Config.TENSION_ATTRIBUTE, math.clamp(tension, 0, Config.TENSION_MAX))
+-- L'attaque précédente est-elle terminée (à la marge de latence près) ?
+local function isPreviousFinished(state: PlayerState, now: number): boolean
+	local attack = state.attack
+	return attack == nil or now >= attack.startClock + attack.step.duration - Config.CADENCE_TOLERANCE
 end
 
 --------------------------------------------------------------------------------
@@ -140,62 +185,184 @@ local function equipSword(character: Model)
 end
 
 --------------------------------------------------------------------------------
+-- Charge
+--------------------------------------------------------------------------------
+
+-- Attaque en cours (ou dernière acceptée) : nature, coup du combo, puissance. Pour les tests et le débogage.
+function CombatService.getCurrentAttack(player: Player): (string?, number, number)
+	local state = states[player]
+	local attack = state and state.attack
+	if attack == nil then
+		return nil, 0, 0
+	end
+	return attack.kind, attack.comboIndex, attack.power
+end
+
+function CombatService.isCharging(player: Player): boolean
+	local state = states[player]
+	return state ~= nil and state.chargeStart ~= nil
+end
+
+local function endCharge(player: Player, state: PlayerState)
+	if state.chargeStart == nil then
+		return
+	end
+	state.chargeStart = nil
+	state.chargeToken += 1
+	player:SetAttribute(Config.CHARGING_ATTRIBUTE, false)
+	MovementService.refreshSpeed(player)
+end
+
+local function onChargeStartRequested(player: Player)
+	if not chargeLimiter:allow(player) then
+		return
+	end
+	local state = getState(player)
+	local now = os.clock()
+	if getLivingParts(player.Character) == nil or isOutOfCombat(player) then
+		return
+	end
+	if state.chargeStart ~= nil or now < state.chargeReadyAt - Config.LATENCY_TOLERANCE then
+		logRejection(player, "charge déjà en cours ou en recharge")
+		return
+	end
+	if not isPreviousFinished(state, now) or ResourceService.isConcentrating(player) then
+		logRejection(player, "charge impossible maintenant")
+		return
+	end
+
+	state.chargeStart = now
+	state.chargeToken += 1
+	local token = state.chargeToken
+	player:SetAttribute(Config.CHARGING_ATTRIBUTE, true)
+	MovementService.stopSprint(player)
+	MovementService.refreshSpeed(player)
+
+	-- Charge jamais relâchée (client déconnecté, entrée perdue) : elle tombe d'elle-même.
+	task.delay(Config.CHARGE_MAX_HOLD + Config.LATENCY_TOLERANCE * 2, function()
+		if state.chargeToken == token and state.chargeStart ~= nil then
+			endCharge(player, state)
+			state.chargeReadyAt = os.clock() + Config.CHARGE_COOLDOWN * 0.5
+		end
+	end)
+end
+
+--------------------------------------------------------------------------------
 -- Validation d'une attaque
 --------------------------------------------------------------------------------
 
--- Vérifie que `comboIndex` est un enchaînement plausible après `last`. Retourne (ok, raison du refus).
-local function isComboStepAllowed(last: AttackState?, comboIndex: number, now: number): (boolean, string)
-	if last == nil then
-		return comboIndex == 1, "le combo doit commencer par le coup 1"
-	end
-
-	local lastEndClock = last.startClock + Config.COMBO[last.comboIndex].duration
-	if now < lastEndClock - Config.LATENCY_TOLERANCE then
+-- Vérifie qu'un coup de combo `comboIndex` est un enchaînement plausible. Retourne (ok, raison du refus).
+local function isComboStepAllowed(state: PlayerState, comboIndex: number, now: number): (boolean, string)
+	if not isPreviousFinished(state, now) then
 		return false, "coup précédent encore en cours"
 	end
 	if comboIndex == 1 then
 		return true, ""
 	end
-
+	local last = state.attack
+	if last == nil or last.kind ~= "combo" then
+		return false, "le combo doit commencer par le coup 1"
+	end
+	local lastEndClock = last.startClock + last.step.duration
 	local isNextStep = comboIndex == last.comboIndex + 1
 	local isInTime = now - lastEndClock <= Config.COMBO_RESET_DELAY + Config.LATENCY_TOLERANCE
 	return isNextStep and isInTime, "enchaînement de combo invalide"
 end
 
-local function onAttackRequested(player: Player, comboIndex: any)
-	if type(comboIndex) ~= "number" or Config.COMBO[comboIndex] == nil then
+-- Le personnage est-il en l'air ? Raycast serveur sous ses pieds (le client simule son personnage :
+-- son état Humanoid n'est pas une preuve).
+local function isAirborne(character: Model, humanoid: Humanoid, rootPart: BasePart): boolean
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { character }
+	params.RespectCanCollide = true
+	local feet = rootPart.Size.Y / 2 + humanoid.HipHeight
+	local result = workspace:Raycast(rootPart.Position, Vector3.new(0, -(feet + PLUNGE_MIN_HEIGHT), 0), params)
+	return result == nil
+end
+
+local function startAttack(player: Player, state: PlayerState, kind: string, comboIndex: number, step: Config.AttackStep, power: number)
+	state.attack = {
+		kind = kind,
+		comboIndex = comboIndex,
+		step = step,
+		startClock = os.clock(),
+		power = power,
+		hitTargets = {},
+		tensionGiven = false,
+	}
+	-- Les poses sont calculées par chaque client : les autres sont prévenus pour animer l'attaquant
+	-- et allumer la traînée de sa lame. L'attaquant, lui, l'a déjà fait.
+	local character = player.Character
+	for _, otherPlayer in Players:GetPlayers() do
+		if otherPlayer ~= player then
+			Remotes.AttackStarted:FireClient(otherPlayer, character, comboIndex, step.action, power)
+		end
+	end
+	if Config.DEBUG_LOGS then
+		print(`[Combat] {player.Name} : {step.name}{if kind == "charged" then ` (puissance {math.floor(power * 100)} %)` else ""}`)
+	end
+end
+
+local function onAttackRequested(player: Player, kind: any)
+	if not attackLimiter:allow(player) then
 		return
 	end
-
 	local character = player.Character
-	if getLivingParts(character) == nil or isOutOfCombat(player) then
+	local humanoid, rootPart = getLivingParts(character)
+	if character == nil or humanoid == nil or rootPart == nil or isOutOfCombat(player) then
 		logRejection(player, "joueur hors combat")
 		return
 	end
-
+	local state = getState(player)
 	local now = os.clock()
-	local isAllowed, reason = isComboStepAllowed(attacks[player], comboIndex, now)
-	if not isAllowed then
-		logRejection(player, reason)
-		return
-	end
 
-	attacks[player] = {
-		comboIndex = comboIndex,
-		startClock = now,
-		hitTargets = {},
-	}
-
-	-- L'animation de l'attaquant est répliquée par Roblox, mais pas ses VFX (traînée de lame) :
-	-- les autres clients sont prévenus pour les jouer chez eux. L'attaquant, lui, l'a déjà fait.
-	for _, otherPlayer in Players:GetPlayers() do
-		if otherPlayer ~= player then
-			Remotes.AttackStarted:FireClient(otherPlayer, character, comboIndex)
+	if type(kind) == "number" then
+		if Config.COMBO[kind] == nil then
+			return
 		end
-	end
-
-	if Config.DEBUG_LOGS then
-		print(`[Combat] {player.Name} lance le coup {comboIndex} ({Config.COMBO[comboIndex].name})`)
+		if state.chargeStart ~= nil then
+			logRejection(player, "coup de combo pendant une charge")
+			return
+		end
+		local isAllowed, reason = isComboStepAllowed(state, kind, now)
+		if not isAllowed then
+			logRejection(player, reason)
+			return
+		end
+		startAttack(player, state, "combo", kind, Config.COMBO[kind], 1)
+	elseif kind == "charged" then
+		local chargeStart = state.chargeStart
+		if chargeStart == nil then
+			logRejection(player, "frappe chargée sans charge")
+			return
+		end
+		local held = now - chargeStart
+		endCharge(player, state)
+		local power = if held >= Config.CHARGE_FULL_TIME - FULL_CHARGE_TOLERANCE then 1 else math.clamp(held / Config.CHARGE_FULL_TIME, 0, 1)
+		state.chargeReadyAt = now + Config.CHARGE_COOLDOWN
+		startAttack(player, state, "charged", 0, Config.CHARGED, power)
+	elseif kind == "counter" then
+		if now > state.counterUntil + Config.LATENCY_TOLERANCE then
+			logRejection(player, "riposte hors de la fenêtre de parade")
+			return
+		end
+		state.counterUntil = 0
+		player:SetAttribute(Config.COUNTER_ATTRIBUTE, 0)
+		endCharge(player, state)
+		startAttack(player, state, "counter", 0, Config.COUNTER, 1)
+	elseif kind == "plunge" then
+		if now < state.plungeReadyAt - Config.LATENCY_TOLERANCE or not isPreviousFinished(state, now) then
+			logRejection(player, "plongée en recharge")
+			return
+		end
+		if not isAirborne(character, humanoid, rootPart) then
+			logRejection(player, "plongée demandée au sol")
+			return
+		end
+		state.plungeReadyAt = now + Config.PLUNGE_COOLDOWN
+		endCharge(player, state)
+		startAttack(player, state, "plunge", 0, Config.PLUNGE, 1)
 	end
 end
 
@@ -218,11 +385,18 @@ local function isTargetAllowed(target: Model): boolean
 	return DamageService.isDamageableEnemy(target)
 end
 
+-- Taille de la zone de frappe d'une attaque (identique côté client : CombatController).
+local function getHitboxSize(step: Config.AttackStep): Vector3
+	return Config.HITBOX_SIZE + Vector3.new(step.widthBonus, 0, step.reachBonus)
+end
+CombatService.getHitboxSize = getHitboxSize
+
 -- Distance maximale (studs) entre l'attaquant et le bord d'une cible pour qu'elle ait pu se trouver
--- dans la zone de frappe de ce coup : le coin le plus éloigné de la boîte, plus la marge du serveur.
-local function getMaxHitDistance(step: Config.ComboStep): number
-	local halfWidth = Config.HITBOX_SIZE.X / 2
-	local depth = Config.HITBOX_SIZE.Z + step.reachBonus
+-- dans la zone de frappe : le coin le plus éloigné de la boîte, plus la marge du serveur.
+local function getMaxHitDistance(step: Config.AttackStep): number
+	local size = getHitboxSize(step)
+	local halfWidth = size.X / 2
+	local depth = if step.centered then size.Z / 2 else size.Z
 	return math.sqrt(depth * depth + halfWidth * halfWidth) + Config.HITBOX_RANGE_TOLERANCE
 end
 
@@ -276,12 +450,30 @@ local function applyKnockback(attackerRoot: BasePart, targetRoot: BasePart, spee
 	Debris:AddItem(attachment, Config.KNOCKBACK_DURATION)
 end
 
+-- Valeurs effectives d'une attaque : la charge interpole entre la frappe minimale et maximale.
+local function resolveStrike(attack: AttackState, state: PlayerState): (number, number, number, boolean)
+	local step = attack.step
+	local damage, posture, knockback, heavy = step.damage, step.posture, step.knockback, step.heavy
+	if attack.kind == "charged" then
+		local power = attack.power
+		damage = lerp(step.damage, Config.CHARGE_MAX_DAMAGE, power)
+		posture = lerp(step.posture, Config.CHARGE_MAX_POSTURE, power)
+		knockback = lerp(step.knockback, Config.CHARGE_MAX_KNOCKBACK, power)
+		heavy = power >= 1 -- seule une charge pleine brise les gardes frontales
+	end
+	if os.clock() < state.momentumUntil then
+		damage *= Config.MOMENTUM_DAMAGE
+	end
+	return damage, posture, knockback, heavy
+end
+
 local function onHitReported(player: Player, target: any)
-	if typeof(target) ~= "Instance" or not target:IsA("Model") then
+	if typeof(target) ~= "Instance" or not target:IsA("Model") or not hitLimiter:allow(player) then
 		return
 	end
 
-	local attack = attacks[player]
+	local state = getState(player)
+	local attack = state.attack
 	local attacker = player.Character
 	local _, attackerRoot = getLivingParts(attacker)
 	if attack == nil or attacker == nil or attackerRoot == nil or isOutOfCombat(player) then
@@ -289,7 +481,7 @@ local function onHitReported(player: Player, target: any)
 	end
 
 	-- 1. Le coup doit être dans sa fenêtre de frappe.
-	local step = Config.COMBO[attack.comboIndex]
+	local step = attack.step
 	local elapsed = os.clock() - attack.startClock
 	if elapsed < step.hitStart - Config.LATENCY_TOLERANCE or elapsed > step.hitEnd + Config.LATENCY_TOLERANCE then
 		logRejection(player, "impact hors de la fenêtre de frappe")
@@ -319,39 +511,81 @@ local function onHitReported(player: Player, target: any)
 	end
 
 	attack.hitTargets[target] = true
+	local damage, posture, knockback, heavy = resolveStrike(attack, state)
 	local source: DamageService.DamageSource = {
 		player = player,
 		model = attacker,
 		kind = "melee",
-		heavy = step.knockback > 0, -- le coup final du combo brise les gardes
+		heavy = heavy,
 	}
 
 	local applied = 0
+	local isBroken = false
 	local targetPlayer = Players:GetPlayerFromCharacter(target)
 	if targetPlayer then
 		-- PvP : dash, parade et immunités du défenseur sont arbitrés par DamageService (peut yield).
-		local result, damage = DamageService.damagePlayer(targetPlayer, step.damage, source)
+		local result, dealt = DamageService.damagePlayer(targetPlayer, damage, source)
 		if result ~= "hit" then
 			logRejection(player, `coup sur {targetPlayer.Name} : {result}`)
 			return
 		end
-		applied = damage
+		applied = dealt
 	else
-		applied = DamageService.dealDamage(target, step.damage, source)
+		applied = DamageService.dealDamage(target, damage, source)
 	end
-	if applied <= 0 then
-		return -- garde intégrale, cible éliminée entre-temps... : ni Tension ni éjection
+	local isBlocked = source.blocked == true
+	if applied <= 0 and not isBlocked then
+		return -- cible éliminée entre-temps, immunisée... : ni Tension ni éjection
 	end
 
-	if step.knockback > 0 and targetHumanoid.Health > 0 then
-		applyKnockback(attackerRoot, targetRoot, step.knockback)
+	-- Posture (ennemis seulement), puis éjection si la garde n'a pas tenu.
+	if targetPlayer == nil and targetHumanoid.Health > 0 and posture > 0 then
+		isBroken = PostureService.damage(target, posture * (if isBlocked then BLOCKED_POSTURE_FACTOR else 1), player)
 	end
-	setTension(player, getTension(player) + Config.TENSION_PER_HIT * RaceService.getTensionGainMultiplier(player))
-	Remotes.HitConfirmed:FireAllClients(attacker, target, applied)
+	if knockback > 0 and not isBlocked and targetHumanoid.Health > 0 then
+		applyKnockback(attackerRoot, targetRoot, knockback)
+	end
+
+	-- Tension : une fois par attaque (frapper un groupe ne remplit pas la jauge d'un coup).
+	if not attack.tensionGiven then
+		attack.tensionGiven = true
+		local scale = if attack.kind == "charged" and attack.power >= 1 then 1.5 else 1
+		if isBlocked then
+			scale *= BLOCKED_TENSION_FACTOR
+		end
+		ResourceService.addTension(player, step.tension, scale)
+	end
+	if isBroken then
+		ResourceService.addTension(player, "postureBreak")
+	end
+
+	local result = if isBroken then "broken" elseif isBlocked then "blocked" else "hit"
+	Remotes.HitConfirmed:FireAllClients(attacker, target, applied, result, step.hitStop)
 
 	if Config.DEBUG_LOGS then
-		print(`[Combat] {player.Name} touche {target.Name} : -{applied} PV (reste {targetHumanoid.Health})`)
+		print(`[Combat] {player.Name} touche {target.Name} ({step.name}, {result}) : -{math.floor(applied * 10) / 10} PV (reste {math.floor(targetHumanoid.Health)})`)
 	end
+end
+
+--------------------------------------------------------------------------------
+-- Parade parfaite et esquive parfaite
+--------------------------------------------------------------------------------
+
+local function onParried(player: Player, attacker: Model?)
+	local state = getState(player)
+	state.counterUntil = os.clock() + Config.COUNTER_WINDOW
+	player:SetAttribute(Config.COUNTER_ATTRIBUTE, workspace:GetServerTimeNow() + Config.COUNTER_WINDOW)
+	if attacker and Players:GetPlayerFromCharacter(attacker) == nil then
+		PostureService.damage(attacker, Config.POSTURE.PARRY_DAMAGE, player)
+	end
+end
+
+local function onDodged(player: Player, isPerfect: boolean)
+	if not isPerfect then
+		return
+	end
+	getState(player).momentumUntil = os.clock() + Config.MOMENTUM_DURATION
+	player:SetAttribute(Config.MOMENTUM_ATTRIBUTE, workspace:GetServerTimeNow() + Config.MOMENTUM_DURATION)
 end
 
 --------------------------------------------------------------------------------
@@ -373,19 +607,21 @@ local function findUltimateTargets(origin: Vector3, radius: number): { Model }
 end
 
 local function onUltimateRequested(player: Player)
+	if not ultimateLimiter:allow(player) then
+		return
+	end
 	local caster = player.Character
 	local _, casterRoot = getLivingParts(caster)
 	if caster == nil or casterRoot == nil or isOutOfCombat(player) then
 		logRejection(player, "ultime demandé hors combat")
 		return
 	end
-	if getTension(player) < Config.TENSION_MAX then
+	-- La jauge est vérifiée ET vidée d'un seul geste : deux demandes rapprochées ne donnent qu'un ultime.
+	if not ResourceService.spendTension(player, Config.TENSION_MAX) then
 		logRejection(player, "ultime demandé sans Tension pleine")
 		return
 	end
-
-	-- La jauge est vidée AVANT tout le reste : deux demandes rapprochées ne donnent qu'un ultime.
-	setTension(player, 0)
+	endCharge(player, getState(player))
 
 	-- L'ultime est celui de la Magie Innée du joueur : l'attribut est écrit par AvatarService,
 	-- côté serveur, donc le client ne peut pas s'en attribuer une autre.
@@ -404,7 +640,7 @@ local function onUltimateRequested(player: Player)
 		return -- rembobinage, anomalie ou mort du lanceur entre-temps : l'explosion n'a "pas eu lieu"
 	end
 	local damageDealt = 0
-	local source: DamageService.DamageSource = { player = player, model = caster, kind = "ultimate" }
+	local source: DamageService.DamageSource = { player = player, model = caster, kind = "ultimate", element = magic.id }
 	for _, target in targets do
 		-- DamageService revérifie tout (éliminé, devenu invulnérable pendant l'arrêt sur image...).
 		damageDealt += DamageService.dealDamage(target, magic.damage, source)
@@ -428,12 +664,21 @@ end
 -- Cycle de vie des joueurs
 --------------------------------------------------------------------------------
 
-local function onPlayerAdded(player: Player)
-	setTension(player, 0)
+local function resetPlayer(player: Player)
+	local state = getState(player)
+	endCharge(player, state)
+	state.attack = nil
+	state.counterUntil = 0
+	state.momentumUntil = 0
+	player:SetAttribute(Config.CHARGING_ATTRIBUTE, false)
+	player:SetAttribute(Config.COUNTER_ATTRIBUTE, 0)
+	player:SetAttribute(Config.MOMENTUM_ATTRIBUTE, 0)
+end
 
+local function onPlayerAdded(player: Player)
+	resetPlayer(player)
 	player.CharacterAdded:Connect(function(character: Model)
-		attacks[player] = nil
-		setTension(player, 0) -- la Tension accumulée est perdue à la mort
+		resetPlayer(player)
 		equipSword(character)
 	end)
 	if player.Character then
@@ -442,14 +687,14 @@ local function onPlayerAdded(player: Player)
 end
 
 local function onPlayerRemoving(player: Player)
-	attacks[player] = nil
+	states[player] = nil
 end
 
 --------------------------------------------------------------------------------
 -- API publique
 --------------------------------------------------------------------------------
 
--- À appeler une seule fois au démarrage du serveur.
+-- À appeler une seule fois au démarrage du serveur (après ResourceService et PostureService).
 function CombatService.start()
 	if isStarted then
 		return
@@ -457,8 +702,23 @@ function CombatService.start()
 	isStarted = true
 
 	Remotes.RequestAttack.OnServerEvent:Connect(onAttackRequested)
+	Remotes.RequestChargeStart.OnServerEvent:Connect(onChargeStartRequested)
 	Remotes.ReportHit.OnServerEvent:Connect(onHitReported)
 	Remotes.RequestUltimate.OnServerEvent:Connect(onUltimateRequested)
+
+	ParryService.Parried:Connect(onParried)
+	DamageService.Dodged:Connect(onDodged)
+
+	-- Contreparties de la charge : ralenti, ni sprint, ni parade, ni Concentration, plus vulnérable.
+	MovementService.addSpeedProvider(function(player: Player): number
+		return if CombatService.isCharging(player) then Config.CHARGE_MOVE_MULTIPLIER else 1
+	end)
+	MovementService.addSprintBlocker(CombatService.isCharging)
+	ParryService.addBlocker(CombatService.isCharging)
+	ResourceService.addConcentrationBlocker(CombatService.isCharging)
+	DamageService.addPlayerModifier(function(player: Player, amount: number): number
+		return if CombatService.isCharging(player) then amount * Config.CHARGE_DAMAGE_TAKEN else amount
+	end)
 
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	Players.PlayerRemoving:Connect(onPlayerRemoving)
