@@ -142,6 +142,7 @@ return function(mock, R, player)
 		for _ = 1, count do
 			R.advance(1 / 60)
 			RunService.RenderStepped:Fire(1 / 60)
+			RunService.Stepped:Fire(R.now and R.now() or 0, 1 / 60)
 			RunService.Heartbeat:Fire(1 / 60)
 		end
 	end

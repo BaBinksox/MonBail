@@ -1,57 +1,63 @@
 --!strict
 --[[
 	AnimationConfig
-	UNE entrée par action animée du jeu (déplacements, épée, sorts, réactions). Lu par le client
-	(CharacterAnimator) ; partagé pour que le serveur puisse caler ses délais sur les mêmes durées.
+	UNE entrée par action animée du jeu (épée, défense, déplacements, magie). Lu par le client
+	(CharacterAnimator) ; partagé pour que le serveur cale ses délais sur les mêmes durées.
 
-	Deux moyens de jouer une action :
-		- `animationId` : un CLIP Roblox publié ("rbxassetid://..."), joué par l'Animator du Humanoid
-		  (répliqué automatiquement aux autres joueurs). Il doit appartenir au propriétaire de
-		  l'expérience (ou être un clip public de Roblox), sinon il ne se charge pas ;
-		- `pose` : une POSE PROCÉDURALE de Client/Animation/PoseLibrary (images clés appliquées aux
-		  articulations R15 par code), jouée chez chaque client à partir des événements du serveur.
-	Si `animationId` est vide, la pose procédurale est utilisée. Les poses procédurales sont
-	réellement jouables, mais ce sont des approximations : des clips réalisés dans l'Animation Editor
-	de Studio les remplaceront avantageusement (voir docs/COMBAT_2.md, liste des clips à produire).
+	Comment une action est jouée, dans cet ordre (la première solution disponible gagne) :
+		1. `animationId` : un clip PUBLIÉ ("rbxassetid://...") joué par l'Animator du personnage
+		   local, répliqué par Roblox aux autres joueurs. À remplir après publication des
+		   séquences dans l'Animation Editor (docs/ANIMATIONS.md) ;
+		2. la SÉQUENCE GÉNÉRÉE (Studio seulement) : la pose de PoseLibrary est construite en vraie
+		   KeyframeSequence (KeyframeBuilder), enregistrée temporairement par
+		   KeyframeSequenceProvider, puis jouée par l'Animator comme un clip. Ces identifiants
+		   temporaires ne fonctionnent pas sur un serveur publié : c'est le moyen de juger les
+		   mouvements dans Studio avant de les publier ;
+		3. `fallbackId` : les clips d'épée utilisés AVANT Combat 2.0 (Roblox, R15 Sword Slash /
+		   Lunge), plus un accent procédural du buste et des jambes pour distinguer les coups ;
+		4. la pose procédurale seule (calque appliqué sur Motor6D.Transform après l'Animator).
+	DEBUG_SOURCES affiche une fois par action, dans la sortie, la solution réellement utilisée.
 
-	Champs :
-		priority  priorité d'un clip (Action par défaut pour les actions, Movement pour la locomotion)
-		fadeIn / fadeOut  fondus (s)
-		speed     vitesse de lecture (1 = normale)
-	Les rigs du projet sont tous R15 (joueurs : Humanoid R15 + tête classique ; PNJ et ennemis :
-	CreateHumanoidModelFromDescription R15). Une pose procédurale n'agit que sur les articulations
-	R15 qu'elle trouve : sur un rig incomplet, elle s'applique partiellement, sans erreur.
+	Champs : fadeIn / fadeOut (s), speed (1 = normale), fallbackId / fallbackSpeed (repli).
+	Les rigs du projet sont R15 ; sur un rig incomplet, une pose s'applique partiellement, sans erreur.
 ]]
 
 export type Action = {
 	animationId: string,
 	pose: string,
-	priority: Enum.AnimationPriority?,
 	fadeIn: number,
 	fadeOut: number,
 	speed: number,
+	fallbackId: string,
+	fallbackSpeed: number,
 }
 
 local function action(pose: string, fadeIn: number?, fadeOut: number?, speed: number?): Action
-	return { animationId = "", pose = pose, fadeIn = fadeIn or 0.06, fadeOut = fadeOut or 0.12, speed = speed or 1 }
+	return { animationId = "", pose = pose, fadeIn = fadeIn or 0.06, fadeOut = fadeOut or 0.12, speed = speed or 1, fallbackId = "", fallbackSpeed = 1 }
 end
 
--- Clips officiels de Roblox déjà utilisés par le projet (publics, jouables partout) : conservés
--- comme solution de repli possible (voir docs), mais les poses procédurales distinctes sont
--- utilisées par défaut pour que les cinq coups du combo ne se ressemblent pas.
+-- Clips d'épée de Roblox utilisés par le jeu avant Combat 2.0 (CombatConfig de l'époque :
+-- coups 1 et 2 au Slash x 1,6 / x 1,8, coup 3 au Lunge x 1,2). Chargement à confirmer en jeu :
+-- s'ils ne se chargent pas, la séquence générée (Studio) ou la pose prennent le relais.
 local ROBLOX_SWORD_SLASH = "rbxassetid://522635514"
 local ROBLOX_SWORD_LUNGE = "rbxassetid://522638767"
 
+local function withFallback(entry: Action, fallbackId: string, fallbackSpeed: number): Action
+	entry.fallbackId = fallbackId
+	entry.fallbackSpeed = fallbackSpeed
+	return entry
+end
+
 local ACTIONS: { [string]: Action } = {
 	-- Épée
-	sword_1 = action("slash_horizontal", 0.04, 0.1),
-	sword_2 = action("slash_diagonal", 0.04, 0.1),
-	sword_3 = action("strike_vertical", 0.05, 0.12),
-	sword_4 = action("spin_slash", 0.05, 0.12),
-	sword_5 = action("finisher_thrust", 0.06, 0.15),
+	sword_1 = withFallback(action("slash_horizontal", 0.04, 0.1), ROBLOX_SWORD_SLASH, 1.6),
+	sword_2 = withFallback(action("slash_diagonal", 0.04, 0.1), ROBLOX_SWORD_SLASH, 1.8),
+	sword_3 = withFallback(action("strike_vertical", 0.05, 0.12), ROBLOX_SWORD_LUNGE, 1.2),
+	sword_4 = withFallback(action("spin_slash", 0.05, 0.12), ROBLOX_SWORD_SLASH, 1.3),
+	sword_5 = withFallback(action("finisher_thrust", 0.06, 0.15), ROBLOX_SWORD_LUNGE, 1),
 	sword_charge = action("charge_hold", 0.12, 0.08),
-	sword_charged = action("charged_release", 0.03, 0.18),
-	sword_counter = action("counter_thrust", 0.03, 0.12),
+	sword_charged = withFallback(action("charged_release", 0.03, 0.18), ROBLOX_SWORD_LUNGE, 1.1),
+	sword_counter = withFallback(action("counter_thrust", 0.03, 0.12), ROBLOX_SWORD_SLASH, 2),
 	sword_plunge_fall = action("plunge_dive", 0.05, 0.05), -- maintenue pendant la chute
 	sword_plunge = action("plunge_strike", 0.02, 0.15), -- impact à l'atterrissage
 	-- Défense, réactions
@@ -84,6 +90,10 @@ return table.freeze({
 	ACTIONS = ACTIONS,
 	ROBLOX_SWORD_SLASH = ROBLOX_SWORD_SLASH,
 	ROBLOX_SWORD_LUNGE = ROBLOX_SWORD_LUNGE,
+	-- Studio : jouer les séquences générées (vraies pistes d'animation) quand aucun clip n'est publié.
+	USE_GENERATED_IN_STUDIO = true,
+	-- Affiche une fois par action la solution utilisée (publié, généré, repli, pose).
+	DEBUG_SOURCES = true,
 	-- Distance (studs) au-delà de laquelle les poses des AUTRES personnages ne sont plus calculées.
 	REMOTE_POSE_RADIUS = 140,
 	-- Inclinaison maximale du buste au sprint (degrés) et à l'accélération.

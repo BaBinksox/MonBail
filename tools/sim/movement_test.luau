@@ -200,26 +200,73 @@ H.check("un seul double saut par passage en l'air (client)", requestsAfter == re
 humanoid.StateChanged:Fire(Enum.HumanoidStateType.Freefall, Enum.HumanoidStateType.Landed)
 H.check("au sol : double saut rendu", MovementState.jumpsUsed == 0 and not MovementState.airborne)
 
-print("== Poses procédurales")
-local CharacterAnimator = env.require("StarterPlayer/StarterPlayerScripts/Client/Animation/CharacterAnimator")
-local waist = player.Character:FindFirstChild("Waist", true)
-local baseC0 = waist.C0
-local animator = CharacterAnimator.get(player.Character, true)
+print("== Animations d'épée : de vraies pistes d'abord")
+local clientRoot = "StarterPlayer/StarterPlayerScripts/Client/Animation/"
+local CharacterAnimator = env.require(clientRoot .. "CharacterAnimator")
+local GeneratedAnimations = env.require(clientRoot .. "GeneratedAnimations")
+local PoseLibrary = H.shared("Animation/PoseLibrary")
+local KeyframeBuilder = H.shared("Animation/KeyframeBuilder")
+local AnimationConfig = H.shared("Animation/AnimationConfig")
+local CombatConfig = H.shared("Combat/CombatConfig")
+local character = player.Character
+local waist = character:FindFirstChild("Waist", true)
+local shoulder = character:FindFirstChild("RightShoulder", true)
+H.check("articulations R15 trouvées (Waist, RightShoulder)", waist ~= nil and shoulder ~= nil)
+local function tracksFor(animationId)
+	local list = {}
+	for _, track in ipairs(runtime.loadedTracks) do
+		if track.AnimationId == animationId then
+			table.insert(list, track)
+		end
+	end
+	return list
+end
+local function played(animationId)
+	local n = 0
+	for _, track in ipairs(tracksFor(animationId)) do
+		n += track.PlayCount
+	end
+	return n
+end
+
+-- 1. Serveur publié (pas de séquences temporaires) : clip historique d'épée + accent du buste.
+local previousAnimator = CharacterAnimator.find(character)
+if previousAnimator then
+	previousAnimator:destroy() -- repart d'un état propre (les tests précédents l'ont fait sauter)
+end
+local baseTransform = waist.Transform
+local animator = CharacterAnimator.get(character, true)
+animator:setLocomotion(0, false, 0, 10) -- en marche : pas de respiration au repos sur le buste
+H.advance(0.1)
 local impact = false
-local duration = animator:play("sword_1", { onImpact = function()
+local duration = animator:play("sword_1", { duration = CombatConfig.COMBO[1].duration, onImpact = function()
 	impact = true
 end })
-H.check("coup 1 : pose jouée (" .. string.format("%.2f", duration) .. " s)", duration > 0.2)
+H.check("coup 1 : clip historique Sword Slash réellement lancé sur l'Animator", played(AnimationConfig.ROBLOX_SWORD_SLASH) >= 1 and animator:getSource("sword_1") == "fallback", animator:getSource("sword_1"))
+local shoulderBefore = shoulder.Transform
 animator:update(duration * 0.5)
-H.check("en plein coup : buste tourné", waist.C0 ~= baseC0)
+H.check("accent procédural : le buste tourne (Transform du Waist)", waist.Transform ~= baseTransform)
+H.check("accent seulement : le bras reste au clip (Transform de l'épaule intact)", shoulder.Transform == shoulderBefore)
 animator:update(duration)
 H.check("instant d'impact signalé (synchronisation des effets)", impact)
-H.check("fin du coup : articulation rendue exactement", waist.C0 == baseC0)
+H.check("fin du coup : Transform rendu exactement", waist.Transform == baseTransform)
+animator:destroy()
+
+-- 2. Clip historique refusé (ne se charge pas) : la pose complète prend le relais, jamais de coup invisible.
+runtime.failingAnimations[AnimationConfig.ROBLOX_SWORD_SLASH] = true
+runtime.failingAnimations[AnimationConfig.ROBLOX_SWORD_LUNGE] = true
+animator = CharacterAnimator.get(character, true)
+H.advance(0.1)
+animator:play("sword_1")
+shoulderBefore = shoulder.Transform
+animator:update(0.15)
+H.check("clip refusé : la pose complète anime le bras", shoulder.Transform ~= shoulderBefore and animator:getSource("sword_1") == "fallback")
+animator:update(2)
 local different = {}
 for i = 1, 5 do
-	animator:play("sword_" .. i)
-	animator:update(0.15)
-	different[i] = waist.C0
+	animator:play("sword_" .. i, { duration = CombatConfig.COMBO[i].duration })
+	animator:update(CombatConfig.COMBO[i].duration * PoseLibrary.get(AnimationConfig.ACTIONS["sword_" .. i].pose).impact)
+	different[i] = shoulder.Transform
 	animator:update(2)
 end
 local distinct = true
@@ -230,16 +277,88 @@ for i = 1, 5 do
 		end
 	end
 end
-H.check("les cinq coups du combo ont des poses distinctes", distinct)
+H.check("les cinq coups ont des mouvements distincts à l'impact", distinct)
+local walkPose = mock.CFrame.new(0, 0.05, 0)
+shoulder.Transform = walkPose -- l'Animator a posé la marche sur l'épaule pendant la pose
 animator:play("concentrate")
-animator:update(0.5)
-local rebuilt = baseC0 * mock.CFrame.new(0, 0.1, 0)
-waist.C0 = rebuilt -- reconstruction du rig pendant une pose (changement d'apparence)
-animator:update(0.1)
+animator:update(0.3)
+H.check("calque ajouté à l'animation de base, pas écrasé", shoulder.Transform ~= walkPose)
 animator:stop("hold")
 animator:update(1)
-H.check("rig reconstruit pendant une pose : le nouveau C0 est conservé", waist.C0 == rebuilt)
+H.check("pose terminée : l'animation de base est rendue", shoulder.Transform == walkPose)
+shoulder.Transform = mock.CFrame.new()
 animator:destroy()
+runtime.failingAnimations[AnimationConfig.ROBLOX_SWORD_SLASH] = nil
+runtime.failingAnimations[AnimationConfig.ROBLOX_SWORD_LUNGE] = nil
+
+-- 3. Studio : la pose devient une vraie séquence d'animation, jouée par l'Animator.
+runtime.allowKeyframeRegistration = true
+GeneratedAnimations.reset()
+animator = CharacterAnimator.get(character, true)
+animator:play("sword_3", { duration = CombatConfig.COMBO[3].duration })
+local generated = false
+for _, track in ipairs(runtime.loadedTracks) do
+	if string.find(track.AnimationId, "^rbxtemp://") and track.PlayCount > 0 then
+		generated = true
+	end
+end
+H.check("Studio : séquence générée enregistrée et jouée comme une piste", generated and animator:getSource("sword_3") == "generated", animator:getSource("sword_3"))
+shoulderBefore = shoulder.Transform
+animator:update(0.2)
+H.check("Studio : pas de calque procédural par-dessus la piste", shoulder.Transform == shoulderBefore)
+animator:destroy()
+runtime.allowKeyframeRegistration = false
+GeneratedAnimations.reset()
+
+print("== Séquences d'animation (KeyframeSequence)")
+local sequence = KeyframeBuilder.build("slash_horizontal")
+local keyframes = sequence and sequence:GetChildren() or {}
+local definition = PoseLibrary.get("slash_horizontal")
+H.check("Entaille : une image clé par clé de pose", #keyframes == #definition.keys, #keyframes)
+local function findPose(root, name)
+	for _, d in ipairs(root:GetDescendants()) do
+		if d.Name == name and d.ClassName == "Pose" then
+			return d
+		end
+	end
+	return nil
+end
+local first = keyframes[2]
+local hrp = first and findPose(first, "HumanoidRootPart")
+local arm = first and findPose(first, "RightUpperArm")
+local handle = first and findPose(first, "Handle")
+H.check("hiérarchie R15 : HumanoidRootPart > LowerTorso > UpperTorso > RightUpperArm", hrp ~= nil and arm ~= nil and arm.Parent and arm.Parent.Name == "UpperTorso" and arm.Parent.Parent and arm.Parent.Parent.Name == "LowerTorso")
+H.check("poids : maillon racine 0, bras animé 1", hrp and hrp.Weight == 0 and arm and arm.Weight == 1)
+H.check("la lame est animée (Pose Handle sous RightHand)", handle ~= nil and handle.Parent and handle.Parent.Name == "RightHand")
+local castSequence = KeyframeBuilder.build("cast_ice_shard")
+H.check("un sort sans jambes ne bloque pas la marche (aucune Pose de jambe)", castSequence ~= nil and findPose(castSequence, "RightUpperLeg") == nil)
+local all = KeyframeBuilder.buildAll(AnimationConfig.ACTIONS)
+local count = 0
+for _ in pairs(AnimationConfig.ACTIONS) do
+	count += 1
+end
+H.check(string.format("%d séquences construites (une par action)", #all), #all == count)
+for index, step in ipairs(CombatConfig.COMBO) do
+	local pose = PoseLibrary.get(AnimationConfig.ACTIONS[step.action].pose)
+	local impactTime = pose.impact * step.duration
+	H.check(string.format("coup %d : impact visible à %.2f s, dans la fenêtre serveur %.2f–%.2f", index, impactTime, step.hitStart, step.hitEnd), impactTime >= step.hitStart and impactTime <= step.hitEnd)
+end
+-- Rotations complètes : jamais plus de 180° entre deux images clés (sinon la piste tourne à l'envers).
+local spinOk = true
+for name, pose in pairs(PoseLibrary.POSES) do
+	for k = 2, #pose.keys do
+		for joint, a in pairs(pose.keys[k].j) do
+			local b = pose.keys[k - 1].j[joint] or { 0, 0, 0 }
+			for axis = 1, 3 do
+				if math.abs(a[axis] - b[axis]) > 180 then
+					spinOk = false
+					print("    " .. name .. " / " .. joint)
+				end
+			end
+		end
+	end
+end
+H.check("aucun saut de plus de 180° entre deux images clés", spinOk)
 
 H.noNewErrors("mobilité sans erreur")
 H.printWarnings()

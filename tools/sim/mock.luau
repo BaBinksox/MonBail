@@ -405,7 +405,7 @@ local DEFAULTS = {
 	Seat = { Size = v3(2, 1, 2), Anchored = false, CanCollide = true, Transparency = 0 },
 	MeshPart = { Size = v3(1, 1, 1), Anchored = false, CanCollide = true, Transparency = 0 },
 	Attachment = { CFrame = cf(0, 0, 0), Position = v3() },
-	Motor6D = { C0 = cf(0, 0, 0), C1 = cf(0, 0, 0) },
+	Motor6D = { C0 = cf(0, 0, 0), C1 = cf(0, 0, 0), Transform = cf(0, 0, 0) },
 	Weld = { C0 = cf(0, 0, 0), C1 = cf(0, 0, 0) },
 	Humanoid = { MoveDirection = v3(), JumpHeight = 7.2, AutoRotate = true },
 }

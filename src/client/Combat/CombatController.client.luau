@@ -49,6 +49,11 @@ local SoftLock = require(script.Parent:WaitForChild("SoftLock") :: ModuleScript)
 
 local ATTACK_ACTION = "SwordAttack"
 local ULTIMATE_ACTION = "Ultimate"
+-- Hauteur du souffle de lame par coup : chaque coup du combo sonne un peu différemment.
+local SWING_PITCH: { [string]: number } = {
+	sword_1 = 1.12, sword_2 = 1.0, sword_3 = 0.86, sword_4 = 0.95, sword_5 = 0.8,
+	sword_charged = 0.78, sword_counter = 1.05,
+}
 local PLUNGE_MIN_HEIGHT = 3 -- studs de vide sous les pieds (le serveur exige 2,5)
 local PLUNGE_IMPACT_WINDOW = 0.15 -- s de zone de frappe à l'atterrissage
 local PLUNGE_HORIZONTAL_KEEP = 0.25 -- part de la vitesse horizontale gardée pendant la chute
@@ -205,7 +210,7 @@ local function performStrike(character: Model, humanoid: Humanoid, rootPart: Bas
 	local releaseLock = lockOntoNearestEnemy(character, humanoid, rootPart)
 	animatorOf(character):play(step.action, { duration = step.duration })
 	local isHeavy = step.heavy or step.knockback > 0 or power >= 1
-	SfxPlayer.play(if isHeavy then "swordSwingHeavy" else "swordSwing", rootPart)
+	SfxPlayer.play(if isHeavy then "swordSwingHeavy" else "swordSwing", rootPart, { pitch = SWING_PITCH[step.action] or 1 })
 
 	-- Fenêtre de frappe : traînée et zone de frappe ne vivent qu'entre hitStart et hitEnd.
 	-- La zone s'éteint d'elle-même au bout de la durée donnée (voir SpatialHitbox.start).

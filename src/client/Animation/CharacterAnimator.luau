@@ -2,43 +2,48 @@
 --[[
 	CharacterAnimator (ModuleScript, client)
 	Joue les actions d'AnimationConfig sur un personnage R15 (le sien, celui d'un autre joueur, un
-	ennemi), par-dessus les animations de base de Roblox.
+	ennemi). Pour chaque action, la PREMIÈRE solution disponible est utilisée (AnimationConfig) :
+		1. clip publié (animationId), joué par l'Animator du personnage local et répliqué ;
+		2. séquence générée depuis PoseLibrary (Studio : vraie piste d'animation) ;
+		3. clip de repli historique (épée) + accent procédural du buste et des jambes ;
+		4. pose procédurale seule.
 
-	Trois canaux, qui s'additionnent :
-		"action"  coups d'épée, sorts, parade, dash, double saut, atterrissage (un à la fois : une
-		          nouvelle action remplace la précédente en fondu) ;
-		"hold"    postures maintenues (attaque chargée, Concentration) jusqu'à stop() ;
-		"react"   réactions aux coups (sursaut, déséquilibre) ;
-	plus une couche de LOCOMOTION continue : inclinaison du buste au sprint, bras en chute,
-	respiration au repos (setLocomotion).
+	Trois canaux : "action" (coups, sorts, dash...), "hold" (charge, Concentration, plongée en
+	chute : jusqu'à stop()), "react" (sursauts). Une nouvelle action remplace la précédente du canal.
 
-	Application : chaque articulation Motor6D reçoit C0 = C0 d'origine x décalage. Le C0 d'origine est
-	relu dès qu'un autre système le modifie (reconstruction du rig, changement d'apparence) : rien ne
-	s'accumule, et une articulation revient exactement à son état d'origine quand plus rien ne
-	l'anime. Une action dont AnimationConfig fournit un clip (animationId) est jouée par l'Animator
-	du personnage LOCAL (Roblox la réplique aux autres) au lieu de la pose procédurale.
+	Calque procédural : appliqué sur Motor6D.Transform à chaque RunService.Stepped, c'est-à-dire
+	APRÈS que l'Animator a posé les animations de base (marche, course) : il s'y ajoute au lieu d'être
+	écrasé. C0 n'est plus jamais modifié. Un Transform que l'Animator n'a pas réécrit (articulation
+	qu'aucune animation ne touche) est repris depuis sa dernière valeur de base : rien ne s'accumule.
 
 	API :
 		CharacterAnimator.get(character, isLocal?): Animator          (un seul par personnage)
 		animator:play(actionName, options?) -> number (durée)          options : speed, duration,
 		                                                               channel, onImpact
-		animator:stop(channel)              animator:freeze(seconds)   (arrêt sur image)
+		animator:stop(channel)   animator:isPlaying(actionName)   animator:freeze(seconds)
 		animator:setLocomotion(sprint, airborne, verticalSpeed, speed)
-		animator:update(dt) -> boolean      (true tant qu'il reste quelque chose à animer)
+		animator:update(dt) -> boolean      (à appeler dans RunService.Stepped)
+		animator:getSource(actionName) -> string?   "published" | "generated" | "fallback" | "pose"
 		animator:destroy()                  CharacterAnimator.getActive(): { Animator }
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local AnimationConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Animation"):WaitForChild("AnimationConfig") :: ModuleScript)
-local PoseLibrary = require(script.Parent:WaitForChild("PoseLibrary") :: ModuleScript)
+local animationFolder = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Animation")
+local AnimationConfig = require(animationFolder:WaitForChild("AnimationConfig") :: ModuleScript)
+local PoseLibrary = require(animationFolder:WaitForChild("PoseLibrary") :: ModuleScript)
+local GeneratedAnimations = require(script.Parent:WaitForChild("GeneratedAnimations") :: ModuleScript)
 
 export type PlayOptions = {
 	speed: number?,
-	duration: number?, -- durée imposée (s) : la pose est étirée pour la remplir
+	duration: number?, -- durée imposée (s) : la piste ou la pose est étirée pour la remplir
 	channel: string?,
 	onImpact: (() -> ())?,
 }
+
+-- Ce que le calque procédural dessine pour une action : tout, seulement le buste et les jambes
+-- (accent sur un clip de repli), ou rien (une vraie piste joue déjà le mouvement).
+type Visual = string -- "full" | "accent" | "none"
 
 type Layer = {
 	action: string,
@@ -53,6 +58,8 @@ type Layer = {
 	impact: number,
 	impactFired: boolean,
 	onImpact: (() -> ())?,
+	visual: Visual,
+	track: AnimationTrack?,
 }
 
 type JointState = { base: CFrame, written: CFrame }
@@ -60,6 +67,12 @@ type JointState = { base: CFrame, written: CFrame }
 local CHANNELS = { "action", "hold", "react" }
 local HOLD_ACTIONS: { [string]: boolean } = { sword_charge = true, sword_plunge_fall = true, concentrate = true }
 local REACT_ACTIONS: { [string]: boolean } = { hit_react = true, stagger = true }
+local ACCENT_JOINTS: { [string]: boolean } = { Root = true, Waist = true, Neck = true, RH = true, RK = true, LH = true, LK = true }
+local CHANNEL_PRIORITY: { [string]: Enum.AnimationPriority } = {
+	hold = Enum.AnimationPriority.Action,
+	action = Enum.AnimationPriority.Action2,
+	react = Enum.AnimationPriority.Action3,
+}
 
 local CharacterAnimator = {}
 CharacterAnimator.__index = CharacterAnimator
@@ -70,7 +83,9 @@ type AnimatorData = {
 	motors: { [string]: Motor6D },
 	joints: { [Motor6D]: JointState },
 	layers: { [string]: Layer },
-	tracks: { [string]: AnimationTrack },
+	tracks: { [string]: AnimationTrack }, -- par identifiant d'animation
+	failedTracks: { [string]: boolean },
+	sources: { [string]: string },
 	sprint: number,
 	airborne: boolean,
 	verticalSpeed: number,
@@ -84,6 +99,7 @@ type AnimatorData = {
 export type Animator = typeof(setmetatable({} :: AnimatorData, CharacterAnimator))
 
 local animators: { [Model]: Animator } = {}
+local reportedSources: { [string]: boolean } = {}
 
 local function channelOf(actionName: string, requested: string?): string
 	if requested then
@@ -109,6 +125,42 @@ local function findMotors(character: Model): { [string]: Motor6D }
 	return motors
 end
 
+local function getRobloxAnimator(self: Animator): Instance?
+	local humanoid = self.character:FindFirstChildOfClass("Humanoid")
+	return humanoid and humanoid:FindFirstChildOfClass("Animator")
+end
+
+-- Piste chargée une fois par personnage et par identifiant.
+local function getTrack(self: Animator, animationId: string, channel: string, looped: boolean): AnimationTrack?
+	if self.failedTracks[animationId] then
+		return nil
+	end
+	local cached = self.tracks[animationId]
+	if cached then
+		return cached
+	end
+	local animatorInstance = getRobloxAnimator(self)
+	if animatorInstance == nil then
+		return nil
+	end
+	local animation = Instance.new("Animation")
+	animation.AnimationId = animationId
+	local isLoaded, track = pcall(function()
+		return (animatorInstance :: any):LoadAnimation(animation)
+	end)
+	if not isLoaded or track == nil then
+		self.failedTracks[animationId] = true
+		return nil
+	end
+	local loadedTrack = track :: AnimationTrack
+	pcall(function()
+		loadedTrack.Priority = CHANNEL_PRIORITY[channel] or Enum.AnimationPriority.Action
+		loadedTrack.Looped = looped
+	end)
+	self.tracks[animationId] = loadedTrack
+	return loadedTrack
+end
+
 function CharacterAnimator.get(character: Model, isLocal: boolean?): Animator
 	local existing = animators[character]
 	if existing and not existing.destroyed then
@@ -121,6 +173,8 @@ function CharacterAnimator.get(character: Model, isLocal: boolean?): Animator
 		joints = {},
 		layers = {},
 		tracks = {},
+		failedTracks = {},
+		sources = {},
 		sprint = 0,
 		airborne = false,
 		verticalSpeed = 0,
@@ -135,7 +189,17 @@ function CharacterAnimator.get(character: Model, isLocal: boolean?): Animator
 	table.insert(data.connections, character.Destroying:Connect(function()
 		animator:destroy()
 	end))
-	-- Une articulation remplacée (changement d'apparence) est retrouvée au besoin.
+	-- Personnage local : les clips de repli sont chargés dès l'apparition, pour être prêts au 1er coup.
+	if data.isLocal then
+		task.defer(function()
+			for actionName, action in AnimationConfig.ACTIONS do
+				if not data.destroyed and action.fallbackId ~= "" and action.animationId == "" then
+					getTrack(animator, action.fallbackId, channelOf(actionName, nil), false)
+				end
+			end
+		end)
+	end
+	-- Une articulation remplacée (changement d'apparence, épée refixée) est retrouvée au besoin.
 	table.insert(data.connections, character.DescendantAdded:Connect(function(descendant: Instance)
 		if descendant:IsA("Motor6D") then
 			data.motors = findMotors(character)
@@ -162,28 +226,50 @@ function CharacterAnimator.getActive(): { Animator }
 	return list
 end
 
--- Clip Roblox de l'action, chargé une fois par personnage (personnage local seulement).
-local function getTrack(self: Animator, actionName: string, animationId: string): AnimationTrack?
-	local cached = self.tracks[actionName]
-	if cached then
-		return cached
+--------------------------------------------------------------------------------
+-- Pistes d'animation
+--------------------------------------------------------------------------------
+
+--[[
+	Choisit la solution d'une action pour ce personnage. Retourne (source, identifiant de la piste à
+	jouer ICI ou nil, ce que le calque procédural doit dessiner).
+	Personnage d'un autre joueur : un clip publié ou de repli est déjà répliqué par Roblox, on ne le
+	rejoue pas ; une séquence générée (identifiant temporaire, local) est rejouée sur place.
+]]
+local function resolve(self: Animator, action: any): (string, string?, Visual)
+	if action.animationId ~= "" then
+		return "published", if self.isLocal then action.animationId else nil, "none"
 	end
-	local humanoid = self.character:FindFirstChildOfClass("Humanoid")
-	local animatorInstance = humanoid and humanoid:FindFirstChildOfClass("Animator")
-	if animatorInstance == nil then
-		return nil
+	local generated = GeneratedAnimations.getId(action.pose)
+	if generated then
+		return "generated", generated, "none"
 	end
-	local animation = Instance.new("Animation")
-	animation.AnimationId = animationId
-	local isLoaded, track = pcall(function()
-		return animatorInstance:LoadAnimation(animation)
-	end)
-	if not isLoaded or typeof(track) ~= "Instance" then
-		return nil
+	if action.fallbackId ~= "" then
+		return "fallback", if self.isLocal then action.fallbackId else nil, "accent"
 	end
-	track.Priority = Enum.AnimationPriority.Action
-	self.tracks[actionName] = track
-	return track
+	return "pose", nil, "full"
+end
+
+local function reportSource(actionName: string, source: string)
+	if AnimationConfig.DEBUG_SOURCES and not reportedSources[actionName] then
+		reportedSources[actionName] = true
+		local labels = {
+			published = "clip publié",
+			generated = "séquence générée (Studio)",
+			fallback = "clip historique + accent procédural",
+			pose = "pose procédurale",
+		}
+		print(`[Animation] {actionName} : {labels[source] or source}`)
+	end
+end
+
+local function stopLayerTrack(layer: Layer?, fade: number)
+	local track = layer and layer.track
+	if track then
+		pcall(function()
+			track:Stop(fade)
+		end)
+	end
 end
 
 -- Joue une action. Retourne sa durée (s), 0 si elle est inconnue.
@@ -192,40 +278,50 @@ function CharacterAnimator.play(self: Animator, actionName: string, options: Pla
 		return 0
 	end
 	local action = AnimationConfig.ACTIONS[actionName]
-	if action == nil then
+	local definition = action and PoseLibrary.get(action.pose)
+	if action == nil or definition == nil then
 		return 0
 	end
 	local opts: PlayOptions = options or {}
 	local speed = (opts.speed or 1) * action.speed
+	local duration = math.max(opts.duration or definition.duration / speed, 0.05)
+	local channel = channelOf(actionName, opts.channel)
 
-	if action.animationId ~= "" then
-		if self.isLocal then
-			local track = getTrack(self, actionName, action.animationId)
-			if track then
-				track:Play(action.fadeIn, 1, speed)
-				local length = if track.Length > 0 then track.Length / speed else 0.5
-				local onImpact = opts.onImpact
-				if onImpact then
-					task.delay(length * 0.4, onImpact)
-				end
-				return length
-			end
-		else
-			return 0 -- le clip du personnage distant est répliqué par Roblox
+	local source, trackId, visual = resolve(self, action)
+	self.sources[actionName] = source
+	reportSource(actionName, source)
+
+	local previous = self.layers[channel]
+	stopLayerTrack(previous, action.fadeIn)
+
+	local track: AnimationTrack? = nil
+	if trackId then
+		track = getTrack(self, trackId, channel, definition.looped)
+		if track and source == "fallback" and track.Length <= 0 then
+			-- Clip de repli pas (encore) chargé, ou refusé : jamais de coup invisible, la pose
+			-- complète le remplace ; il servira dès qu'il sera chargé (préchargé à l'apparition).
+			track = nil
+		end
+		if track then
+			-- Vitesse : la séquence générée dure exactement definition.duration ; un clip publié ou
+			-- de repli a sa propre longueur (connue une fois chargé).
+			local playSpeed = if source == "generated"
+				then definition.duration / duration
+				elseif track.Length > 0 then track.Length / duration
+				else action.fallbackSpeed * (opts.speed or 1)
+			pcall(function()
+				(track :: AnimationTrack):Play(action.fadeIn, 1, playSpeed)
+			end)
+		elseif source == "fallback" then
+			visual = "full" -- le clip de repli ne se charge pas : la pose complète le remplace
 		end
 	end
 
-	local definition = PoseLibrary.get(action.pose)
-	if definition == nil then
-		return 0
-	end
-	local duration = opts.duration or definition.duration / speed
-	local channel = channelOf(actionName, opts.channel)
 	self.layers[channel] = {
 		action = actionName,
 		pose = action.pose,
 		elapsed = 0,
-		duration = math.max(duration, 0.05),
+		duration = duration,
 		looped = definition.looped,
 		fadeIn = action.fadeIn,
 		fadeOut = action.fadeOut,
@@ -234,25 +330,23 @@ function CharacterAnimator.play(self: Animator, actionName: string, options: Pla
 		impact = definition.impact,
 		impactFired = false,
 		onImpact = opts.onImpact,
+		visual = visual,
+		track = track,
 	}
 	return duration
 end
 
--- Arrête en fondu l'action du canal (« hold » : charge, Concentration).
+function CharacterAnimator.getSource(self: Animator, actionName: string): string?
+	return self.sources[actionName]
+end
+
+-- Arrête en fondu l'action du canal (« hold » : charge, Concentration, plongée).
 function CharacterAnimator.stop(self: Animator, channel: string)
 	local layer = self.layers[channel]
 	if layer and not layer.stopping then
 		layer.stopping = true
 		layer.stopElapsed = 0
-	end
-	local track = nil
-	for actionName, cachedTrack in self.tracks do
-		if channelOf(actionName, nil) == channel and cachedTrack.IsPlaying then
-			track = cachedTrack
-		end
-	end
-	if track then
-		track:Stop(0.15)
+		stopLayerTrack(layer, layer.fadeOut)
 	end
 end
 
@@ -265,7 +359,7 @@ function CharacterAnimator.isPlaying(self: Animator, actionName: string): boolea
 	return false
 end
 
--- Arrêt sur image (hit-stop) : les poses ne progressent plus pendant `seconds`.
+-- Arrêt sur image (hit-stop) : poses et pistes figées pendant `seconds`.
 function CharacterAnimator.freeze(self: Animator, seconds: number)
 	self.frozenFor = math.max(self.frozenFor, seconds)
 end
@@ -290,30 +384,31 @@ local function weightOf(layer: Layer): number
 	return math.clamp(weight, 0, 1)
 end
 
--- Écrit le C0 d'une articulation (C0 d'origine relu si quelqu'un d'autre l'a changé).
+--------------------------------------------------------------------------------
+-- Calque procédural sur Motor6D.Transform
+--------------------------------------------------------------------------------
+
 local function writeJoint(self: Animator, motor: Motor6D, offset: CFrame?)
 	local state = self.joints[motor]
+	local current = motor.Transform
 	if offset == nil then
 		if state then
-			if motor.C0 == state.written then
-				motor.C0 = state.base
+			if current == state.written then
+				motor.Transform = state.base -- personne d'autre ne l'a réécrit : on rend la base
 			end
 			self.joints[motor] = nil
 		end
 		return
 	end
-	if state == nil then
-		state = { base = motor.C0, written = motor.C0 }
-		self.joints[motor] = state
-	elseif motor.C0 ~= state.written then
-		state.base = motor.C0
-	end
-	local target = state.base * offset
-	motor.C0 = target
-	state.written = target
+	-- L'Animator réécrit Transform à chaque image pour les articulations qu'il anime ; s'il ne l'a
+	-- pas fait (valeur identique à notre dernière écriture), on repart de la base précédente.
+	local base = if state and current == state.written then state.base else current
+	local target = base * offset
+	motor.Transform = target
+	self.joints[motor] = { base = base, written = target }
 end
 
--- Avance d'un pas. Retourne true s'il reste quelque chose à animer.
+-- Avance d'un pas (RunService.Stepped). Retourne true s'il reste quelque chose à animer.
 function CharacterAnimator.update(self: Animator, dt: number): boolean
 	if self.destroyed then
 		return false
@@ -350,11 +445,14 @@ function CharacterAnimator.update(self: Animator, dt: number): boolean
 				or (not layer.looped and layer.elapsed >= layer.duration)
 			if finished then
 				self.layers[channel] = nil
-			else
+			elseif layer.visual ~= "none" then
 				local weight = weightOf(layer)
 				local poseAngles, poseOffset = PoseLibrary.sample(layer.pose, layer.elapsed / layer.duration)
+				local accentOnly = layer.visual == "accent"
 				for name, value in poseAngles do
-					add(name, value * weight)
+					if not accentOnly or ACCENT_JOINTS[name] then
+						add(name, value * weight)
+					end
 				end
 				rootOffset += poseOffset * weight
 			end
@@ -379,6 +477,10 @@ function CharacterAnimator.update(self: Animator, dt: number): boolean
 	end
 
 	for short, motor in self.motors do
+		if motor.Parent == nil then
+			self.joints[motor] = nil
+			continue
+		end
 		local value: Vector3? = angles[short]
 		local position = if short == "Root" then rootOffset else Vector3.zero
 		if (value == nil or value.Magnitude < 1e-4) and position.Magnitude < 1e-4 then
@@ -398,8 +500,8 @@ function CharacterAnimator.destroy(self: Animator)
 	end
 	self.destroyed = true
 	for motor, state in self.joints do
-		if motor.Parent and motor.C0 == state.written then
-			motor.C0 = state.base
+		if motor.Parent and motor.Transform == state.written then
+			motor.Transform = state.base
 		end
 	end
 	self.joints = {}

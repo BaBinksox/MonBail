@@ -97,7 +97,9 @@ local function updateLocomotion()
 	end
 end
 
-RunService.RenderStepped:Connect(function(dt: number)
+-- Stepped : après la mise à jour des animations par l'Animator, avant la physique et le rendu.
+-- Le calque procédural s'ajoute ainsi aux animations au lieu d'être écrasé par elles.
+RunService.Stepped:Connect(function(_time: number, dt: number)
 	updateLocomotion()
 	for _, animator in CharacterAnimator.getActive() do
 		if not animator:update(dt) then

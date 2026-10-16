@@ -265,8 +265,29 @@ return function(mock)
 		part.Parent = character
 		return true
 	end
+	-- KeyframeSequenceProvider : désactivé par défaut (comme sur un serveur publié) ; un test peut
+	-- l'activer pour simuler Studio (identifiants temporaires rbxtemp://).
+	R.allowKeyframeRegistration = false
+	R.registeredSequences = {}
+	extra["*.RegisterKeyframeSequence"] = function(_self, sequence)
+		if not R.allowKeyframeRegistration then
+			error("RegisterKeyframeSequence indisponible (simulation d'un serveur publié)")
+		end
+		table.insert(R.registeredSequences, sequence)
+		return "rbxtemp://" .. #R.registeredSequences
+	end
+	-- Pistes : enregistrées pour les tests (identifiant, lectures). R.loadedTracks liste tout.
+	R.loadedTracks = {}
+	R.failingAnimations = {} -- identifiants dont le chargement « échoue » (Length reste 0)
 	extra["Humanoid.LoadAnimation"] = function(self, animation)
-		return mock.newTrack()
+		local track = mock.newTrack()
+		track.AnimationId = animation and animation.AnimationId or ""
+		track.Owner = self
+		if R.failingAnimations[track.AnimationId] then
+			track.Length = 0
+		end
+		table.insert(R.loadedTracks, track)
+		return track
 	end
 	extra["Animator.LoadAnimation"] = extra["Humanoid.LoadAnimation"]
 	extra["Animator.GetPlayingAnimationTracks"] = function()
@@ -274,9 +295,18 @@ return function(mock)
 	end
 	extra["Humanoid.GetPlayingAnimationTracks"] = extra["Animator.GetPlayingAnimationTracks"]
 	function mock.newTrack()
-		return {
-			Play = function() end,
-			Stop = function() end,
+		local track
+		track = {
+			PlayCount = 0,
+			Play = function(self, _fade, _weight, speed)
+				self.PlayCount += 1
+				self.IsPlaying = true
+				self.LastSpeed = speed
+			end,
+			Stop = function(self)
+				self.IsPlaying = false
+			end,
+			Destroy = function() end,
 			AdjustSpeed = function() end,
 			IsPlaying = false,
 			Looped = false,
@@ -286,6 +316,7 @@ return function(mock)
 				return mock.newSignal()
 			end,
 		}
+		return track
 	end
 	extra["*.GetNetworkPing"] = function()
 		return 0.08

@@ -137,9 +137,12 @@ local CHARACTER_JUMP = "rbxasset://sounds/action_jump.mp3"
 
 local SFX: { [string]: Sfx } = {
 	-- Épée
-	swordSwing = sfx(CLASSIC_SLASH, 0.45, "Souffle de lame court (whoosh), sans impact.", 1.05, 0.08),
-	swordSwingHeavy = sfx(CLASSIC_LUNGE, 0.55, "Souffle de lame lourd, plus grave.", 0.9, 0.05),
-	swordHit = sfx("", 0.6, "Lame qui entaille (chair / tissu), court, sans cri.", 1, 0.08),
+	-- Balayage dans le vide : léger, aérien, hauteur variée à chaque coup (jamais le « shing »
+	-- métallique, réservé aux impacts réels), et pas plus d'un toutes les 0,12 s.
+	swordSwing = sfx(CLASSIC_LUNGE, 0.16, "Souffle de lame court et doux (whoosh), sans impact métallique.", 1.15, 0.12, 0.12, 2),
+	swordSwingHeavy = sfx(CLASSIC_LUNGE, 0.3, "Souffle de lame lourd, plus grave.", 0.82, 0.06, 0.15, 2),
+	-- Impact sur une cible : le « shing » métallique classique, seulement quand le coup porte.
+	swordHit = sfx(CLASSIC_SLASH, 0.42, "Lame qui entaille (chair / tissu), court, sans cri.", 0.92, 0.1, 0.06, 3),
 	swordBlocked = sfx("", 0.6, "Métal contre métal ou pierre, sec et mat (coup arrêté par une garde).", 1, 0.06),
 	parryPerfect = sfx(CLASSIC_UNSHEATH, 0.65, "Tintement métallique clair et réverbéré (parade parfaite).", 1.35, 0.03, 0.1, 2),
 	postureBreak = sfx("", 0.7, "Craquement sourd + souffle (garde brisée).", 1, 0.05, 0.2, 2),

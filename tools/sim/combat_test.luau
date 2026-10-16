@@ -401,8 +401,23 @@ end
 print("== Sauvegarde et reconnexion")
 local profileBefore = H.profile(player)
 local xpBefore = profileBefore and profileBefore.progression.xp
-local serialized = profileBefore and mock.game:GetService("HttpService"):JSONEncode(profileBefore) or ""
-H.check("ni Mana, ni Tension, ni recharge dans la sauvegarde (rien à migrer)", not string.find(serialized, "Mana") and not string.find(serialized, "Tension") and not string.find(serialized, "SpellReady"))
+-- Parcours réel du profil (clés et valeurs texte) : aucune trace des ressources de combat.
+local found = {}
+local function scan(value, depth)
+	if type(value) ~= "table" or depth > 8 then
+		return
+	end
+	for key, inner in pairs(value) do
+		local text = tostring(key)
+		if string.find(text, "Mana") or string.find(text, "Tension") or string.find(text, "SpellReady") or string.find(text, "Posture") then
+			table.insert(found, text)
+		end
+		scan(inner, depth + 1)
+	end
+end
+scan(profileBefore, 0)
+H.check("profil lu (sauvegarde existante)", profileBefore ~= nil and next(profileBefore) ~= nil)
+H.check("ni Mana, ni Tension, ni recharge dans la sauvegarde (rien à migrer)", #found == 0, table.concat(found, ", "))
 ResourceService.setTension(player, 70)
 ResourceService.spendMana(player, 50)
 H.leave(player)
