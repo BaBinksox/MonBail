@@ -31,6 +31,7 @@ local ItemConfig = require(sharedFolder:WaitForChild("Progression"):WaitForChild
 local RankConfig = require(sharedFolder:WaitForChild("Progression"):WaitForChild("RankConfig") :: ModuleScript)
 
 local clientFolder = script.Parent.Parent
+local TouchLayout = require(clientFolder:WaitForChild("Input"):WaitForChild("TouchLayout") :: ModuleScript)
 local Theme = require(clientFolder:WaitForChild("UI"):WaitForChild("Theme") :: ModuleScript)
 local UIBus = require(clientFolder:WaitForChild("UI"):WaitForChild("UIBus") :: ModuleScript)
 local PlayerState = require(clientFolder:WaitForChild("State"):WaitForChild("PlayerState") :: ModuleScript)
@@ -789,6 +790,7 @@ ContextActionService:BindAction(ACTION_NAME, function(_name: string, state: Enum
 	end
 	return Enum.ContextActionResult.Pass
 end, true, grimoireKey, binding.gamepad or Enum.KeyCode.DPadUp)
--- Bouton tactile (téléphone, tablette) : créé par ContextActionService, au-dessus du bouton de saut.
+-- Bouton tactile (téléphone, tablette) : créé par ContextActionService, en haut à droite, loin
+-- des boutons de combat (voir KeyBindings et Client/Input/TouchLayout).
 ContextActionService:SetTitle(ACTION_NAME, binding.label)
-ContextActionService:SetPosition(ACTION_NAME, UDim2.new(1, -170, 1, -230))
+TouchLayout.place(ACTION_NAME, "Grimoire")

@@ -28,7 +28,6 @@ for _, path in ipairs(scripts) do
 	end)
 end
 H.advance(1)
-local _ = C
 local SoundService = mock.game:GetService("SoundService")
 local MusicDirector = env.require("StarterPlayer/StarterPlayerScripts/Client/Audio/MusicDirector")
 local AudioMixer = env.require("StarterPlayer/StarterPlayerScripts/Client/Audio/AudioMixer")
@@ -154,10 +153,12 @@ H.check("jamais deux musiques à plein volume", count == 1, names)
 TimeLoopRemotes.AnomalyOpened:FireClient(player, 5)
 H.advance(0.3)
 H.check("anomalie : musique d'anomalie prioritaire", MusicDirector.getCurrentKey() == "anomaly", MusicDirector.getCurrentKey())
+H.check("anomalie : bouton tactile « Rembobiner » proposé", C.actions.RewindTouch ~= nil)
 fight(1.5)
 H.check("l'anomalie passe avant le combat", MusicDirector.getCurrentKey() == "anomaly")
 TimeLoopRemotes.AnomalyClosed:FireClient(player)
 fight(1)
+H.check("anomalie refermée : bouton de rembobinage retiré", C.actions.RewindTouch == nil)
 H.check("anomalie refermée : retour au combat en cours", MusicDirector.getCurrentKey() == "combat", MusicDirector.getCurrentKey())
 -- Victoire : un ennemi proche (factice, sans IA) vaincu pendant le combat.
 local foe = mock.Instance.new("Model")

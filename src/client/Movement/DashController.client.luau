@@ -26,6 +26,7 @@ local Remotes = require(sharedFolder:WaitForChild("MovementRemotes") :: ModuleSc
 local KeyBindings = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Input"):WaitForChild("KeyBindings") :: ModuleScript)
 
 local clientFolder = script.Parent.Parent
+local TouchLayout = require(clientFolder:WaitForChild("Input"):WaitForChild("TouchLayout") :: ModuleScript)
 local CharacterAnimator = require(clientFolder:WaitForChild("Animation"):WaitForChild("CharacterAnimator") :: ModuleScript)
 local SfxPlayer = require(clientFolder:WaitForChild("Audio"):WaitForChild("SfxPlayer") :: ModuleScript)
 local MovementState = require(script.Parent:WaitForChild("MovementState") :: ModuleScript)
@@ -197,9 +198,7 @@ ContextActionService:BindAction(DASH_ACTION, function(_name: string, state: Enum
 	return Enum.ContextActionResult.Pass
 end, dashBinding.touch ~= nil, dashBinding.keyCode or dashBinding.fallbackKeyCode, dashBinding.gamepad or Enum.KeyCode.ButtonB)
 ContextActionService:SetTitle(DASH_ACTION, dashBinding.label)
-if dashBinding.touch then
-	ContextActionService:SetPosition(DASH_ACTION, dashBinding.touch)
-end
+TouchLayout.place(DASH_ACTION, "Dash")
 
 -- Double appui sur une même touche de direction.
 UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)

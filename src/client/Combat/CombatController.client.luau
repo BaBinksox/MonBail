@@ -39,6 +39,7 @@ local Remotes = require(combatFolder:WaitForChild("CombatRemotes") :: ModuleScri
 local SpatialHitbox = require(combatFolder:WaitForChild("SpatialHitbox") :: ModuleScript)
 
 local clientFolder = script.Parent.Parent
+local TouchLayout = require(clientFolder:WaitForChild("Input"):WaitForChild("TouchLayout") :: ModuleScript)
 local CharacterAnimator = require(clientFolder:WaitForChild("Animation"):WaitForChild("CharacterAnimator") :: ModuleScript)
 local SfxPlayer = require(clientFolder:WaitForChild("Audio"):WaitForChild("SfxPlayer") :: ModuleScript)
 local MovementState = require(clientFolder:WaitForChild("Movement"):WaitForChild("MovementState") :: ModuleScript)
@@ -494,9 +495,7 @@ ContextActionService:BindAction(ATTACK_ACTION, function(_name: string, state: En
 	return Enum.ContextActionResult.Pass
 end, attackBinding.touch ~= nil, attackBinding.gamepad or Enum.KeyCode.ButtonR2)
 ContextActionService:SetTitle(ATTACK_ACTION, attackBinding.label)
-if attackBinding.touch then
-	ContextActionService:SetPosition(ATTACK_ACTION, attackBinding.touch)
-end
+TouchLayout.place(ATTACK_ACTION, "Attack")
 
 ContextActionService:BindAction(ULTIMATE_ACTION, function(_name: string, state: Enum.UserInputState): Enum.ContextActionResult
 	if state == Enum.UserInputState.Begin then
@@ -506,9 +505,7 @@ ContextActionService:BindAction(ULTIMATE_ACTION, function(_name: string, state: 
 	return Enum.ContextActionResult.Pass
 end, ultimateBinding.touch ~= nil, ultimateBinding.keyCode or ultimateBinding.fallbackKeyCode, ultimateBinding.gamepad or Enum.KeyCode.ButtonY)
 ContextActionService:SetTitle(ULTIMATE_ACTION, ultimateBinding.label)
-if ultimateBinding.touch then
-	ContextActionService:SetPosition(ULTIMATE_ACTION, ultimateBinding.touch)
-end
+TouchLayout.place(ULTIMATE_ACTION, "Ultimate")
 
 UIBus.DialogueStateChanged:Connect(function(isOpen: boolean)
 	isInDialogue = isOpen

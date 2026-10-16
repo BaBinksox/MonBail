@@ -25,6 +25,7 @@ local ResourceConfig = require(sharedFolder:WaitForChild("Combat"):WaitForChild(
 local CombatRemotes = require(sharedFolder:WaitForChild("Combat"):WaitForChild("CombatRemotes") :: ModuleScript)
 
 local clientFolder = script.Parent.Parent
+local TouchLayout = require(clientFolder:WaitForChild("Input"):WaitForChild("TouchLayout") :: ModuleScript)
 local CharacterAnimator = require(clientFolder:WaitForChild("Animation"):WaitForChild("CharacterAnimator") :: ModuleScript)
 local SfxPlayer = require(clientFolder:WaitForChild("Audio"):WaitForChild("SfxPlayer") :: ModuleScript)
 local MovementState = require(clientFolder:WaitForChild("Movement"):WaitForChild("MovementState") :: ModuleScript)
@@ -187,9 +188,7 @@ ContextActionService:BindAction(ACTION_NAME, function(_name: string, state: Enum
 	return Enum.ContextActionResult.Pass
 end, binding.touch ~= nil, binding.keyCode or binding.fallbackKeyCode, binding.gamepad or Enum.KeyCode.DPadRight)
 ContextActionService:SetTitle(ACTION_NAME, binding.label)
-if binding.touch then
-	ContextActionService:SetPosition(ACTION_NAME, binding.touch)
-end
+TouchLayout.place(ACTION_NAME, "Concentrate")
 
 UIBus.DialogueStateChanged:Connect(function(isOpen: boolean)
 	isInDialogue = isOpen

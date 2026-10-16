@@ -30,7 +30,12 @@
 	Manette : R2 attaque (maintenue : chargée), L1 parade, R1 sort de base, L2 sort secondaire,
 	Y ultime, B dash, L3 sprint (bascule), A saut / double saut, X interagir, croix haut Grimoire,
 	croix bas rembobinage, croix droite Concentration (maintenue).
-	Tactile : boutons créés par ContextActionService autour du bouton de saut (positions ci-dessous).
+	Tactile : boutons créés par ContextActionService en arc autour du bouton de saut de Roblox, à
+	droite de l'écran (le stick reste libre à gauche, le centre de l'action reste dégagé). Deux
+	dispositions : `touch` pour les grands écrans (bouton de saut de 120 px), `touchCompact` pour
+	les téléphones (plus petit côté ≤ 500 px, bouton de saut de 70 px). Client/Input/TouchLayout
+	choisit la bonne et la réapplique quand l'écran tourne. Le bouton « Rembobiner » n'apparaît que
+	pendant une anomalie temporelle. À vérifier dans l'émulateur d'appareils de Studio.
 ]]
 
 export type Binding = {
@@ -39,7 +44,8 @@ export type Binding = {
 	fallbackKeyCode: Enum.KeyCode, -- si la disposition du clavier est illisible
 	mouse: Enum.UserInputType?, -- bouton de souris (attaque)
 	gamepad: Enum.KeyCode?,
-	touch: UDim2?, -- position du bouton tactile (nil = pas de bouton)
+	touch: UDim2?, -- position du bouton tactile, grand écran (nil = pas de bouton)
+	touchCompact: UDim2?, -- position sur téléphone (plus petit côté ≤ 500 px)
 	label: string, -- nom de l'action affiché à l'écran
 }
 
@@ -48,61 +54,72 @@ local BINDINGS: { [string]: Binding } = {
 		mouse = Enum.UserInputType.MouseButton1,
 		fallbackKeyCode = Enum.KeyCode.ButtonR2, -- pas de touche clavier : clic gauche
 		gamepad = Enum.KeyCode.ButtonR2,
-		touch = UDim2.new(1, -95, 1, -205),
+		touch = UDim2.new(1, -145, 1, -235),
+		touchCompact = UDim2.new(1, -90, 1, -160),
 		label = "Attaque",
 	},
 	Sprint = {
 		keyCode = Enum.KeyCode.LeftShift,
 		fallbackKeyCode = Enum.KeyCode.LeftShift,
 		gamepad = Enum.KeyCode.ButtonL3, -- bascule (on n'appuie pas un stick en continu)
-		touch = UDim2.new(1, -245, 1, -95),
+		touch = UDim2.new(1, -255, 1, -50),
+		touchCompact = UDim2.new(1, -220, 1, -60),
 		label = "Sprint",
 	},
 	Dash = {
 		keyCode = Enum.KeyCode.C,
 		fallbackKeyCode = Enum.KeyCode.C,
 		gamepad = Enum.KeyCode.ButtonB,
-		touch = UDim2.new(1, -245, 1, -165),
+		touch = UDim2.new(1, -255, 1, -125),
+		touchCompact = UDim2.new(1, -160, 1, -70),
 		label = "Esquive",
 	},
 	Parry = {
 		keyCode = Enum.KeyCode.Q,
 		fallbackKeyCode = Enum.KeyCode.Q,
 		gamepad = Enum.KeyCode.ButtonL1,
+		touch = UDim2.new(1, -240, 1, -205),
+		touchCompact = UDim2.new(1, -160, 1, -130),
 		label = "Parade",
 	},
 	SpellBase = {
 		keyCode = Enum.KeyCode.One,
 		fallbackKeyCode = Enum.KeyCode.One,
 		gamepad = Enum.KeyCode.ButtonR1,
-		touch = UDim2.new(1, -170, 1, -285),
+		touch = UDim2.new(1, -225, 1, -290),
+		touchCompact = UDim2.new(1, -150, 1, -195),
 		label = "Sort",
 	},
 	SpellSecondary = {
 		keyCode = Enum.KeyCode.Two,
 		fallbackKeyCode = Enum.KeyCode.Two,
 		gamepad = Enum.KeyCode.ButtonL2,
-		touch = UDim2.new(1, -95, 1, -285),
+		touch = UDim2.new(1, -145, 1, -315),
+		touchCompact = UDim2.new(1, -90, 1, -225),
 		label = "Sort II",
 	},
 	Concentrate = {
 		keyCode = Enum.KeyCode.G,
 		fallbackKeyCode = Enum.KeyCode.G,
 		gamepad = Enum.KeyCode.DPadRight,
-		touch = UDim2.new(1, -320, 1, -95),
+		touch = UDim2.new(1, -335, 1, -125),
+		touchCompact = UDim2.new(1, -222, 1, -122),
 		label = "Concentration",
 	},
 	Ultimate = {
 		keyCode = Enum.KeyCode.E,
 		fallbackKeyCode = Enum.KeyCode.E,
 		gamepad = Enum.KeyCode.ButtonY,
-		touch = UDim2.new(1, -320, 1, -165),
+		touch = UDim2.new(1, -305, 1, -275),
+		touchCompact = UDim2.new(1, -228, 1, -188),
 		label = "Ultime",
 	},
 	Rewind = {
 		keyCode = Enum.KeyCode.R,
 		fallbackKeyCode = Enum.KeyCode.R,
 		gamepad = Enum.KeyCode.DPadDown,
+		touch = UDim2.new(0.5, -45, 1, -230), -- pendant une anomalie seulement (joueur figé)
+		touchCompact = UDim2.new(0.5, -35, 1, -170),
 		label = "Rembobiner",
 	},
 	Grimoire = {
@@ -110,6 +127,8 @@ local BINDINGS: { [string]: Binding } = {
 		fallbackKeyCode = Enum.KeyCode.J,
 		-- Pas ButtonSelect : Roblox l'utilise déjà pour la navigation des interfaces à la manette.
 		gamepad = Enum.KeyCode.DPadUp,
+		touch = UDim2.new(1, -90, 0, 70), -- en haut à droite, loin des boutons de combat
+		touchCompact = UDim2.new(1, -70, 0, 56),
 		label = "Grimoire",
 	},
 	Interact = {
@@ -131,6 +150,37 @@ local DIRECTION_KEYS: { [Enum.KeyCode]: Vector3 } = {
 	[Enum.KeyCode.Left] = Vector3.new(-1, 0, 0),
 	[Enum.KeyCode.Right] = Vector3.new(1, 0, 0),
 }
+
+-- Boutons tactiles qui se chevauchent, par disposition (taille de bouton supposée, en px), ou qui
+-- empiètent sur le bouton de saut de Roblox.
+local JUMP_AREAS = {
+	touch = { x0 = -170, x1 = -50, y0 = -140, y1 = -20 }, -- bouton de saut de 120 px
+	touchCompact = { x0 = -95, x1 = -25, y0 = -90, y1 = -20 }, -- bouton de saut de 70 px
+}
+local function findTouchOverlaps(sizeLarge: number, sizeCompact: number): { string }
+	local overlaps = {}
+	for _, field in { "touch", "touchCompact" } do
+		local size = if field == "touch" then sizeLarge else sizeCompact
+		local jump = JUMP_AREAS[field]
+		local placed: { { name: string, x: number, y: number } } = {}
+		for name, binding in BINDINGS do
+			local position: UDim2? = (binding :: any)[field]
+			if position and position.X.Scale == 1 and position.Y.Scale == 1 then
+				for _, other in placed do
+					if math.abs(other.x - position.X.Offset) < size and math.abs(other.y - position.Y.Offset) < size then
+						table.insert(overlaps, `{field} : {name} / {other.name}`)
+					end
+				end
+				local x0, y0 = position.X.Offset, position.Y.Offset
+				if x0 < jump.x1 and x0 + size > jump.x0 and y0 < jump.y1 and y0 + size > jump.y0 then
+					table.insert(overlaps, `{field} : {name} / bouton de saut`)
+				end
+				table.insert(placed, { name = name, x = position.X.Offset, y = position.Y.Offset })
+			end
+		end
+	end
+	return overlaps
+end
 
 -- Vérifie qu'aucune touche clavier ni bouton de manette n'est attribué à deux actions.
 local function findConflicts(): { string }
@@ -159,6 +209,7 @@ return table.freeze({
 	BINDINGS = BINDINGS,
 	DIRECTION_KEYS = DIRECTION_KEYS,
 	findConflicts = findConflicts,
+	findTouchOverlaps = findTouchOverlaps,
 	-- Touche des ProximityPrompts des objets du monde (identique à celle des villageois).
 	PROMPT_KEY = Enum.KeyCode.F,
 	PROMPT_GAMEPAD_KEY = Enum.KeyCode.ButtonX,

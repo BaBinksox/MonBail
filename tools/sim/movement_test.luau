@@ -16,6 +16,8 @@ print("== Commandes")
 local conflicts = KeyBindings.findConflicts()
 H.check("aucune touche ni bouton attribué à deux actions", #conflicts == 0, table.concat(conflicts, ", "))
 H.check("Maj = sprint, C = dash", KeyBindings.BINDINGS.Sprint.keyCode == Enum.KeyCode.LeftShift and KeyBindings.BINDINGS.Dash.keyCode == Enum.KeyCode.C)
+local overlaps = KeyBindings.findTouchOverlaps(70, 60)
+H.check("boutons tactiles : aucun chevauchement ni empiètement sur le saut (deux dispositions)", #overlaps == 0, table.concat(overlaps, ", "))
 for name, binding in pairs(KeyBindings.BINDINGS) do
 	if name ~= "Grimoire" and name ~= "Interact" and name ~= "Parry" and name ~= "Rewind" then
 		H.check(name .. " : jouable à la manette", binding.gamepad ~= nil)

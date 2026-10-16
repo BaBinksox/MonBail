@@ -29,6 +29,7 @@ local MovementModel = require(sharedFolder:WaitForChild("Movement"):WaitForChild
 local Remotes = require(sharedFolder:WaitForChild("Movement"):WaitForChild("MovementRemotes") :: ModuleScript)
 
 local clientFolder = script.Parent.Parent
+local TouchLayout = require(clientFolder:WaitForChild("Input"):WaitForChild("TouchLayout") :: ModuleScript)
 local CharacterAnimator = require(clientFolder:WaitForChild("Animation"):WaitForChild("CharacterAnimator") :: ModuleScript)
 local SfxPlayer = require(clientFolder:WaitForChild("Audio"):WaitForChild("SfxPlayer") :: ModuleScript)
 local ClientSettings = require(clientFolder:WaitForChild("State"):WaitForChild("ClientSettings") :: ModuleScript)
@@ -245,9 +246,7 @@ ContextActionService:BindAction(SPRINT_ACTION, function(_name: string, state: En
 	return Enum.ContextActionResult.Pass -- Maj reste lisible par les autres scripts
 end, sprintBinding.touch ~= nil, sprintBinding.keyCode or sprintBinding.fallbackKeyCode, sprintBinding.gamepad or Enum.KeyCode.ButtonL3)
 ContextActionService:SetTitle(SPRINT_ACTION, sprintBinding.label)
-if sprintBinding.touch then
-	ContextActionService:SetPosition(SPRINT_ACTION, sprintBinding.touch)
-end
+TouchLayout.place(SPRINT_ACTION, "Sprint")
 
 -- Fenêtre perdue (Alt-Tab avec Maj enfoncée) ou dialogue (qui capte Maj) : on relâche le sprint.
 UserInputService.WindowFocusReleased:Connect(function()

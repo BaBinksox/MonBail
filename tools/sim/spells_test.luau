@@ -376,6 +376,22 @@ local castsBefore = sentCasts()
 mock.task.spawn(C.actions.SpellBase.fn, "SpellBase", Enum.UserInputState.Begin, {})
 C.frames(30)
 H.check("touche 1 : Braise Ardente demandée au serveur", sentCasts() == castsBefore + 1)
+local hudGui = C.playerGui:FindFirstChild("CombatHudGui")
+local baseSlot = hudGui and hudGui:FindFirstChild("SpellBaseSlot", true)
+C.frames(10)
+local timer = baseSlot and baseSlot:FindFirstChildWhichIsA("TextLabel", true)
+local slotTexts = {}
+if baseSlot then
+	for _, d in ipairs(baseSlot:GetDescendants()) do
+		if d:IsA("TextLabel") then
+			table.insert(slotTexts, d.Text)
+		end
+	end
+end
+H.check("HUD : emplacement du sort de base nommé (Braise Ardente, 18)", table.find(slotTexts, "Braise Ardente") ~= nil and table.find(slotTexts, "18") ~= nil, table.concat(slotTexts, "|"))
+local cooldownShade = baseSlot and baseSlot:FindFirstChild("Cooldown")
+H.check("HUD : recharge affichée après le lancer", cooldownShade ~= nil and cooldownShade.Size.Y.Scale > 0, cooldownShade and cooldownShade.Size.Y.Scale)
+local _ = timer
 local UIBus = env.require("StarterPlayer/StarterPlayerScripts/Client/UI/UIBus")
 local denied = 0
 UIBus.ManaDenied:Connect(function()
@@ -387,6 +403,17 @@ castsBefore = sentCasts()
 mock.task.spawn(C.actions.SpellSecondary.fn, "SpellSecondary", Enum.UserInputState.Begin, {})
 C.frames(5)
 H.check("Mana insuffisant : rien n'est envoyé, la jauge le signale", sentCasts() == castsBefore and denied == 1, denied)
+C.frames(10)
+local secondarySlot = hudGui and hudGui:FindFirstChild("SpellSecondarySlot", true)
+local costRed = false
+if secondarySlot then
+	for _, d in ipairs(secondarySlot:GetDescendants()) do
+		if d:IsA("TextLabel") and d.Text == "35" and d.TextColor3.R > 0.8 then
+			costRed = true
+		end
+	end
+end
+H.check("HUD : coût du sort secondaire en rouge quand le Mana manque", costRed)
 StatusService.apply(target, "burn", { source = pyro })
 C.frames(5)
 H.check("brûlure visible sur l'ennemi (braises)", target:FindFirstChild("StatusFx_burn", true) ~= nil)

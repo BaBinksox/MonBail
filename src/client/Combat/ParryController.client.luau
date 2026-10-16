@@ -27,6 +27,7 @@ local ParryRemotes = require(sharedFolder:WaitForChild("Combat"):WaitForChild("P
 local EnemyDefinitions = require(sharedFolder:WaitForChild("Enemy"):WaitForChild("EnemyDefinitions") :: ModuleScript)
 
 local clientFolder = script.Parent.Parent
+local TouchLayout = require(clientFolder:WaitForChild("Input"):WaitForChild("TouchLayout") :: ModuleScript)
 local Theme = require(clientFolder:WaitForChild("UI"):WaitForChild("Theme") :: ModuleScript)
 local UIBus = require(clientFolder:WaitForChild("UI"):WaitForChild("UIBus") :: ModuleScript)
 local CharacterAnimator = require(clientFolder:WaitForChild("Animation"):WaitForChild("CharacterAnimator") :: ModuleScript)
@@ -155,7 +156,7 @@ end
 local binding = KeyBindings.BINDINGS.Parry
 ContextActionService:BindAction(ACTION_NAME, onParryAction, true, binding.keyCode or binding.fallbackKeyCode, binding.gamepad or Enum.KeyCode.ButtonL1)
 ContextActionService:SetTitle(ACTION_NAME, binding.label)
-ContextActionService:SetPosition(ACTION_NAME, UDim2.new(1, -170, 1, -150))
+TouchLayout.place(ACTION_NAME, "Parry")
 
 UIBus.DialogueStateChanged:Connect(function(isOpen: boolean)
 	isInDialogue = isOpen

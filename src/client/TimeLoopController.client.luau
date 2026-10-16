@@ -14,6 +14,7 @@
 		                                            compteur de magnétoscope qui remonte le temps.
 ]]
 
+local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
@@ -23,6 +24,7 @@ local Config = require(sharedFolder:WaitForChild("TimeLoopConfig") :: ModuleScri
 local Remotes = require(sharedFolder:WaitForChild("TimeLoopRemotes") :: ModuleScript)
 local KeyBindings = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Input"):WaitForChild("KeyBindings") :: ModuleScript)
 
+local TouchLayout = require(script.Parent:WaitForChild("Input"):WaitForChild("TouchLayout") :: ModuleScript)
 local modulesFolder = script.Parent:WaitForChild("TimeLoop")
 local GlitchOverlay = require(modulesFolder:WaitForChild("GlitchOverlay") :: ModuleScript)
 local TimeLoopAudio = require(modulesFolder:WaitForChild("TimeLoopAudio") :: ModuleScript)
@@ -67,6 +69,25 @@ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: 
 	end
 end)
 
+-- Tactile : un bouton « Rembobiner » n'existe que pendant une anomalie (le joueur est figé : il
+-- ne cache rien d'utile), au centre bas de l'écran.
+local REWIND_TOUCH_ACTION = "RewindTouch"
+local function setRewindTouchButton(isShown: boolean)
+	if isShown then
+		ContextActionService:BindAction(REWIND_TOUCH_ACTION, function(_name: string, state: Enum.UserInputState): Enum.ContextActionResult
+			if state == Enum.UserInputState.Begin then
+				Remotes.RequestRewind:FireServer()
+				return Enum.ContextActionResult.Sink
+			end
+			return Enum.ContextActionResult.Pass
+		end, true)
+		ContextActionService:SetTitle(REWIND_TOUCH_ACTION, KeyBindings.BINDINGS.Rewind.label)
+		TouchLayout.place(REWIND_TOUCH_ACTION, "Rewind")
+	else
+		ContextActionService:UnbindAction(REWIND_TOUCH_ACTION)
+	end
+end
+
 --------------------------------------------------------------------------------
 -- Réactions aux événements serveur
 --------------------------------------------------------------------------------
@@ -75,10 +96,12 @@ end)
 Remotes.AnomalyOpened.OnClientEvent:Connect(function(_windowDuration: number)
 	GlitchOverlay.setMessage(Config.ANOMALY_MESSAGE)
 	GlitchOverlay.start("anomaly")
+	setRewindTouchButton(true)
 end)
 
 -- Fin de l'anomalie, quelle que soit l'issue (rewind accepté, mort, respawn).
 Remotes.AnomalyClosed.OnClientEvent:Connect(function()
+	setRewindTouchButton(false)
 	GlitchOverlay.setMessage("")
 	-- En cas de rewind, RewindStarted a pris le relais : on ne coupe pas son glitch.
 	if not isRewinding then

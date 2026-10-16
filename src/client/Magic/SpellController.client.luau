@@ -27,6 +27,7 @@ local SpellRemotes = require(sharedFolder:WaitForChild("Magic"):WaitForChild("Sp
 local ResourceConfig = require(sharedFolder:WaitForChild("Combat"):WaitForChild("ResourceConfig") :: ModuleScript)
 
 local clientFolder = script.Parent.Parent
+local TouchLayout = require(clientFolder:WaitForChild("Input"):WaitForChild("TouchLayout") :: ModuleScript)
 local CharacterAnimator = require(clientFolder:WaitForChild("Animation"):WaitForChild("CharacterAnimator") :: ModuleScript)
 local SfxPlayer = require(clientFolder:WaitForChild("Audio"):WaitForChild("SfxPlayer") :: ModuleScript)
 local UIBus = require(clientFolder:WaitForChild("UI"):WaitForChild("UIBus") :: ModuleScript)
@@ -167,9 +168,7 @@ local function bindSlot(actionName: string, bindingName: string, slot: string)
 		return Enum.ContextActionResult.Pass
 	end, binding.touch ~= nil, binding.keyCode or binding.fallbackKeyCode, binding.gamepad or Enum.KeyCode.ButtonR1)
 	ContextActionService:SetTitle(actionName, binding.label)
-	if binding.touch then
-		ContextActionService:SetPosition(actionName, binding.touch)
-	end
+	TouchLayout.place(actionName, bindingName)
 end
 
 bindSlot("SpellBase", "SpellBase", "base")
