@@ -546,6 +546,7 @@ local function dummy(name, position, boss)
 	return model
 end
 local iceMagic = MagicConfig.getById("ice")
+mock.workspace.CurrentCamera.CFrame = mock.CFrame.new(root(target).Position + V3.new(0, 10, 30)) -- joueur proche
 clearFx()
 CombatRemotes.UltimateFired.OnClientEvent:Fire(mages.ice.Character, root(target).Position + V3.new(0, 0, 6), { target }, "ice")
 C.frames(20)
@@ -561,13 +562,26 @@ H.check("Hiver Éternel : budget de pièces raisonnable", iceStats.parts <= 220,
 C.frames(60 * 6)
 H.check("Hiver Éternel : tout a disparu ensuite (rien ne reste dans le Workspace)", fxStats().parts == 0, fxStats().parts)
 local amMagic = MagicConfig.getById("antimatter")
-CombatRemotes.UltimateFired.OnClientEvent:Fire(mages.antimatter.Character, root(target).Position + V3.new(0, 0, 6), { target }, "antimatter")
+local AudioMixer = env.require("StarterPlayer/StarterPlayerScripts/Client/Audio/AudioMixer")
+local amOrigin = root(target).Position + V3.new(0, 0, 6)
+mock.workspace.CurrentCamera.CFrame = mock.CFrame.new(amOrigin + V3.new(0, 8, 20)) -- joueur proche
+local musicBefore = AudioMixer.getVolume("Music")
+clearFx()
+CombatRemotes.UltimateFired.OnClientEvent:Fire(mages.antimatter.Character, amOrigin, { target }, "antimatter")
 C.frames(15)
-H.check("Antimatière, préparation : cœur de vide, coque déformante, anneau qui se resserre", effects("VoidCore") == 1 and effects("Distortion") == 1 and effects("CompressionRing") == 1)
-H.check("Antimatière, préparation : lien d'énergie vers la cible", root(target):FindFirstChild("VoidTether") ~= nil)
-C.frames(math.ceil(amMagic.ultimateWindup * 60) + 10)
-H.check("Antimatière, impact : implosion puis onde", effects("VoidCore") == 0 and effects("VoidWave") == 1)
-C.frames(120)
+H.check("Rupture du Néant, préparation : cœur, espace comprimé (lentille), matière tirée en spirale", effects("VoidCore") == 1 and effects("Distortion") == 1 and effects("VoidMote") >= 5, effects("VoidMote"))
+H.check("Rupture du Néant, préparation : lien d'énergie vers la cible", root(target):FindFirstChild("VoidTether") ~= nil)
+H.check("Rupture du Néant, préparation : aucun disque", fxStats().cylinders == 0, fxStats().cylinders)
+C.frames(math.ceil(amMagic.ultimateWindup * 60) - 18)
+H.check("Rupture du Néant : instant de silence juste avant la libération (musique atténuée)", AudioMixer.getVolume("Music") < musicBefore * 0.6, AudioMixer.getVolume("Music"))
+C.frames(14)
+H.check("Rupture du Néant, libération : effondrement du cœur puis onde géante", effects("VoidCore") == 0 and effects("VoidWave") == 1 and effects("RuptureShell") >= 1)
+H.check("Rupture du Néant, libération : fissures sombres au sol", effects("VoidCrack") >= 4, effects("VoidCrack"))
+H.check("Rupture du Néant : aucune pièce d'effet solide", fxStats().solid == 0)
+C.frames(60 * 3)
+H.check("Rupture du Néant : la musique revient", math.abs(AudioMixer.getVolume("Music") - musicBefore) < 1e-3, AudioMixer.getVolume("Music"))
+C.frames(60 * 3)
+H.check("Rupture du Néant : tout a disparu", fxStats().parts == 0, fxStats().parts)
 -- Les quatre autres ultimes : préparation visible, puis impact.
 local others = {
 	{ id = "pyromancy", before = "EmberFloor", after = "FireWall" },
@@ -631,7 +645,7 @@ C.frames(20)
 clearFx()
 SpellRemotes.SpellImpact.OnClientEvent:Fire(9002, "crystal_prison", prisonPoint, { frozen, boss })
 C.frames(30)
-H.check("Prison Cristalline, impact : pointes successives autour des cibles", spellFx("Spire") >= 8, spellFx("Spire"))
+H.check("Prison Cristalline, impact : pointes successives autour des cibles", spellFx("Spire") >= 6, spellFx("Spire"))
 local function spiresNear(model)
 	local n = 0
 	local position = root(model).Position
@@ -652,20 +666,76 @@ C.frames(60 * 4)
 H.check("Prison Cristalline : tout a disparu", fxStats().parts == 0, fxStats().parts)
 frozen:Destroy()
 boss:Destroy()
+clearFx()
 SpellRemotes.SpellCast.OnClientEvent:Fire(mages.antimatter.Character, "void_fragment", 9003, origin, root(target).Position)
-C.frames(math.ceil(SpellConfig.get("void_fragment").castTime * 60) + 3)
-H.check("Fragment du Vide : cœur noir cerclé de violet", spellFx("VoidFragment") == 1)
+C.frames(5)
+H.check("Fragment du Vide, préparation : sphère noire condensée dans la main", spellFx("ChargingVoid") == 1)
+C.frames(math.ceil(SpellConfig.get("void_fragment").castTime * 60))
+local fragment = mock.workspace.SpellEffects:FindFirstChild("VoidFragment")
+H.check("Fragment du Vide : sphère à couches (cœur noir, lentille, coque)", fragment ~= nil and fragment:FindFirstChild("Core") ~= nil and fragment:FindFirstChild("Lens") ~= nil and fragment:FindFirstChild("Shell") ~= nil)
 SpellRemotes.SpellImpact.OnClientEvent:Fire(9003, "void_fragment", root(target).Position, { target })
 C.frames(2)
-H.check("Fragment du Vide : l'espace se replie à l'impact", spellFx("VoidFold") == 1)
-SpellRemotes.SpellCast.OnClientEvent:Fire(mages.antimatter.Character, "minor_singularity", 9004, origin, root(target).Position)
-C.frames(5)
-H.check("Singularité Mineure : point de vide qui naît au point visé", spellFx("SingularitySeed") == 1)
-SpellRemotes.SpellImpact.OnClientEvent:Fire(9004, "minor_singularity", root(target).Position, { target })
+H.check("Fragment du Vide, impact : la sphère se contracte d'abord", spellFx("VoidFold") == 1 and spellFx("RuptureShell") == 0)
+C.frames(15)
+H.check("Fragment du Vide, impact : puis l'onde de rupture et les éclats", spellFx("VoidFold") == 0 and spellFx("RuptureShell") == 1 and spellFx("Shard") >= 3)
+H.check("Fragment du Vide : ni singularité ni aspiration (sorts distincts)", spellFx("Singularity") == 0 and spellFx("VoidShard") == 0)
+C.frames(60 * 3)
+H.check("Fragment du Vide : tout a disparu", fxStats().parts == 0, fxStats().parts)
+
+local pulled = dummy("Aspiré", root(target).Position + V3.new(30, 0, 4), false)
+local heavy = dummy("BossLourd", root(target).Position + V3.new(30, 0, -4), true)
+local singularityPoint = root(target).Position + V3.new(30, 0, 0)
+mock.workspace.CurrentCamera.CFrame = mock.CFrame.new(singularityPoint + V3.new(0, 10, 25))
+SpellRemotes.SpellCast.OnClientEvent:Fire(mages.antimatter.Character, "minor_singularity", 9004, origin, singularityPoint)
 C.frames(10)
-H.check("Singularité Mineure : tourbillon pendant l'aspiration", spellFx("Singularity") == 1 and spellFx("Vortex") == 1)
-C.frames(60)
-H.check("Singularité Mineure : se referme en onde", spellFx("SingularityWave") == 1)
+H.check("Singularité Mineure, préparation : point noir et espace qui se bombe, aucun disque", spellFx("SingularitySeed") == 1 and spellFx("SingularityLens") == 1 and fxStats().cylinders == 0)
+C.frames(30)
+clearFx()
+SpellRemotes.SpellImpact.OnClientEvent:Fire(9004, "minor_singularity", singularityPoint, { pulled, heavy })
+C.frames(12)
+local function beams()
+	local n = 0
+	for _, holder in ipairs(fxFolders()) do
+		for _, d in ipairs(holder:GetDescendants()) do
+			if rawget(d, "ClassName") == "Beam" then n += 1 end
+		end
+	end
+	return n
+end
+H.check("Singularité Mineure : cœur sombre, coque, fragments en orbite", spellFx("Singularity") == 1 and spellFx("SingularityShell") == 1 and spellFx("VoidShard") >= 4, spellFx("VoidShard"))
+H.check("Singularité Mineure : lien tendu vers l'ennemi aspiré seulement (le boss rompt le sien)", beams() == 1, beams())
+C.frames(50)
+H.check("Singularité Mineure : contraction puis implosion finale", spellFx("Singularity") == 0 and spellFx("RuptureShell") == 1)
+H.check("Singularité Mineure : aucune pièce d'effet solide", fxStats().solid == 0)
+C.frames(60 * 3)
+H.check("Singularité Mineure : tout a disparu", fxStats().parts == 0, fxStats().parts)
+pulled:Destroy()
+heavy:Destroy()
+-- Charge : dix lanceurs au même endroit, en même temps. Le budget doit contenir le nombre de pièces.
+do
+	clearFx()
+	local crowd = {}
+	local center = root(target).Position + V3.new(60, 0, 0)
+	for index = 1, 3 do
+		table.insert(crowd, dummy("Foule" .. index, center + V3.new(index * 3, 0, 0), false))
+	end
+	mock.workspace.CurrentCamera.CFrame = mock.CFrame.new(center + V3.new(0, 10, 25))
+	for index = 1, 10 do
+		local spellId = if index % 2 == 0 then "crystal_prison" else "minor_singularity"
+		local caster = if index % 2 == 0 then mages.ice.Character else mages.antimatter.Character
+		SpellRemotes.SpellCast.OnClientEvent:Fire(caster, spellId, 9500 + index, origin, center)
+		SpellRemotes.SpellImpact.OnClientEvent:Fire(9500 + index, spellId, center, crowd)
+	end
+	local peak = 0
+	for _ = 1, 40 do
+		C.frames(3)
+		peak = math.max(peak, fxStats().parts)
+	end
+	H.check("dix sorts de zone simultanés : pièces d'effet contenues par le budget", peak <= 700, peak)
+	C.frames(60 * 8)
+	H.check("dix sorts simultanés : tout a disparu ensuite", fxStats().parts == 0, fxStats().parts)
+	for _, model in ipairs(crowd) do model:Destroy() end
+end
 local spellLooks = {
 	{ id = "ember", magic = "pyromancy", projectile = "Ember", impact = "Scorch" },
 	{ id = "dark_bolt", magic = "shadow", projectile = "DarkBolt", impact = "LifeWisp" },

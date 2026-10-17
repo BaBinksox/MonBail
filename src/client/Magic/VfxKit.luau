@@ -44,16 +44,39 @@ VfxKit.random = random
 
 local NEAR_DISTANCE = 90 -- studs : détail complet en deçà
 local FAR_DISTANCE = 200 -- studs : détail minimal au-delà
-local BUDGET_SOFT = 220 -- objets d'effet déjà présents : au-delà, détail divisé par deux
-local BUDGET_HARD = 420 -- au-delà, détail minimal
+local BUDGET_SOFT = 180 -- pièces d'effet vivantes : au-delà, détail divisé par deux
+local BUDGET_HARD = 320 -- au-delà, détail minimal
+local ATTACH_LIFETIME = 2.5 -- durée comptée pour une pièce soudée (elle meurt avec sa racine)
 
 --------------------------------------------------------------------------------
 -- Niveau de détail et budget
 --------------------------------------------------------------------------------
 
+-- Compteur exact des pièces créées par VfxKit et encore vivantes (mis à jour à la création :
+-- dix sorts lancés dans la même image voient déjà la charge des précédents).
+local livePieces = 0
+local function track(lifetime: number)
+	livePieces += 1
+	task.delay(lifetime, function()
+		livePieces -= 1
+	end)
+end
+
 local function liveObjects(): number
-	local folder = MagicFx.getFolder()
-	return #folder:GetChildren()
+	return livePieces
+end
+
+function VfxKit.load(): number
+	return livePieces
+end
+
+-- Réserve `amount` pièces pendant `duration` s : un effet qui crée ses pièces en différé (pointes
+-- qui jaillissent l'une après l'autre) les annonce tout de suite au budget.
+function VfxKit.reserve(amount: number, duration: number)
+	livePieces += amount
+	task.delay(duration, function()
+		livePieces -= amount
+	end)
 end
 
 -- 0 < detail <= 1 : multiplicateur des quantités (pièces décoratives, particules).
@@ -77,9 +100,11 @@ function VfxKit.detail(position: Vector3?): number
 	return factor
 end
 
--- Quantité ajustée au détail, jamais sous `minimum` (1 par défaut).
+-- Quantité ajustée au détail, jamais sous `minimum` (1 par défaut). Quand le détail est minimal
+-- (budget saturé ou très loin), le plancher tombe à 1 : l'essentiel reste, le décor disparaît.
 function VfxKit.count(value: number, detail: number, minimum: number?): number
-	return math.max(minimum or 1, math.floor(value * detail + 0.5))
+	local floor = if detail <= 0.25 then math.min(minimum or 1, 1) else minimum or 1
+	return math.max(floor, math.floor(value * detail + 0.5))
 end
 
 -- Faut-il ajouter les détails coûteux (lumières, couches supplémentaires) ?
@@ -104,12 +129,14 @@ end
 function VfxKit.part(name: string, size: Vector3, color: Color3, material: Enum.Material, lifetime: number, shape: Enum.PartType?): Part
 	local part = MagicFx.part(name, shape or Enum.PartType.Block, size, color, material, lifetime)
 	part.Parent = MagicFx.getFolder()
+	track(lifetime)
 	return part
 end
 
 -- Pièce soudée à `root` (suit ses déplacements) ; détruite avec elle.
 function VfxKit.attach(root: BasePart, class: string, name: string, size: Vector3, offset: CFrame, color: Color3, material: Enum.Material): BasePart
 	local part = Instance.new(class) :: BasePart
+	track(ATTACH_LIFETIME)
 	part.Name = name
 	part.Size = size
 	decorate(part, color, material)
@@ -177,7 +204,7 @@ end
 
 -- Gerbe ponctuelle à `position` (porteur invisible détruit tout seul).
 function VfxKit.burst(position: Vector3, amount: number, props: { [string]: any })
-	local anchor = VfxKit.part("Burst", Vector3.one * 0.2, Color3.new(1, 1, 1), Enum.Material.SmoothPlastic, 3)
+	local anchor = VfxKit.part("Burst", Vector3.one * 0.2, Color3.new(1, 1, 1), Enum.Material.SmoothPlastic, 2.2)
 	anchor.Transparency = 1
 	anchor.CFrame = CFrame.new(position)
 	local emitter = VfxKit.emitter(anchor, props)
@@ -237,6 +264,10 @@ end
 -- Formes
 --------------------------------------------------------------------------------
 
+-- Orientation des pièces en coin (WedgePart) : face inclinée à l'avant (-Z). Si les pointes de
+-- cristal paraissent creuses dans Studio, passer à false (une seule ligne à changer).
+VfxKit.WEDGE_SLOPE_FRONT = true
+
 -- Rotation qui pose un cube sur une pointe (diagonale du cube vers le haut) : un diamant.
 local DIAMOND = CFrame.fromAxisAngle(Vector3.new(-1, 0, 1).Unit, math.acos(1 / math.sqrt(3)))
 VfxKit.DIAMOND = DIAMOND
@@ -247,7 +278,7 @@ VfxKit.DIAMOND = DIAMOND
 	cristal relatif à la racine ; son axe Y est la direction de la pointe.
 	Coins Roblox : la face inclinée est la face avant (-Z), la face verticale à l'arrière (+Z).
 ]]
-function VfxKit.attachCrystal(root: BasePart, base: CFrame, height: number, width: number, color: Color3, transparency: number, core: Color3?)
+function VfxKit.attachCrystal(root: BasePart, base: CFrame, height: number, width: number, color: Color3, transparency: number, core: Color3?, light: boolean?)
 	local tipHeight = math.min(width * 1.7, height * 0.5)
 	local bodyHeight = math.max(height - tipHeight, 0.1)
 	local spin = CFrame.Angles(0, math.rad(45), 0)
@@ -256,10 +287,13 @@ function VfxKit.attachCrystal(root: BasePart, base: CFrame, height: number, widt
 	body.Reflectance = 0.08
 	-- Pyramide : chaque arête de faîte est faite de deux coins dos à dos.
 	local top = base * CFrame.new(0, bodyHeight + tipHeight / 2, 0) * spin
-	for _, yaw in { 0, 90 } do
+	-- Version légère : une seule arête (3 pièces au lieu de 5), pour les petits cristaux.
+	local yaws: { number } = if light then { 0 } else { 0, 90 }
+	for _, yaw in yaws do
 		local ridge = top * CFrame.Angles(0, math.rad(yaw), 0)
-		local front = VfxKit.attach(root, "WedgePart", "Tip", Vector3.new(width, tipHeight, width / 2), ridge * CFrame.new(0, 0, -width / 4), color, Enum.Material.Glass)
-		local back = VfxKit.attach(root, "WedgePart", "Tip", Vector3.new(width, tipHeight, width / 2), ridge * CFrame.new(0, 0, width / 4) * CFrame.Angles(0, math.pi, 0), color, Enum.Material.Glass)
+		local flip = if VfxKit.WEDGE_SLOPE_FRONT then CFrame.new() else CFrame.Angles(0, math.pi, 0)
+		local front = VfxKit.attach(root, "WedgePart", "Tip", Vector3.new(width, tipHeight, width / 2), ridge * CFrame.new(0, 0, -width / 4) * flip, color, Enum.Material.Glass)
+		local back = VfxKit.attach(root, "WedgePart", "Tip", Vector3.new(width, tipHeight, width / 2), ridge * CFrame.new(0, 0, width / 4) * CFrame.Angles(0, math.pi, 0) * flip, color, Enum.Material.Glass)
 		front.Transparency = transparency
 		back.Transparency = transparency
 	end
@@ -270,11 +304,11 @@ function VfxKit.attachCrystal(root: BasePart, base: CFrame, height: number, widt
 end
 
 -- Pointe de cristal autonome. Pivot : la base (axe Y vers la pointe). Rend sa racine invisible.
-function VfxKit.spire(pivot: CFrame, height: number, width: number, color: Color3, lifetime: number, core: Color3?): Part
+function VfxKit.spire(pivot: CFrame, height: number, width: number, color: Color3, lifetime: number, core: Color3?, light: boolean?): Part
 	local root = VfxKit.part("Spire", Vector3.one * 0.2, color, Enum.Material.SmoothPlastic, lifetime)
 	root.Transparency = 1
 	root.CFrame = pivot
-	VfxKit.attachCrystal(root, CFrame.new(), height, width, color, 0.22, core)
+	VfxKit.attachCrystal(root, CFrame.new(), height, width, color, 0.22, core, light)
 	return root
 end
 

@@ -119,15 +119,15 @@ local function icePowder(position: Vector3, amount: number, speed: number)
 end
 
 -- Une pointe qui jaillit, tient, puis éclate en fragments.
-local function growSpire(base: Vector3, direction: Vector3, height: number, width: number, palette: any, hold: number, rise: number, core: boolean, detail: number)
+local function growSpire(base: Vector3, direction: Vector3, height: number, width: number, palette: any, hold: number, rise: number, core: boolean, detail: number, light: boolean?)
 	local up = direction.Unit
 	local look = if math.abs(up.Y) > 0.98 then Vector3.zAxis else Vector3.yAxis:Cross(up).Unit
 	local pivot = CFrame.fromMatrix(base, look, up) * CFrame.Angles(0, random:NextNumber(0, math.pi), 0)
-	local root = VfxKit.spire(pivot, height, width, palette.glow, rise + hold + 1.5, if core then palette.main else nil)
+	local root = VfxKit.spire(pivot, height, width, palette.glow, rise + hold + 1.5, if core then palette.main else nil, light)
 	VfxKit.erupt(root, height, rise)
 	task.delay(rise + hold, function()
 		if root.Parent then
-			VfxKit.shatter(base + up * height * 0.5, VfxKit.count(5, detail), palette.glow, Enum.Material.Glass, width * 0.7, 10, 0.7)
+			VfxKit.shatter(base + up * height * 0.5, VfxKit.count(if light then 2 else 3, detail), palette.glow, Enum.Material.Glass, width * 0.7, 10, 0.7)
 			root:Destroy()
 		end
 	end)
@@ -221,13 +221,14 @@ local function prisonTelegraph(spell: any, aimPoint: Vector3, palette: any)
 	VfxKit.frostSpread(aimPoint, spell.radius, palette.glow, VfxKit.count(14, detail, 4), duration, 0.6)
 	coldMist(aimPoint, spell.radius, duration + 0.4, detail)
 	-- Bourgeons de cristal sur le pourtour, un à un : la zone se lit sans disque.
-	local buds = VfxKit.count(8, detail, 4)
+	local buds = VfxKit.count(7, detail, 3)
+	VfxKit.reserve(buds * 3, duration + 0.4)
 	for index = 1, buds do
 		local angle = index / buds * math.pi * 2
 		local base = aimPoint + Vector3.new(math.cos(angle), 0, math.sin(angle)) * spell.radius
 		task.delay(duration * (index - 1) / buds, function()
 			local outward = Vector3.new(math.cos(angle), 0, math.sin(angle))
-			growSpire(base, Vector3.yAxis + outward * 0.3, random:NextNumber(0.8, 1.3), 0.35, palette, duration + 0.2, 0.12, false, detail)
+			growSpire(base, Vector3.yAxis + outward * 0.3, random:NextNumber(0.8, 1.3), 0.35, palette, duration + 0.2, 0.12, false, detail, true)
 		end)
 	end
 end
@@ -239,14 +240,15 @@ local function prisonImpact(spell: any, position: Vector3, targets: { Model }, c
 	VfxKit.flash(position + Vector3.new(0, 2, 0), palette.main, 16, 3, 0.5, detail)
 
 	-- Quelques pointes dans la zone, même sans cible : la manifestation reste lisible.
-	for _ = 1, VfxKit.count(4, detail, 2) do
+	for _ = 1, VfxKit.count(3, detail, 1) do
 		local angle = random:NextNumber(0, math.pi * 2)
 		local distance = random:NextNumber(0.3, 0.85) * spell.radius
 		local base = position + Vector3.new(math.cos(angle), 0, math.sin(angle)) * distance
-		growSpire(base, Vector3.yAxis + Vector3.new(random:NextNumber(-0.2, 0.2), 0, random:NextNumber(-0.2, 0.2)), random:NextNumber(1.8, 2.8), 0.55, palette, 0.7, 0.14, false, detail)
+		growSpire(base, Vector3.yAxis + Vector3.new(random:NextNumber(-0.2, 0.2), 0, random:NextNumber(-0.2, 0.2)), random:NextNumber(1.8, 2.8), 0.55, palette, 0.7, 0.14, false, detail, true)
 	end
 
-	local fullCages = VfxKit.count(4, detail)
+	local fullCages = VfxKit.count(3, detail)
+	VfxKit.reserve(math.min(#targets, fullCages) * 4 * 5, 0.5)
 	for index, target in targets do
 		local targetRoot = VfxKit.rootOf(target)
 		if targetRoot == nil then
@@ -254,7 +256,7 @@ local function prisonImpact(spell: any, position: Vector3, targets: { Model }, c
 		end
 		local ground = VfxKit.groundBelow(targetRoot.Position, ignore)
 		local resists = isBoss(target)
-		local spikes = if index <= fullCages then VfxKit.count(5, detail, 3) else 2
+		local spikes = if index <= fullCages then VfxKit.count(4, detail, 3) else 1
 		local cageRadius = math.clamp(target:GetExtentsSize().X * 0.55, 1.4, 3)
 		local spires: { BasePart } = {}
 		for spike = 1, spikes do

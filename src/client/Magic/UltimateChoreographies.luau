@@ -7,11 +7,8 @@
 	dégâts et altération, puis une disparition progressive. Moins de particules, plus de formes :
 	disque de givre, cristaux, cœur de vide, onde, liens d'énergie.
 
-		ice        « Hiver Éternel »         givre qui se rassemble, sol qui gèle, cristaux qui jaillissent
-		                                     autour du lanceur et emprisonnent les cibles, fonte lente ;
-		antimatter « Éruption d'Antimatière » cœur de vide qui grossit, espace comprimé (anneau qui se
-		                                     resserre, matière aspirée, liens vers les cibles), implosion
-		                                     puis onde violente ;
+		ice        « Hiver Éternel »         voir Vfx/Ice ;
+		antimatter « Rupture du Néant »       voir Vfx/Antimatter ;
 		pyromancy  « Brasier du Parjure »    colonne de flammes qui monte autour du lanceur, sol qui
 		                                     rougeoie, puis nova de feu et sol qui brûle encore ;
 		lightning  « Jugement Céleste »      ciel qui s'assombrit, cercles de visée sur les cibles, puis
@@ -26,7 +23,6 @@
 ]]
 
 local Debris = game:GetService("Debris")
-local RunService = game:GetService("RunService")
 
 local clientFolder = script.Parent.Parent
 local CombatEffects = require(clientFolder:WaitForChild("Combat"):WaitForChild("CombatEffects") :: ModuleScript)
@@ -34,11 +30,12 @@ local SfxPlayer = require(clientFolder:WaitForChild("Audio"):WaitForChild("SfxPl
 
 local MagicFx = require(script.Parent:WaitForChild("MagicFx") :: ModuleScript)
 local IceVfx = require(script.Parent:WaitForChild("Vfx"):WaitForChild("Ice") :: ModuleScript)
+local AntimatterVfx = require(script.Parent:WaitForChild("Vfx"):WaitForChild("Antimatter") :: ModuleScript)
 
 local SPARK_TEXTURE = MagicFx.SPARK_TEXTURE
 local SMOKE_TEXTURE = MagicFx.SMOKE_TEXTURE
 local getFolder, scaled, part, tween, disc = MagicFx.getFolder, MagicFx.scaled, MagicFx.part, MagicFx.tween, MagicFx.disc
-local groundBelow, burst, inwardStream, rootOf = MagicFx.groundBelow, MagicFx.burst, MagicFx.inwardStream, MagicFx.rootOf
+local groundBelow, burst, rootOf = MagicFx.groundBelow, MagicFx.burst, MagicFx.rootOf
 local random = MagicFx.random
 
 local UltimateChoreographies = {}
@@ -51,135 +48,11 @@ local UltimateChoreographies = {}
 UltimateChoreographies.ice = IceVfx.ultimate
 
 --------------------------------------------------------------------------------
--- Antimatière : Éruption d'Antimatière
+-- Antimatière : Rupture du Néant
 --------------------------------------------------------------------------------
 
-function UltimateChoreographies.antimatter(caster: Model?, origin: Vector3, targets: { Model }, magic: any)
-	local windup = magic.ultimateWindup or 0.2
-	local palette = magic.palette
-	local radius = magic.radius
-	local intensity = CombatEffects.intensityAt(origin, radius)
-	local center = origin + Vector3.new(0, 1.5, 0)
-	local ignore: { Instance } = { getFolder() }
-	if caster then
-		table.insert(ignore, caster)
-	end
-	for _, target in targets do
-		table.insert(ignore, target)
-	end
-	local ground = groundBelow(origin, ignore)
-
-	-- 1. Le cœur de vide naît et grossit ; une coque déformante se resserre autour de lui.
-	local core = part("VoidCore", Enum.PartType.Ball, Vector3.one * 0.4, palette.void, Enum.Material.SmoothPlastic, windup + 2)
-	core.CFrame = CFrame.new(center)
-	core.Parent = getFolder()
-	tween(core, windup, { Size = Vector3.one * 4.5 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-	local distortion = part("Distortion", Enum.PartType.Ball, Vector3.one * 12, palette.main, Enum.Material.ForceField, windup + 2)
-	distortion.Transparency = 0.7
-	distortion.CFrame = CFrame.new(center)
-	distortion.Parent = getFolder()
-	tween(distortion, windup, { Size = Vector3.one * 5.5, Transparency = 0.25 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-	local light = Instance.new("PointLight")
-	light.Color = palette.main
-	light.Range = 16
-	light.Brightness = 0.5
-	light.Parent = core
-	tween(light, windup, { Brightness = 3 })
-
-	-- 2. L'espace se comprime : anneau au sol qui se resserre, matière aspirée.
-	local ring = disc("CompressionRing", ground, radius * 2, palette.main, Enum.Material.Neon, windup + 0.2)
-	ring.Transparency = 0.6
-	tween(ring, windup, { Size = Vector3.new(0.12, 2, 2), Transparency = 0.15 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-	local stream = inwardStream(center, radius * 0.45, ColorSequence.new(palette.glow, palette.main), SPARK_TEXTURE, 60, windup)
-
-	-- 3. Des liens d'énergie relient chaque cible au cœur.
-	local coreAttachment = Instance.new("Attachment")
-	coreAttachment.Parent = core
-	for _, target in targets do
-		local targetRoot = rootOf(target)
-		if targetRoot then
-			local attachment = Instance.new("Attachment")
-			attachment.Name = "VoidTether"
-			attachment.Parent = targetRoot
-			Debris:AddItem(attachment, windup + 0.1)
-			local beam = Instance.new("Beam")
-			beam.Attachment0 = attachment
-			beam.Attachment1 = coreAttachment
-			beam.Color = ColorSequence.new(palette.main, palette.glow)
-			beam.LightEmission = 1
-			beam.Width0 = 0.08
-			beam.Width1 = 0.35
-			beam.Segments = 12
-			beam.CurveSize0 = random:NextNumber(-3, 3)
-			beam.CurveSize1 = random:NextNumber(-3, 3)
-			beam.FaceCamera = true
-			beam.Transparency = NumberSequence.new(0.6, 0.1)
-			beam.Parent = core
-		end
-	end
-	if intensity > 0 then
-		CombatEffects.tintScreen(palette.main, 0.5 * intensity, windup, 0.6)
-		CombatEffects.shake(windup, 0.15 * intensity)
-	end
-
-	-- La coque tremble légèrement pendant la compression.
-	local startClock = os.clock()
-	local wobble = RunService.Heartbeat:Connect(function()
-		local t = os.clock() - startClock
-		if distortion.Parent then
-			distortion.CFrame = CFrame.new(center) * CFrame.Angles(math.sin(t * 40) * 0.05, t * 3, math.cos(t * 37) * 0.05)
-		end
-	end)
-
-	task.wait(windup)
-	wobble:Disconnect()
-	stream.Enabled = false
-
-	-- 4. Implosion : tout se replie d'un coup...
-	tween(core, 0.07, { Size = Vector3.one * 0.2 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-	tween(distortion, 0.07, { Size = Vector3.one * 0.5 })
-	task.wait(0.07)
-	core:Destroy()
-
-	-- 5. ... puis l'onde part, violente.
-	local wave = part("VoidWave", Enum.PartType.Ball, Vector3.one * 2, palette.glow, Enum.Material.ForceField, 0.8)
-	wave.CFrame = CFrame.new(center)
-	wave.Parent = getFolder()
-	tween(wave, 0.5, { Size = Vector3.one * radius * 2, Transparency = 1 }, Enum.EasingStyle.Quart)
-	local groundWave = disc("VoidGroundWave", ground, 2, palette.main, Enum.Material.Neon, 0.8)
-	groundWave.Transparency = 0.15
-	tween(groundWave, 0.6, { Size = Vector3.new(0.12, radius * 2, radius * 2), Transparency = 1 }, Enum.EasingStyle.Quart)
-	tween(distortion, 0.45, { Size = Vector3.one * radius * 1.4, Transparency = 1 }, Enum.EasingStyle.Quart)
-	burst(center, 70, function(emitter: ParticleEmitter)
-		emitter.Texture = SPARK_TEXTURE
-		emitter.LightEmission = 1
-		emitter.Color = ColorSequence.new(Color3.new(1, 1, 1), palette.main)
-		emitter.Speed = NumberRange.new(radius * 1.4, radius * 3)
-		emitter.Drag = 3
-		emitter.Lifetime = NumberRange.new(0.35, 0.7)
-		emitter.Size = NumberSequence.new(1.6, 0)
-		emitter.Transparency = NumberSequence.new(0, 1)
-	end)
-	burst(center, 24, function(emitter: ParticleEmitter)
-		emitter.Texture = SMOKE_TEXTURE
-		emitter.LightEmission = 0
-		emitter.Color = ColorSequence.new(palette.main, palette.void)
-		emitter.Speed = NumberRange.new(radius * 0.3, radius * 0.9)
-		emitter.Drag = 2
-		emitter.Lifetime = NumberRange.new(0.8, 1.4)
-		emitter.Rotation = NumberRange.new(0, 360)
-		emitter.Size = NumberSequence.new(3, 9)
-		emitter.Transparency = NumberSequence.new(0.4, 1)
-	end)
-	for _, target in targets do
-		CombatEffects.playHitImpact(target, nil, palette.main, 8)
-	end
-	SfxPlayer.play("impact_antimatter", center)
-	if intensity > 0 then
-		CombatEffects.tintScreen(palette.glow, 0.9 * intensity, 0.04, 0.7)
-		CombatEffects.shake(0.55, 1.1 * intensity)
-	end
-end
+-- Magies 3.0 : la chorégraphie vit dans Vfx/Antimatter.
+UltimateChoreographies.antimatter = AntimatterVfx.ultimate
 
 --------------------------------------------------------------------------------
 -- Pyromancie : Brasier du Parjure
