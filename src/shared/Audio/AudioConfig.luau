@@ -86,7 +86,10 @@ local REGION_MUSIC: { [string]: RegionMusic } = {
 ]]
 local REWIND_CHOIR = {
 	id = "",
-	volume = 0.32, -- modéré : un souffle, pas une alarme
+	-- +3 dB par rapport à l'ancien réglage 0,32 (0,32 x 10^(3/20) = 0,45), après retour des tests :
+	-- le chœur était trop discret. Toujours multiplié par le curseur « Effets » (0 = muet).
+	volume = 0.45,
+	maxVolume = 0.6, -- plafond, même si `volume` est relevé plus tard
 	fadeIn = 0.25,
 	fadeOut = 1.2,
 	maxDuration = 3, -- secondes : le chœur s'efface même si le rembobinage dure plus longtemps

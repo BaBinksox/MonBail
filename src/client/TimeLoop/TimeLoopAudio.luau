@@ -56,7 +56,7 @@ local function nextVolume(now: number): number
 	else
 		fatigueRatio = 1
 	end
-	return CHOIR.volume * fatigueRatio
+	return math.min(CHOIR.volume, CHOIR.maxVolume) * fatigueRatio
 end
 
 -- Lance le chœur pour un rembobinage de `duration` secondes.
