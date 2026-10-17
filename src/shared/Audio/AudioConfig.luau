@@ -140,7 +140,7 @@ local CLASSIC_LUNGE = "rbxasset://sounds/swordlunge.wav"
 local CLASSIC_UNSHEATH = "rbxasset://sounds/unsheath.wav"
 local CHARACTER_JUMP = "rbxasset://sounds/action_jump.mp3"
 -- Sons livrés avec Roblox, utilisés pour donner un son distinct à chaque magie en attendant des
--- sons importés (docs/MUSIQUE.md, « Sons à importer »). Leur présence est vérifiée dans Studio par
+-- sons importés (docs/MUSIQUE_PUBLICATION.md, §7 « Sons à importer »). Leur présence est vérifiée dans Studio par
 -- AudioAudit.run() (ligne « [builtin:...] ») ; un fichier absent reste muet, sans erreur de jeu.
 local SWOOSH = "rbxasset://sounds/swoosh.wav"
 local GLASS_BREAK = "rbxasset://sounds/glassbreak.wav"

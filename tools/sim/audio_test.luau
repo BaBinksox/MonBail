@@ -371,6 +371,30 @@ H.check("snippet : téléversements de particuliers omis par défaut", printed("
 H.check("snippet : rien pour un contexte sans candidat chargé", printed("TRACKS.boss = ") == nil)
 AudioAudit.listen("creator", 2)
 AudioAudit.stop()
+print("== Jeu publié : une piste inscrite dans AudioConfig joue hors Studio")
+do
+	local RunServiceMock = mock.game:GetService("RunService")
+	local wasStudio = RunServiceMock.IsStudio
+	RunServiceMock.IsStudio = function() return false end
+	CandidateResolver.reset()
+	AudioConfig.TRACKS.creator.id = "rbxassetid://123450001" -- valeur factice, en mémoire seulement
+	MusicDirector.set("override", nil)
+	H.advance(4)
+	MusicDirector.set("override", "creator")
+	H.advance(6)
+	local published = SoundService:FindFirstChild("Music_creator")
+	H.check("jeu publié : la piste approuvée (AudioConfig) est jouée", published ~= nil and published.SoundId == "rbxassetid://123450001" and published.IsPlaying, published and published.SoundId)
+	AudioConfig.TRACKS.creator.id = ""
+	MusicDirector.set("override", nil)
+	H.advance(4)
+	MusicDirector.set("override", "creator")
+	H.advance(4)
+	H.check("jeu publié : sans piste approuvée, silence (aucun candidat d'essai)", SoundService:FindFirstChild("Music_creator") == nil or not SoundService:FindFirstChild("Music_creator").IsPlaying)
+	MusicDirector.set("override", nil)
+	RunServiceMock.IsStudio = wasStudio
+	H.advance(4)
+end
+
 print("== Ultimes : un seul son d'impact chacun (pas de superposition)")
 do
 	local CombatRemotes = H.shared("Combat/CombatRemotes")
