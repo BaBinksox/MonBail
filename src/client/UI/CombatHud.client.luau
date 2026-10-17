@@ -28,6 +28,7 @@ local ResourceConfig = require(sharedFolder:WaitForChild("Combat"):WaitForChild(
 local KeyBindings = require(sharedFolder:WaitForChild("Input"):WaitForChild("KeyBindings") :: ModuleScript)
 local MagicConfig = require(sharedFolder:WaitForChild("Magic"):WaitForChild("MagicConfig") :: ModuleScript)
 local SpellConfig = require(sharedFolder:WaitForChild("Magic"):WaitForChild("SpellConfig") :: ModuleScript)
+local SpellTags = require(sharedFolder:WaitForChild("Magic"):WaitForChild("SpellTags") :: ModuleScript)
 local StatusConfig = require(sharedFolder:WaitForChild("Combat"):WaitForChild("StatusConfig") :: ModuleScript)
 
 local Theme = require(script.Parent:WaitForChild("Theme") :: ModuleScript)
@@ -50,7 +51,7 @@ local colors = Theme.colors
 
 local screen = Theme.screenGui("CombatHudGui", Theme.displayOrder.hud)
 
-local SLOT_SIZE = Vector2.new(64, 44)
+local SLOT_SIZE = Vector2.new(84, 56) -- nom, nature du sort (SpellTags), coût et touche
 local SLOT_GAP = 8
 local SLOTS_HEIGHT = SLOT_SIZE.Y + 6
 local STATUS_ROW_HEIGHT = 18
@@ -129,7 +130,7 @@ local prompt = Theme.title({
 prompt.Visible = false
 
 -- Emplacements : sort de base, sort secondaire, Concentration.
-type Slot = { frame: Frame, name: TextLabel, key: TextLabel, cost: TextLabel, shade: Frame, timer: TextLabel, stroke: UIStroke }
+type Slot = { frame: Frame, name: TextLabel, tag: TextLabel, key: TextLabel, cost: TextLabel, shade: Frame, timer: TextLabel, stroke: UIStroke }
 
 local function newSlot(name: string, index: number): Slot
 	local width = 3 * SLOT_SIZE.X + 2 * SLOT_GAP
@@ -156,13 +157,23 @@ local function newSlot(name: string, index: number): Slot
 	local title = Theme.caption({ parent = frame, text = "", size = UDim2.new(1, -6, 0, 14), position = UDim2.fromOffset(3, 2), textSize = Theme.textSize.small, alignX = Enum.TextXAlignment.Center })
 	title.TextTruncate = Enum.TextTruncate.AtEnd
 	title.ZIndex = 3
+	-- Nature du sort, déduite des données du serveur : « Projectile · Ralentit », « Zone ciblée · Immobilise »…
+	local tag = Theme.caption({ parent = frame, text = "", size = UDim2.new(1, -6, 0, 20), position = UDim2.fromOffset(3, 16), textSize = Theme.textSize.small, alignX = Enum.TextXAlignment.Center })
+	tag.TextWrapped = true
+	tag.TextScaled = true
+	tag.TextTransparency = 0.15
+	tag.ZIndex = 3
+	local tagSize = Instance.new("UITextSizeConstraint")
+	tagSize.MaxTextSize = 11
+	tagSize.MinTextSize = 7
+	tagSize.Parent = tag
 	local cost = Theme.caption({ parent = frame, text = "", size = UDim2.new(0.5, -3, 0, 12), position = UDim2.new(0, 3, 1, -14), textSize = Theme.textSize.small, alignX = Enum.TextXAlignment.Left })
 	cost.ZIndex = 3
 	local key = Theme.caption({ parent = frame, text = "", size = UDim2.new(0.5, -3, 0, 12), position = UDim2.new(0.5, 0, 1, -14), textSize = Theme.textSize.small, alignX = Enum.TextXAlignment.Right })
 	key.ZIndex = 3
 	local timer = Theme.label({ parent = frame, text = "", size = UDim2.fromScale(1, 1), textSize = Theme.textSize.label, alignX = Enum.TextXAlignment.Center })
 	timer.ZIndex = 4
-	return { frame = frame, name = title, key = key, cost = cost, shade = shade, timer = timer, stroke = stroke }
+	return { frame = frame, name = title, tag = tag, key = key, cost = cost, shade = shade, timer = timer, stroke = stroke }
 end
 
 local baseSlot = newSlot("SpellBaseSlot", 1)
@@ -331,6 +342,9 @@ local function refreshKeyLabels()
 	local base, secondary = currentSpells()
 	baseSlot.name.Text = if base then base.name else ""
 	secondarySlot.name.Text = if secondary then secondary.name else ""
+	baseSlot.tag.Text = if base then SpellTags.describe(base) else ""
+	secondarySlot.tag.Text = if secondary then SpellTags.describe(secondary) else ""
+	concentrationSlot.tag.Text = "Recharge le Mana"
 	baseSlot.cost.Text = if base then `{base.manaCost}` else ""
 	secondarySlot.cost.Text = if secondary then `{secondary.manaCost}` else ""
 	concentrationSlot.name.Text = "Concentration"

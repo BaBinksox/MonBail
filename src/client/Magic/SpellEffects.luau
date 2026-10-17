@@ -165,68 +165,7 @@ local function glow(target: BasePart, color: Color3, range: number, brightness: 
 	light.Parent = target
 end
 
--- GLACE ------------------------------------------------------------------------
-
--- Éclat de Givre : un vrai cristal effilé, orienté dans sa course.
-PROJECTILE_LOOKS.frost_shard = function(palette: any): BasePart
-	local shard = newPart("FrostShard", Enum.PartType.Block, Vector3.new(0.35, 0.35, 2.1), palette.glow, MAX_PROJECTILE_LIFETIME)
-	shard.Material = Enum.Material.Glass
-	shard.Transparency = 0.1
-	glow(shard, palette.main, 8, 1.5)
-	return shard
-end
--- À l'impact : le cristal éclate en éclats et laisse une plaque de givre.
-IMPACTS.frost_shard = function(_spell: any, position: Vector3, targets: { Model }, _caster: Model?, palette: any)
-	for _ = 1, MagicFx.scaled(6) do
-		local splinter = MagicFx.part("Splinter", Enum.PartType.Block, Vector3.new(0.18, 0.18, 0.6), palette.glow, Enum.Material.Glass, 0.6)
-		splinter.CFrame = CFrame.new(position) * CFrame.Angles(MagicFx.random:NextNumber(0, 6.28), MagicFx.random:NextNumber(0, 6.28), 0)
-		splinter.Parent = MagicFx.getFolder()
-		local flung = position + MagicFx.random:NextUnitVector() * MagicFx.random:NextNumber(1.5, 3)
-		MagicFx.tween(splinter, 0.45, { Position = flung, Transparency = 1 })
-	end
-	burst(position, palette.glow, 10, 6, SMOKE_TEXTURE)
-	local plate = MagicFx.disc("FrostPlate", MagicFx.groundBelow(position, targets :: { any }), 1, palette.glow, Enum.Material.Ice, 2.5)
-	plate.Transparency = 0.4
-	MagicFx.tween(plate, 0.2, { Size = Vector3.new(0.12, 4, 4) })
-	task.delay(1, function()
-		MagicFx.tween(plate, 1.2, { Transparency = 1 })
-	end)
-end
--- Prison Cristalline : un cercle de givre se dessine et se resserre, des pointes affleurent.
-TELEGRAPHS.crystal_prison = function(spell: any, aimPoint: Vector3, palette: any)
-	local duration = math.max(spell.castTime, 0.2)
-	local circle = MagicFx.disc("PrisonCircle", aimPoint, spell.radius * 2.4, palette.main, Enum.Material.Ice, duration + 0.1)
-	circle.Transparency = 0.85
-	MagicFx.tween(circle, duration, { Size = Vector3.new(0.12, spell.radius * 2, spell.radius * 2), Transparency = 0.35 })
-	for index = 1, MagicFx.scaled(6) do
-		local angle = index / 6 * math.pi * 2
-		local base = aimPoint + Vector3.new(math.cos(angle), 0, math.sin(angle)) * spell.radius * 0.9
-		task.delay(duration * index / 8, function()
-			MagicFx.crystal(base, Vector3.yAxis, 0.8, 0.4, palette.glow, duration)
-		end)
-	end
-end
--- À l'impact : la glace jaillit et emprisonne chaque cible gelée ; le sol reste givré.
-IMPACTS.crystal_prison = function(spell: any, position: Vector3, targets: { Model }, _caster: Model?, palette: any)
-	local floor = MagicFx.disc("PrisonFloor", position, spell.radius * 2, palette.glow, Enum.Material.Ice, 4)
-	floor.Transparency = 0.3
-	task.delay(2.2, function()
-		MagicFx.tween(floor, 1.5, { Transparency = 1 })
-	end)
-	for _, target in targets do
-		local targetRoot = MagicFx.rootOf(target)
-		if targetRoot then
-			local ground = MagicFx.groundBelow(targetRoot.Position, { target })
-			for index = 1, MagicFx.scaled(5) do
-				local angle = index / 5 * math.pi * 2
-				local base = ground + Vector3.new(math.cos(angle), 0, math.sin(angle)) * 1.5
-				MagicFx.crystal(base, Vector3.yAxis - Vector3.new(math.cos(angle), 0, math.sin(angle)) * 0.35, MagicFx.random:NextNumber(3, 4.2), 0.75, palette.glow, 1.8)
-			end
-		end
-	end
-	burst(position, palette.glow, 24, 12)
-	CombatEffects.shake(0.2, 0.25)
-end
+-- GLACE : voir Vfx/Ice (Magies 3.0).
 
 -- ANTIMATIÈRE --------------------------------------------------------------------
 
@@ -485,6 +424,34 @@ IMPACTS.gravity_field = function(_spell: any, _position: Vector3, targets: { Mod
 end
 
 --------------------------------------------------------------------------------
+-- Magies 3.0 : un module d'effets par magie (Client/Magic/Vfx), qui remplace les effets ci-dessus
+-- pour ses sorts. Chaque sort peut y définir : charge (préparation dans la main du lanceur),
+-- projectile (apparence en vol), telegraph (annonce de la zone), impact (résolution).
+--------------------------------------------------------------------------------
+
+type Charge = (caster: Model?, spell: any, palette: any, duration: number) -> ()
+local CHARGES: { [string]: Charge } = {}
+local VFX_MODULES = { "Ice" }
+local vfxFolder = script.Parent:WaitForChild("Vfx")
+for _, moduleName in VFX_MODULES do
+	local module = require(vfxFolder:WaitForChild(moduleName) :: ModuleScript) :: any
+	for spellId, hooks in module.spells do
+		if hooks.charge then
+			CHARGES[spellId] = hooks.charge
+		end
+		if hooks.projectile then
+			PROJECTILE_LOOKS[spellId] = hooks.projectile
+		end
+		if hooks.telegraph then
+			TELEGRAPHS[spellId] = hooks.telegraph
+		end
+		if hooks.impact then
+			IMPACTS[spellId] = hooks.impact
+		end
+	end
+end
+
+--------------------------------------------------------------------------------
 -- API
 --------------------------------------------------------------------------------
 
@@ -492,6 +459,10 @@ end
 function SpellEffects.castStarted(caster: Model?, spell: any, castId: number, origin: Vector3, aimPoint: Vector3)
 	local magic = MagicConfig.getById(spell.magic)
 	local palette = magic.palette
+	local charge = CHARGES[spell.id]
+	if charge then
+		task.spawn(charge, caster, spell, palette, math.max(spell.castTime, 0.15))
+	end
 	local telegraph = TELEGRAPHS[spell.id]
 	if telegraph and (spell.kind == "zone" or spell.kind == "field") then
 		telegraph(spell, aimPoint, palette)

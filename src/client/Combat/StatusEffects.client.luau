@@ -4,7 +4,7 @@
 	Rend VISIBLES les altérations posées par le serveur (StatusService) sur les ennemis et les
 	joueurs, à partir des attributs Status_<id> (heure serveur de fin) du Model :
 		brûlure     braises qui montent (plus denses à chaque cran)
-		froid       teinte bleutée ; gel : gangue de glace translucide
+		froid       teinte bleutée ; gel : givre sur la silhouette et éclats de glace sur le corps
 		électrisé   étincelles crépitantes ; paralysie : idem, plus vives
 		drain       volutes sombres ; voile (joueur) : silhouette assombrie
 		pression    poussière plaquée au sol ; cloué : idem
@@ -89,25 +89,36 @@ local function addFx(model: Model, statusId: string, level: number)
 		highlight.Parent = model
 	end
 	if look.crystal then
-		-- Gangue de glace : une pièce translucide soudée au RootPart, sans collision.
+		-- Gel : givre blanc sur la silhouette et éclats de glace pris sur le corps (soudés au
+		-- RootPart, sans masse ni collision). La cage de la Prison Cristalline s'y ajoute.
+		local frost = model:FindFirstChildOfClass("Highlight")
+		if frost and frost.Name == FX_PREFIX .. statusId then
+			frost.OutlineColor = Color3.new(1, 1, 1)
+			frost.OutlineTransparency = 0.35
+		end
 		local extents = model:GetExtentsSize()
-		local crystal = Instance.new("Part")
-		crystal.Name = FX_PREFIX .. statusId
-		crystal.Material = Enum.Material.Glass
-		crystal.Color = def.color
-		crystal.Transparency = 0.55
-		crystal.Size = Vector3.new(extents.X + 0.6, extents.Y + 0.4, extents.Z + 0.6)
-		crystal.CanCollide = false
-		crystal.CanQuery = false
-		crystal.CanTouch = false
-		crystal.Massless = true
-		crystal.CastShadow = false
-		crystal.CFrame = root.CFrame
-		local weld = Instance.new("WeldConstraint")
-		weld.Part0 = crystal
-		weld.Part1 = root
-		weld.Parent = crystal
-		crystal.Parent = model
+		local shardCount = if isReduced then 2 else 4
+		for index = 1, shardCount do
+			local shard = Instance.new("Part")
+			shard.Name = FX_PREFIX .. statusId
+			shard.Material = Enum.Material.Glass
+			shard.Color = def.color
+			shard.Transparency = 0.25
+			shard.Size = Vector3.new(0.5, extents.Y * 0.45, 0.5)
+			shard.CanCollide = false
+			shard.CanQuery = false
+			shard.CanTouch = false
+			shard.Massless = true
+			shard.CastShadow = false
+			local angle = index / shardCount * math.pi * 2
+			local offset = Vector3.new(math.cos(angle) * extents.X * 0.4, -extents.Y * 0.15, math.sin(angle) * extents.Z * 0.4)
+			shard.CFrame = root.CFrame * CFrame.new(offset) * CFrame.Angles(math.sin(angle) * 0.5, angle, math.cos(angle) * 0.5) * CFrame.Angles(0, math.rad(45), 0)
+			local weld = Instance.new("WeldConstraint")
+			weld.Part0 = shard
+			weld.Part1 = root
+			weld.Parent = shard
+			shard.Parent = model
+		end
 	end
 end
 

@@ -33,11 +33,12 @@ local CombatEffects = require(clientFolder:WaitForChild("Combat"):WaitForChild("
 local SfxPlayer = require(clientFolder:WaitForChild("Audio"):WaitForChild("SfxPlayer") :: ModuleScript)
 
 local MagicFx = require(script.Parent:WaitForChild("MagicFx") :: ModuleScript)
+local IceVfx = require(script.Parent:WaitForChild("Vfx"):WaitForChild("Ice") :: ModuleScript)
 
 local SPARK_TEXTURE = MagicFx.SPARK_TEXTURE
 local SMOKE_TEXTURE = MagicFx.SMOKE_TEXTURE
 local getFolder, scaled, part, tween, disc = MagicFx.getFolder, MagicFx.scaled, MagicFx.part, MagicFx.tween, MagicFx.disc
-local groundBelow, burst, inwardStream, crystal, rootOf = MagicFx.groundBelow, MagicFx.burst, MagicFx.inwardStream, MagicFx.crystal, MagicFx.rootOf
+local groundBelow, burst, inwardStream, rootOf = MagicFx.groundBelow, MagicFx.burst, MagicFx.inwardStream, MagicFx.rootOf
 local random = MagicFx.random
 
 local UltimateChoreographies = {}
@@ -46,100 +47,8 @@ local UltimateChoreographies = {}
 -- Glace : Hiver Éternel
 --------------------------------------------------------------------------------
 
-function UltimateChoreographies.ice(caster: Model?, origin: Vector3, targets: { Model }, magic: any)
-	local windup = magic.ultimateWindup or 0.2
-	local palette = magic.palette
-	local radius = magic.radius
-	local intensity = CombatEffects.intensityAt(origin, radius)
-	local ignore: { Instance } = { getFolder() }
-	if caster then
-		table.insert(ignore, caster)
-	end
-	for _, target in targets do
-		table.insert(ignore, target)
-	end
-	local ground = groundBelow(origin, ignore)
-
-	-- 1. Le froid se rassemble : particules aspirées vers le lanceur, lumière qui monte.
-	local stream, shell = inwardStream(origin, 9, ColorSequence.new(palette.glow, palette.main), SPARK_TEXTURE, 55, windup)
-	local light = Instance.new("PointLight")
-	light.Color = palette.main
-	light.Range = 18
-	light.Brightness = 0
-	light.Parent = shell
-	tween(light, windup, { Brightness = 3.5 })
-
-	-- 2. Le sol gèle peu à peu sous le lanceur.
-	local floor = disc("FrostFloor", ground, 4, palette.glow, Enum.Material.Ice, windup + 3.5)
-	floor.Transparency = 1
-	tween(floor, windup, { Size = Vector3.new(0.12, radius * 1.1, radius * 1.1), Transparency = 0.35 }, Enum.EasingStyle.Sine)
-
-	-- 3. Le givre gagne les pieds des cibles (manifestation autour des ennemis).
-	task.delay(windup * 0.35, function()
-		for _, target in targets do
-			local targetRoot = rootOf(target)
-			if targetRoot then
-				local targetGround = groundBelow(targetRoot.Position, ignore)
-				local mark = disc("FrostMark", targetGround, 1, palette.glow, Enum.Material.Ice, windup + 3)
-				mark.Transparency = 0.8
-				tween(mark, windup * 0.6, { Size = Vector3.new(0.12, 6, 6), Transparency = 0.3 })
-			end
-		end
-	end)
-	if intensity > 0 then
-		CombatEffects.tintScreen(palette.main, 0.45 * intensity, windup, 0.9)
-	end
-
-	task.wait(windup)
-	stream.Enabled = false
-
-	-- 4. Impact : cristaux qui jaillissent en couronne autour du lanceur...
-	local spikeCount = scaled(12)
-	for index = 1, spikeCount do
-		local angle = (index / spikeCount) * math.pi * 2 + random:NextNumber(-0.15, 0.15)
-		local distance = random:NextNumber(3.5, math.max(5, radius * 0.45))
-		local base = ground + Vector3.new(math.cos(angle) * distance, 0, math.sin(angle) * distance)
-		local outward = Vector3.new(math.cos(angle), 0, math.sin(angle))
-		crystal(base, Vector3.yAxis + outward * 0.45, random:NextNumber(3.5, 6.5), random:NextNumber(0.9, 1.4), palette.glow, 1.1)
-	end
-	-- ... et emprisonnent les cibles (gel appliqué par le serveur à cet instant).
-	for _, target in targets do
-		local targetRoot = rootOf(target)
-		if targetRoot then
-			local targetGround = groundBelow(targetRoot.Position, ignore)
-			for index = 1, scaled(5) do
-				local angle = (index / 5) * math.pi * 2
-				local base = targetGround + Vector3.new(math.cos(angle) * 1.6, 0, math.sin(angle) * 1.6)
-				local inward = -Vector3.new(math.cos(angle), 0, math.sin(angle))
-				crystal(base, Vector3.yAxis + inward * 0.35, random:NextNumber(3, 4.5), 0.8, palette.glow, 1.5)
-			end
-			CombatEffects.playHitImpact(target, nil, palette.glow, 6)
-		end
-	end
-	burst(origin, 40, function(emitter: ParticleEmitter)
-		emitter.Texture = SPARK_TEXTURE
-		emitter.LightEmission = 1
-		emitter.Color = ColorSequence.new(Color3.new(1, 1, 1), palette.glow)
-		emitter.Speed = NumberRange.new(radius * 0.8, radius * 1.6)
-		emitter.Drag = 3
-		emitter.Lifetime = NumberRange.new(0.4, 0.8)
-		emitter.Size = NumberSequence.new(0.5, 0)
-		emitter.Transparency = NumberSequence.new(0, 1)
-	end)
-	SfxPlayer.play("impact_ice", origin)
-	if intensity > 0 then
-		CombatEffects.tintScreen(palette.glow, 0.8 * intensity, 0.04, 0.8)
-		CombatEffects.shake(0.35, 0.7 * intensity)
-	end
-	tween(light, 1.2, { Brightness = 0 })
-
-	-- 5. Fonte : le sol gelé s'efface lentement.
-	task.delay(1.6, function()
-		if floor.Parent then
-			tween(floor, 1.6, { Transparency = 1 }, Enum.EasingStyle.Sine)
-		end
-	end)
-end
+-- Magies 3.0 : la chorégraphie vit dans Vfx/Ice.
+UltimateChoreographies.ice = IceVfx.ultimate
 
 --------------------------------------------------------------------------------
 -- Antimatière : Éruption d'Antimatière

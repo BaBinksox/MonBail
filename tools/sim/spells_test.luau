@@ -39,6 +39,33 @@ for _, magic in ipairs(MagicConfig.MAGICS) do
 	end
 end
 
+print("== Nature des sorts affichée (SpellTags, déduite des données serveur)")
+do
+	local SpellTags = H.shared("Magic/SpellTags")
+	local expected = {
+		frost_shard = "Projectile · Ralentit",
+		crystal_prison = "Zone ciblée · Immobilise",
+		void_fragment = "Projectile · Explose",
+		minor_singularity = "Zone ciblée · Aspire",
+		dark_bolt = "Projectile · Draine la vie",
+		shadow_veil = "Sur soi · Protège",
+		gravity_field = "Zone persistante · Ralentit, use la garde",
+		electric_arc = "Instantané · Interrompt",
+	}
+	local wrong = {}
+	for id, text in pairs(expected) do
+		local got = SpellTags.describe(SpellConfig.get(id))
+		if got ~= text then table.insert(wrong, id .. " = " .. got) end
+	end
+	H.check("étiquettes justes (forme · effet)", #wrong == 0, table.concat(wrong, " ; "))
+	local same = {}
+	for _, magic in ipairs(MagicConfig.MAGICS) do
+		local base = SpellTags.describe(SpellConfig.forMagic(magic.id, "base"))
+		local secondary = SpellTags.describe(SpellConfig.forMagic(magic.id, "secondary"))
+		if base == secondary then table.insert(same, magic.id) end
+	end
+	H.check("les deux sorts de chaque magie se distinguent (forme ou effet)", #same == 0, table.concat(same, ","))
+end
 print("== Gestes calés sur le serveur")
 local PoseLibrary = H.shared("Animation/PoseLibrary")
 local AnimationConfig = H.shared("Animation/AnimationConfig")
@@ -470,15 +497,69 @@ local function effects(name)
 	end
 	return found
 end
+-- Outils de contrôle des effets « Magies 3.0 ».
+local function fxFolders()
+	local list = {}
+	for _, holderName in ipairs({ "SpellEffects", "UltimateEffects" }) do
+		local holder = mock.workspace:FindFirstChild(holderName)
+		if holder then table.insert(list, holder) end
+	end
+	return list
+end
+local function fxStats()
+	local stats = { parts = 0, solid = 0, cylinders = 0, wedges = 0, glass = 0 }
+	for _, holder in ipairs(fxFolders()) do
+		for _, d in ipairs(holder:GetDescendants()) do
+			local cls = rawget(d, "ClassName")
+			if cls == "Part" or cls == "WedgePart" then
+				stats.parts += 1
+				if d.CanCollide or d.CanQuery or d.CanTouch then stats.solid += 1 end
+				if cls == "WedgePart" then stats.wedges += 1 end
+				if cls == "Part" and d.Shape == Enum.PartType.Cylinder then stats.cylinders += 1 end
+				if d.Material == Enum.Material.Glass then stats.glass += 1 end
+			end
+		end
+	end
+	return stats
+end
+local function clearFx()
+	for _, holder in ipairs(fxFolders()) do
+		for _, child in ipairs(holder:GetChildren()) do child:Destroy() end
+	end
+end
+local function dummy(name, position, boss)
+	local model = mock.Instance.new("Model")
+	model.Name = name
+	local humanoid = mock.Instance.new("Humanoid")
+	humanoid.MaxHealth = 100
+	humanoid.Health = 100
+	humanoid.Parent = model
+	local part = mock.Instance.new("Part")
+	part.Name = "HumanoidRootPart"
+	part.Size = V3.new(2, 2, 1)
+	part.CFrame = mock.CFrame.new(position)
+	part.Parent = model
+	humanoid.RootPart = part
+	model.PrimaryPart = part
+	model.Parent = mock.workspace
+	if boss then mock.game:GetService("CollectionService"):AddTag(model, "Boss") end
+	return model
+end
 local iceMagic = MagicConfig.getById("ice")
+clearFx()
 CombatRemotes.UltimateFired.OnClientEvent:Fire(mages.ice.Character, root(target).Position + V3.new(0, 0, 6), { target }, "ice")
 C.frames(20)
-H.check("Glace, préparation : le sol gèle et le froid se rassemble", effects("FrostFloor") == 1 and effects("InwardShell") >= 1)
-H.check("Glace, préparation : le givre gagne les pieds des cibles", effects("FrostMark") >= 1)
-H.check("Glace, préparation : aucun cristal avant l'impact", effects("Crystal") == 0)
-C.frames(math.ceil(iceMagic.ultimateWindup * 60))
-H.check("Glace, impact : couronne de cristaux et cible emprisonnée", effects("Crystal") >= 6, effects("Crystal"))
-C.frames(240)
+H.check("Hiver Éternel, préparation : cristaux en suspension et givre qui gagne le sol", effects("FloatingCrystal") >= 3 and effects("Frost") >= 6, effects("FloatingCrystal") .. "/" .. effects("Frost"))
+H.check("Hiver Éternel, préparation : aucune formation avant l'impact", effects("Spire") == 0)
+C.frames(math.ceil(iceMagic.ultimateWindup * 60) + 15)
+H.check("Hiver Éternel, impact : grandes formations autour du lanceur et des cibles", effects("Spire") >= 4 + 3, effects("Spire"))
+H.check("Hiver Éternel : les cristaux en suspension ont éclaté", effects("FloatingCrystal") == 0)
+local iceStats = fxStats()
+H.check("Hiver Éternel : vrais cristaux (verre + pointes), aucun disque", iceStats.wedges >= 16 and iceStats.glass >= 20 and iceStats.cylinders == 0, string.format("coins %d, verre %d, cylindres %d", iceStats.wedges, iceStats.glass, iceStats.cylinders))
+H.check("Hiver Éternel : aucune pièce d'effet solide (collision, requête, contact)", iceStats.solid == 0, iceStats.solid)
+H.check("Hiver Éternel : budget de pièces raisonnable", iceStats.parts <= 220, iceStats.parts)
+C.frames(60 * 6)
+H.check("Hiver Éternel : tout a disparu ensuite (rien ne reste dans le Workspace)", fxStats().parts == 0, fxStats().parts)
 local amMagic = MagicConfig.getById("antimatter")
 CombatRemotes.UltimateFired.OnClientEvent:Fire(mages.antimatter.Character, root(target).Position + V3.new(0, 0, 6), { target }, "antimatter")
 C.frames(15)
@@ -518,18 +599,59 @@ local function spellFx(name)
 	return found
 end
 local origin = root(target).Position + V3.new(0, 1.5, 12)
+clearFx()
 SpellRemotes.SpellCast.OnClientEvent:Fire(mages.ice.Character, "frost_shard", 9001, origin, root(target).Position)
-C.frames(math.ceil(SpellConfig.get("frost_shard").castTime * 60) + 3)
-H.check("Éclat de Givre : projectile en forme de cristal", spellFx("FrostShard") == 1)
+C.frames(4)
+H.check("Éclat de Givre, préparation : un cristal se forme dans la main", spellFx("FormingCrystal") == 1)
+C.frames(math.ceil(SpellConfig.get("frost_shard").castTime * 60))
+local shard = mock.workspace.SpellEffects:FindFirstChild("FrostShard")
+local shardWedges = 0
+for _, d in ipairs(shard and shard:GetDescendants() or {}) do
+	if rawget(d, "ClassName") == "WedgePart" then shardWedges += 1 end
+end
+H.check("Éclat de Givre : projectile cristallin en 3D (plusieurs fragments pointus)", shard ~= nil and shardWedges >= 8, shardWedges)
 SpellRemotes.SpellImpact.OnClientEvent:Fire(9001, "frost_shard", root(target).Position, { target })
-C.frames(3)
-H.check("Éclat de Givre : éclats et plaque de givre à l'impact", spellFx("FrostShard") == 0 and spellFx("FrostPlate") == 1 and spellFx("Splinter") >= 3)
-SpellRemotes.SpellCast.OnClientEvent:Fire(mages.ice.Character, "crystal_prison", 9002, origin, root(target).Position)
-C.frames(5)
-H.check("Prison Cristalline : cercle de givre annoncé au sol", spellFx("PrisonCircle") == 1)
-SpellRemotes.SpellImpact.OnClientEvent:Fire(9002, "crystal_prison", root(target).Position, { target })
-C.frames(10)
-H.check("Prison Cristalline : cristaux autour de la cible gelée", spellFx("Crystal") >= 3)
+C.frames(15)
+H.check("Éclat de Givre, impact : le cristal éclate en fragments et le givre s'étend", spellFx("FrostShard") == 0 and spellFx("Shard") >= 3 and spellFx("Frost") >= 2, spellFx("Shard") .. "/" .. spellFx("Frost"))
+H.check("Éclat de Givre : pas de pointes de prison (sorts distincts)", spellFx("Spire") == 0)
+C.frames(60 * 3)
+H.check("Éclat de Givre : tout a disparu", fxStats().parts == 0, fxStats().parts)
+
+-- Prison Cristalline : cible gelée (attribut du serveur) contre boss qui résiste.
+local frozen = dummy("Gelé", root(target).Position + V3.new(30, 0, 0), false)
+local boss = dummy("BossRésistant", root(target).Position + V3.new(36, 0, 0), true)
+frozen:SetAttribute(StatusConfig.ATTRIBUTE_PREFIX .. "freeze", mock.workspace:GetServerTimeNow() + 2.5)
+local prisonPoint = root(frozen).Position
+mock.workspace.CurrentCamera.CFrame = mock.CFrame.new(prisonPoint + V3.new(0, 10, 25)) -- caméra proche : détail complet
+SpellRemotes.SpellCast.OnClientEvent:Fire(mages.ice.Character, "crystal_prison", 9002, origin, prisonPoint)
+C.frames(math.ceil(SpellConfig.get("crystal_prison").castTime * 60 * 0.8))
+local telegraphStats = fxStats()
+H.check("Prison Cristalline, préparation : givre et bourgeons de cristal, aucun disque", spellFx("Frost") >= 4 and spellFx("Spire") >= 3 and telegraphStats.cylinders == 0, string.format("givre %d, pointes %d, cylindres %d", spellFx("Frost"), spellFx("Spire"), telegraphStats.cylinders))
+C.frames(20)
+clearFx()
+SpellRemotes.SpellImpact.OnClientEvent:Fire(9002, "crystal_prison", prisonPoint, { frozen, boss })
+C.frames(30)
+H.check("Prison Cristalline, impact : pointes successives autour des cibles", spellFx("Spire") >= 8, spellFx("Spire"))
+local function spiresNear(model)
+	local n = 0
+	local position = root(model).Position
+	for _, holder in ipairs(fxFolders()) do
+		for _, child in ipairs(holder:GetChildren()) do
+			if child.Name == "Spire" and (child.Position - position).Magnitude < 4 then n += 1 end
+		end
+	end
+	return n
+end
+C.frames(40) -- 1,2 s après l'impact
+H.check("Prison Cristalline : la cage tient tant que la cible est gelée", spiresNear(frozen) >= 3, spiresNear(frozen))
+H.check("Prison Cristalline : un boss (simple froid) brise aussitôt sa cage", spiresNear(boss) == 0, spiresNear(boss))
+C.frames(60 * 2)
+H.check("Prison Cristalline : la cage éclate quand le gel prend fin", spiresNear(frozen) == 0, spiresNear(frozen))
+H.check("Prison Cristalline : aucune pièce d'effet solide", fxStats().solid == 0)
+C.frames(60 * 4)
+H.check("Prison Cristalline : tout a disparu", fxStats().parts == 0, fxStats().parts)
+frozen:Destroy()
+boss:Destroy()
 SpellRemotes.SpellCast.OnClientEvent:Fire(mages.antimatter.Character, "void_fragment", 9003, origin, root(target).Position)
 C.frames(math.ceil(SpellConfig.get("void_fragment").castTime * 60) + 3)
 H.check("Fragment du Vide : cœur noir cerclé de violet", spellFx("VoidFragment") == 1)

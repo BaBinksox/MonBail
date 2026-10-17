@@ -12,9 +12,12 @@
 		AudioMixer.group(category): SoundGroup
 		AudioMixer.preview(settings)            applique des volumes sans les enregistrer (curseurs)
 		AudioMixer.getVolume(category): number  volume effectif de la catégorie (0 à 1)
+		AudioMixer.duck(level, down, hold, up)  atténuation brève de la musique et de l'ambiance
+		                                        (instant de silence d'un ultime), puis retour
 ]]
 
 local SoundService = game:GetService("SoundService")
+local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local AudioConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Audio"):WaitForChild("AudioConfig") :: ModuleScript)
@@ -54,10 +57,38 @@ local function settingValue(settings: any, key: string): number
 	return if type(value) == "number" and value == value then math.clamp(value, 0, 1) else 1
 end
 
-function AudioMixer.preview(settings: any)
+-- Atténuation momentanée (multiplie Musique et Ambiance ; les effets restent audibles).
+local duckValue = Instance.new("NumberValue")
+duckValue.Value = 1
+local duckToken = 0
+local lastSettings: any = nil
+local DUCKED: { [string]: boolean } = { Music = true, Ambience = true }
+
+local function apply(settings: any)
+	lastSettings = settings
 	for category, key in SETTING_OF_CATEGORY do
-		groups[category].Volume = settingValue(settings, key) * (AudioConfig.CATEGORY_MAX_VOLUME[category] or 1)
+		local duck = if DUCKED[category] then duckValue.Value else 1
+		groups[category].Volume = settingValue(settings, key) * (AudioConfig.CATEGORY_MAX_VOLUME[category] or 1) * duck
 	end
+end
+
+function AudioMixer.preview(settings: any)
+	apply(settings)
+end
+
+duckValue.Changed:Connect(function()
+	apply(lastSettings)
+end)
+
+function AudioMixer.duck(level: number, down: number, hold: number, up: number)
+	duckToken += 1
+	local token = duckToken
+	TweenService:Create(duckValue, TweenInfo.new(math.max(down, 0.01)), { Value = math.clamp(level, 0, 1) }):Play()
+	task.delay(down + hold, function()
+		if token == duckToken then
+			TweenService:Create(duckValue, TweenInfo.new(math.max(up, 0.01)), { Value = 1 }):Play()
+		end
+	end)
 end
 
 function AudioMixer.getVolume(category: Category): number

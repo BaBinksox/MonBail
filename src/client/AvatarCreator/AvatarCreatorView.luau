@@ -38,6 +38,7 @@ local AvatarConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChi
 local MagicConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Magic"):WaitForChild("MagicConfig"))
 local SpellConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Magic"):WaitForChild("SpellConfig"))
 local MagicShowcase = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Magic"):WaitForChild("MagicShowcase"))
+local SpellTags = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Magic"):WaitForChild("SpellTags"))
 local Theme = require(script.Parent.Parent:WaitForChild("UI"):WaitForChild("Theme"))
 local Catalog = require(script.Parent:WaitForChild("AvatarCreatorCatalog"))
 
@@ -487,7 +488,7 @@ local function createMagicCard(magic: Magic, index: number, parent: Instance): M
 		end
 		Theme.label({
 			name = if slot == "base" then "BaseSpell" else "SecondarySpell",
-			text = `<b>{title} · {spell.name}</b>  <font color="{accentHex}">{spell.manaCost} Mana</font>\n{spell.description}`,
+			text = `<b>{title} · {spell.name}</b>  <font color="{accentHex}">{spell.manaCost} Mana</font>\n<i>{SpellTags.describe(spell)}</i> — {spell.description}`,
 			textSize = 14,
 			color = COLORS.text,
 			rich = true,

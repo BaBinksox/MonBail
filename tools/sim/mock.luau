@@ -431,6 +431,7 @@ DEFAULTS.UIListLayout = { AbsoluteContentSize = v2(200, 50) }
 DEFAULTS.UIGridLayout = { AbsoluteContentSize = v2(200, 50), AbsoluteCellSize = v2(50, 50) }
 DEFAULTS.UIScale = { Scale = 1 }
 DEFAULTS.Sound = { Volume = 0.5, Playing = false, IsLoaded = true, TimeLength = 10, TimePosition = 0, Looped = false }
+DEFAULTS.Workspace = { Gravity = 196.2 }
 local BASEPART = { Part = true, WedgePart = true, CornerWedgePart = true, TrussPart = true, SpawnLocation = true, Seat = true, MeshPart = true, BasePart = true }
 local ISA = {
 	BasePart = BASEPART,
