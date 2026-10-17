@@ -348,17 +348,18 @@ function VfxKit.shatter(origin: Vector3, amount: number, color: Color3, material
 	end)
 end
 
--- Sol qui se couvre de givre : plaques de glace fines et irrégulières, de proche en proche.
-function VfxKit.frostSpread(center: Vector3, radius: number, color: Color3, amount: number, spread: number, hold: number)
+-- Taches au sol : plaques fines et irrégulières qui apparaissent de proche en proche (givre,
+-- sol brûlé, ombre, poussière), puis s'effacent. Aucune modification de la carte.
+function VfxKit.groundPatches(name: string, center: Vector3, radius: number, color: Color3, material: Enum.Material, transparency: number, amount: number, spread: number, hold: number)
 	for index = 1, amount do
 		local ring = math.sqrt(index / amount)
 		local angle = random:NextNumber(0, math.pi * 2)
 		local distance = ring * radius * random:NextNumber(0.7, 1)
 		local position = center + Vector3.new(math.cos(angle) * distance, 0.04 + index * 0.002, math.sin(angle) * distance)
 		local length = random:NextNumber(1.2, 2.6) * math.max(radius / 6, 0.6)
-		local plate = VfxKit.part("Frost", Vector3.new(0.05, 0.05, 0.05), color, Enum.Material.Ice, spread + hold + 1.6)
-		plate.Transparency = 0.25
-		plate.Reflectance = 0.15
+		local plate = VfxKit.part(name, Vector3.new(0.05, 0.05, 0.05), color, material, spread + hold + 1.6)
+		plate.Transparency = transparency
+		plate.Reflectance = if material == Enum.Material.Ice then 0.15 else 0
 		plate.CFrame = CFrame.new(position) * CFrame.Angles(0, random:NextNumber(0, math.pi * 2), 0)
 		task.delay(spread * ring, function()
 			if plate.Parent then
@@ -371,6 +372,167 @@ function VfxKit.frostSpread(center: Vector3, radius: number, color: Color3, amou
 			end
 		end)
 	end
+end
+
+-- Sol qui se couvre de givre (plaques de glace).
+function VfxKit.frostSpread(center: Vector3, radius: number, color: Color3, amount: number, spread: number, hold: number)
+	VfxKit.groundPatches("Frost", center, radius, color, Enum.Material.Ice, 0.25, amount, spread, hold)
+end
+
+--------------------------------------------------------------------------------
+-- Éclairs, flammes, rochers, filaments
+--------------------------------------------------------------------------------
+
+-- Ligne brisée entre deux points (déplacement aléatoire des milieux, `depth` niveaux).
+local function jagged(from: Vector3, to: Vector3, depth: number, roughness: number): { Vector3 }
+	local points = { from, to }
+	for _ = 1, depth do
+		local refined = { points[1] }
+		for index = 1, #points - 1 do
+			local a, b = points[index], points[index + 1]
+			local length = (b - a).Magnitude
+			local offset = random:NextUnitVector() * length * roughness
+			table.insert(refined, (a + b) / 2 + offset)
+			table.insert(refined, b)
+		end
+		points = refined
+	end
+	return points
+end
+
+local function boltSegments(points: { Vector3 }, color: Color3, width: number, lifetime: number, transparency: number)
+	for index = 1, #points - 1 do
+		local a, b = points[index], points[index + 1]
+		local length = (b - a).Magnitude
+		if length > 0.05 then
+			local segment = VfxKit.part("Bolt", Vector3.new(width, width, length + width * 0.5), color, Enum.Material.Neon, lifetime + 0.05)
+			segment.Transparency = transparency
+			segment.CFrame = CFrame.lookAt((a + b) / 2, b)
+			-- Scintillement bref puis extinction.
+			task.delay(lifetime * 0.35, function()
+				if segment.Parent then
+					segment.Transparency = math.min(transparency + 0.5, 1)
+				end
+			end)
+			task.delay(lifetime * 0.5, function()
+				if segment.Parent then
+					segment.Transparency = transparency
+					VfxKit.tween(segment, lifetime * 0.5, { Transparency = 1, Size = Vector3.new(width * 0.3, width * 0.3, length) })
+				end
+			end)
+		end
+	end
+end
+
+--[[
+	Éclair ramifié : un tracé brisé (cœur clair + halo coloré) et des branches qui s'en détachent.
+	Rend les points du tracé principal (pour y accrocher des étincelles).
+]]
+function VfxKit.bolt(from: Vector3, to: Vector3, core: Color3, halo: Color3, width: number, lifetime: number, branches: number, detail: number): { Vector3 }
+	local length = (to - from).Magnitude
+	local depth = if length > 25 and detail >= 0.5 then 4 else 3
+	local points = jagged(from, to, depth, 0.16)
+	boltSegments(points, core, width, lifetime, 0)
+	if VfxKit.rich(detail) then
+		boltSegments(points, halo, width * 2.6, lifetime * 0.8, 0.7)
+	end
+	for _ = 1, branches do
+		local startIndex = random:NextInteger(2, math.max(2, #points - 2))
+		local start = points[startIndex]
+		local direction = ((to - from).Unit + random:NextUnitVector() * 0.9).Unit
+		local branchEnd = start + direction * length * random:NextNumber(0.15, 0.3)
+		boltSegments(jagged(start, branchEnd, 2, 0.2), core, width * 0.55, lifetime * 0.8, 0.15)
+	end
+	return points
+end
+
+--[[
+	Flammes réelles : l'effet Fire de Roblox (flammes animées en volume), sur un porteur invisible,
+	avec des particules de feu en complément quand le détail le permet. Les flammes s'éteignent
+	d'elles-mêmes à la fin (`burn` s), le porteur disparaît ensuite.
+]]
+function VfxKit.flames(position: Vector3, size: number, heat: number, color: Color3, secondary: Color3, burn: number, detail: number): Part
+	local holder = VfxKit.part("Flames", Vector3.new(size * 0.5, 0.2, size * 0.5), color, Enum.Material.SmoothPlastic, burn + 2)
+	holder.Transparency = 1
+	holder.CFrame = CFrame.new(position)
+	local fire = Instance.new("Fire")
+	fire.Size = size
+	fire.Heat = heat
+	fire.Color = color
+	fire.SecondaryColor = secondary
+	fire.Parent = holder
+	if VfxKit.rich(detail) then
+		VfxKit.emitter(holder, {
+			Texture = VfxKit.TEXTURES.fire,
+			Color = ColorSequence.new({ ColorSequenceKeypoint.new(0, secondary), ColorSequenceKeypoint.new(0.5, color), ColorSequenceKeypoint.new(1, Color3.fromRGB(60, 20, 10)) }),
+			Rate = 10 * detail,
+			Lifetime = NumberRange.new(0.4, 0.7),
+			Speed = NumberRange.new(heat * 0.4, heat * 0.8),
+			SpreadAngle = Vector2.new(12, 12),
+			EmissionDirection = Enum.NormalId.Top,
+			Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, size * 0.35), NumberSequenceKeypoint.new(1, size * 0.1) }),
+			Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.3), NumberSequenceKeypoint.new(1, 1) }),
+			Rotation = NumberRange.new(0, 360),
+			RotSpeed = NumberRange.new(-60, 60),
+		})
+	end
+	task.delay(burn, function()
+		fire.Enabled = false
+		for _, item in holder:GetChildren() do
+			if item:IsA("ParticleEmitter") then
+				item.Enabled = false
+			end
+		end
+	end)
+	return holder
+end
+
+-- Fragment de roche (décor, sans collision).
+local ROCK_COLORS = { Color3.fromRGB(86, 80, 74), Color3.fromRGB(70, 66, 64), Color3.fromRGB(104, 96, 86) }
+function VfxKit.rock(position: Vector3, size: number, lifetime: number): Part
+	local rock = VfxKit.part("Rock", Vector3.new(size * random:NextNumber(0.8, 1.3), size * random:NextNumber(0.6, 1), size * random:NextNumber(0.8, 1.2)), ROCK_COLORS[random:NextInteger(1, #ROCK_COLORS)], Enum.Material.Slate, lifetime)
+	rock.CFrame = CFrame.new(position) * CFrame.Angles(random:NextNumber(0, 6.28), random:NextNumber(0, 6.28), random:NextNumber(0, 6.28))
+	return rock
+end
+
+--[[
+	Filament mouvant : un ruban (Beam, texture de fumée qui défile) entre deux attachements, dont la
+	courbure ondule image par image. Sombre (LightEmission 0) ou lumineux selon `glow`.
+]]
+function VfxKit.filament(from: Attachment, to: Attachment, color: ColorSequence, width: number, lifetime: number, glow: number, amplitude: number): Beam
+	local beam = Instance.new("Beam")
+	beam.Attachment0 = from
+	beam.Attachment1 = to
+	beam.Color = color
+	beam.LightEmission = glow
+	beam.Texture = VfxKit.TEXTURES.smoke
+	beam.TextureMode = Enum.TextureMode.Stretch
+	beam.TextureSpeed = 1.5
+	beam.Width0 = width
+	beam.Width1 = width * 0.25
+	beam.Segments = 20
+	beam.FaceCamera = true
+	beam.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 0.6) })
+	beam.Parent = from
+	Debris:AddItem(beam, lifetime)
+	local phase = random:NextNumber(0, math.pi * 2)
+	VfxKit.animate(lifetime, function(_alpha: number, elapsed: number)
+		beam.CurveSize0 = math.sin(elapsed * 6 + phase) * amplitude
+		beam.CurveSize1 = math.cos(elapsed * 5 + phase) * amplitude
+	end, beam)
+	return beam
+end
+
+-- Liste d'exclusion pour les rayons au sol : dossier des effets, lanceur, cibles.
+function VfxKit.ignore(caster: Model?, targets: { Model }): { Instance }
+	local list: { Instance } = { MagicFx.getFolder() }
+	if caster then
+		table.insert(list, caster)
+	end
+	for _, target in targets do
+		table.insert(list, target)
+	end
+	return list
 end
 
 -- Position de la main droite d'un personnage (ou de son centre).

@@ -3,7 +3,7 @@
 	StatusEffects (LocalScript)
 	Rend VISIBLES les altérations posées par le serveur (StatusService) sur les ennemis et les
 	joueurs, à partir des attributs Status_<id> (heure serveur de fin) du Model :
-		brûlure     braises qui montent (plus denses à chaque cran)
+		brûlure     flammes sur le corps et braises qui montent (plus hautes à chaque cran)
 		froid       teinte bleutée ; gel : givre sur la silhouette et éclats de glace sur le corps
 		électrisé   étincelles crépitantes ; paralysie : idem, plus vives
 		drain       volutes sombres ; voile (joueur) : silhouette assombrie
@@ -27,10 +27,10 @@ local SPARK_TEXTURE = "rbxasset://textures/particles/sparkles_main.dds"
 local SMOKE_TEXTURE = "rbxasset://textures/particles/smoke_main.dds"
 local FX_PREFIX = "StatusFx_"
 
-type Look = { texture: string, rate: number, speed: NumberRange, acceleration: Vector3, size: NumberSequence, lifetime: NumberRange, tint: number?, crystal: boolean? }
+type Look = { texture: string, rate: number, speed: NumberRange, acceleration: Vector3, size: NumberSequence, lifetime: NumberRange, tint: number?, crystal: boolean?, fire: boolean? }
 
 local LOOKS: { [string]: Look } = {
-	burn = { texture = SPARK_TEXTURE, rate = 10, speed = NumberRange.new(1, 3), acceleration = Vector3.new(0, 6, 0), size = NumberSequence.new(0.35, 0), lifetime = NumberRange.new(0.5, 0.9) },
+	burn = { texture = SPARK_TEXTURE, rate = 10, speed = NumberRange.new(1, 3), acceleration = Vector3.new(0, 6, 0), size = NumberSequence.new(0.35, 0), lifetime = NumberRange.new(0.5, 0.9), fire = true },
 	chill = { texture = SPARK_TEXTURE, rate = 5, speed = NumberRange.new(0.2, 0.6), acceleration = Vector3.new(0, -1, 0), size = NumberSequence.new(0.2, 0), lifetime = NumberRange.new(0.8, 1.2), tint = 0.75 },
 	frostbite = { texture = SPARK_TEXTURE, rate = 6, speed = NumberRange.new(0.2, 0.6), acceleration = Vector3.new(0, -1, 0), size = NumberSequence.new(0.25, 0), lifetime = NumberRange.new(0.8, 1.2), tint = 0.65 },
 	freeze = { texture = SPARK_TEXTURE, rate = 4, speed = NumberRange.new(0.1, 0.3), acceleration = Vector3.zero, size = NumberSequence.new(0.3, 0), lifetime = NumberRange.new(0.6, 1), tint = 0.5, crystal = true },
@@ -87,6 +87,16 @@ local function addFx(model: Model, statusId: string, level: number)
 		highlight.OutlineTransparency = 1
 		highlight.DepthMode = Enum.HighlightDepthMode.Occluded
 		highlight.Parent = model
+	end
+	if look.fire then
+		-- Brûlure : de vraies flammes sur le corps, plus hautes à chaque cran.
+		local fire = Instance.new("Fire")
+		fire.Name = FX_PREFIX .. statusId
+		fire.Size = (if isReduced then 2 else 3) + level
+		fire.Heat = 6
+		fire.Color = def.color
+		fire.SecondaryColor = Color3.fromRGB(255, 220, 140)
+		fire.Parent = root
 	end
 	if look.crystal then
 		-- Gel : givre blanc sur la silhouette et éclats de glace pris sur le corps (soudés au

@@ -582,21 +582,58 @@ C.frames(60 * 3)
 H.check("Rupture du Néant : la musique revient", math.abs(AudioMixer.getVolume("Music") - musicBefore) < 1e-3, AudioMixer.getVolume("Music"))
 C.frames(60 * 3)
 H.check("Rupture du Néant : tout a disparu", fxStats().parts == 0, fxStats().parts)
--- Les quatre autres ultimes : préparation visible, puis impact.
-local others = {
-	{ id = "pyromancy", before = "EmberFloor", after = "FireWall" },
-	{ id = "lightning", before = "StrikeMark", after = "Bolt" },
-	{ id = "shadow", before = "ShadowPool", after = "ShadowWave" },
-	{ id = "gravity", before = "GravityRing", after = "GravityDome" },
+-- Les quatre autres ultimes (Magies 3.0) : préparation, impact au bon moment, rien de solide, nettoyage.
+local function fxCount(className, enabledOnly)
+	local n = 0
+	for _, holder in ipairs(fxFolders()) do
+		for _, d in ipairs(holder:GetDescendants()) do
+			if rawget(d, "ClassName") == className and (not enabledOnly or d.Enabled ~= false) then n += 1 end
+		end
+	end
+	return n
+end
+local ultimateCases = {
+	{
+		id = "pyromancy",
+		before = function() return fxCount("Fire") >= 4 and effects("LavaCrack") >= 4, fxCount("Fire") .. " flammes, " .. effects("LavaCrack") .. " fissures" end,
+		after = function() return fxCount("Fire") >= 10 and effects("HotGround") >= 6, fxCount("Fire") .. " flammes, " .. effects("HotGround") .. " sol" end,
+		label = "cercle de flammes et fissures de lave, puis colonne et vagues de feu",
+	},
+	{
+		id = "lightning",
+		before = function() return effects("StrikeMark") >= 1 and effects("StaticAura") == 1, effects("StrikeMark") end,
+		after = function() return effects("Bolt") >= 20, effects("Bolt") .. " segments" end,
+		label = "électricité statique et lueur sur la cible, puis éclairs ramifiés tombés du ciel",
+	},
+	{
+		id = "shadow",
+		before = function() return effects("Shade") >= 3 and effects("ShadowPool") >= 6 and fxCount("Beam") >= 1, effects("Shade") .. " formes" end,
+		after = function() return effects("Shade") == 0 and effects("LifeWisp") >= 1, effects("LifeWisp") .. " lueurs" end,
+		label = "flaque, formes sombres et vrilles, puis vague et vie qui revient",
+	},
+	{
+		id = "gravity",
+		before = function() return effects("Rock") >= 6 and effects("GravityDome") == 1, effects("Rock") .. " débris" end,
+		after = function() return effects("GravityDome") == 0 and effects("GroundCrack") >= 4, effects("GroundCrack") .. " fissures" end,
+		label = "débris qui s'élèvent et dôme, puis écrasement et fissures",
+		extra = 0.35 + 0.2 + 0.15, -- soulèvement + écrasement du serveur
+	},
 }
-for _, entry in ipairs(others) do
-	local magic = MagicConfig.getById(entry.id)
-	CombatRemotes.UltimateFired.OnClientEvent:Fire(mages[entry.id].Character, root(target).Position + V3.new(0, 0, 6), { target }, entry.id)
-	C.frames(math.ceil(magic.ultimateWindup * 60 * 0.6))
-	H.check(string.format("%s, préparation : %s visible, pas encore d'impact", magic.ultimateName, entry.before), effects(entry.before) >= 1 and effects(entry.after) == 0)
-	C.frames(math.ceil(magic.ultimateWindup * 60 * 0.4) + 4)
-	H.check(magic.ultimateName .. ", impact : " .. entry.after, effects(entry.after) >= 1)
-	C.frames(240)
+mock.workspace.CurrentCamera.CFrame = mock.CFrame.new(root(target).Position + V3.new(0, 10, 30))
+for _, case in ipairs(ultimateCases) do
+	local magic = MagicConfig.getById(case.id)
+	clearFx()
+	CombatRemotes.UltimateFired.OnClientEvent:Fire(mages[case.id].Character, root(target).Position + V3.new(0, 0, 6), { target }, case.id)
+	C.frames(math.ceil(magic.ultimateWindup * 60 * 0.7))
+	local okBefore, infoBefore = case.before()
+	H.check(magic.ultimateName .. ", préparation : " .. case.label, okBefore, infoBefore)
+	H.check(magic.ultimateName .. ", préparation : aucun disque", fxStats().cylinders == 0, fxStats().cylinders)
+	C.frames(math.ceil((magic.ultimateWindup * 0.3 + (case.extra or 0) + 0.15) * 60))
+	local okAfter, infoAfter = case.after()
+	H.check(magic.ultimateName .. ", impact au moment des dégâts", okAfter, infoAfter)
+	H.check(magic.ultimateName .. " : aucune pièce d'effet solide", fxStats().solid == 0, fxStats().solid)
+	C.frames(60 * 6)
+	H.check(magic.ultimateName .. " : tout a disparu", fxStats().parts == 0, fxStats().parts)
 end
 local function spellFx(name)
 	local found = 0
@@ -726,44 +763,170 @@ do
 		SpellRemotes.SpellCast.OnClientEvent:Fire(caster, spellId, 9500 + index, origin, center)
 		SpellRemotes.SpellImpact.OnClientEvent:Fire(9500 + index, spellId, center, crowd)
 	end
+	-- Les douze sorts des six magies, en même temps, plus trois ultimes.
+	for index, spell in ipairs(SpellConfig.SPELLS) do
+		SpellRemotes.SpellCast.OnClientEvent:Fire(mages[spell.magic].Character, spell.id, 9600 + index, origin, center)
+		SpellRemotes.SpellImpact.OnClientEvent:Fire(9600 + index, spell.id, center, crowd)
+	end
+	for _, magicId in ipairs({ "pyromancy", "lightning", "gravity" }) do
+		mock.task.spawn(function()
+			CombatRemotes.UltimateFired.OnClientEvent:Fire(mages[magicId].Character, center, crowd, magicId)
+		end)
+	end
 	local peak = 0
 	for _ = 1, 40 do
 		C.frames(3)
 		peak = math.max(peak, fxStats().parts)
 	end
-	H.check("dix sorts de zone simultanés : pièces d'effet contenues par le budget", peak <= 700, peak)
-	C.frames(60 * 8)
-	H.check("dix sorts simultanés : tout a disparu ensuite", fxStats().parts == 0, fxStats().parts)
+	print("    pic de pièces d'effet : " .. peak)
+	H.check("22 sorts et 3 ultimes simultanés : pièces d'effet contenues par le budget", peak <= 900, peak)
+	C.frames(60 * 10)
+	H.check("sorts et ultimes simultanés : tout a disparu ensuite", fxStats().parts == 0, fxStats().parts)
 	for _, model in ipairs(crowd) do model:Destroy() end
 end
-local spellLooks = {
-	{ id = "ember", magic = "pyromancy", projectile = "Ember", impact = "Scorch" },
-	{ id = "dark_bolt", magic = "shadow", projectile = "DarkBolt", impact = "LifeWisp" },
-}
-for index, entry in ipairs(spellLooks) do
-	local spell = SpellConfig.get(entry.id)
-	SpellRemotes.SpellCast.OnClientEvent:Fire(mages[entry.magic].Character, entry.id, 9100 + index, origin, root(target).Position)
-	C.frames(math.ceil(spell.castTime * 60) + 3)
-	H.check(spell.name .. " : projectile propre à la magie", spellFx(entry.projectile) == 1)
-	SpellRemotes.SpellImpact.OnClientEvent:Fire(9100 + index, entry.id, root(target).Position, { target })
-	C.frames(3)
-	H.check(spell.name .. " : impact propre à la magie", spellFx(entry.impact) >= 1)
-	C.frames(120)
-end
-SpellRemotes.SpellCast.OnClientEvent:Fire(mages.lightning.Character, "electric_arc", 9201, origin, root(target).Position)
-SpellRemotes.SpellImpact.OnClientEvent:Fire(9201, "electric_arc", root(target).Position, { target })
-C.frames(2)
-H.check("Arc Électrique : double éclair et éclat lumineux", spellFx("SpellBeam") >= 4 and spellFx("BoltFlash") == 1)
-SpellRemotes.SpellCast.OnClientEvent:Fire(mages.gravity.Character, "gravity_press", 9202, origin, root(target).Position)
-C.frames(math.ceil(SpellConfig.get("gravity_press").castTime * 60))
-SpellRemotes.SpellImpact.OnClientEvent:Fire(9202, "gravity_press", root(target).Position, { target })
-C.frames(2)
-H.check("Pression Gravitationnelle : colonne de pression qui s'abat", spellFx("PressureColumn") == 1)
-SpellRemotes.SpellCast.OnClientEvent:Fire(mages.pyromancy.Character, "blazing_circle", 9203, origin, root(target).Position)
+-- Pyromancie
+local near = root(target).Position
+mock.workspace.CurrentCamera.CFrame = mock.CFrame.new(near + V3.new(0, 10, 30))
+clearFx()
+SpellRemotes.SpellCast.OnClientEvent:Fire(mages.pyromancy.Character, "ember", 9101, origin, near)
 C.frames(5)
-SpellRemotes.SpellImpact.OnClientEvent:Fire(9203, "blazing_circle", root(target).Position, { target })
+H.check("Braise Ardente, préparation : une flamme naît dans la paume", spellFx("EmberCharge") == 1 and fxCount("Fire") >= 1)
+C.frames(math.ceil(SpellConfig.get("ember").castTime * 60))
+local fireball = mock.workspace.SpellEffects:FindFirstChild("Ember")
+H.check("Braise Ardente : boule de feu (noyau incandescent + vraies flammes)", fireball ~= nil and fireball:FindFirstChild("Core") ~= nil and fireball:FindFirstChildOfClass("Fire") ~= nil)
+SpellRemotes.SpellImpact.OnClientEvent:Fire(9101, "ember", near, { target })
+C.frames(10)
+H.check("Braise Ardente, impact : explosion ardente et sol roussi", spellFx("Scorch") >= 2 and spellFx("Flames") >= 1)
+C.frames(60 * 4)
+H.check("Braise Ardente : tout a disparu", fxStats().parts == 0, fxStats().parts)
+
+SpellRemotes.SpellCast.OnClientEvent:Fire(mages.pyromancy.Character, "blazing_circle", 9102, origin, near)
+C.frames(math.ceil(SpellConfig.get("blazing_circle").castTime * 60 * 0.9))
+H.check("Cercle Incandescent, préparation : sol qui chauffe, braises, flammes sur le pourtour, aucun disque", spellFx("Flames") >= 3 and spellFx("HotGround") >= 3 and spellFx("Embers") == 1 and fxStats().cylinders == 0)
+C.frames(10)
+SpellRemotes.SpellImpact.OnClientEvent:Fire(9102, "blazing_circle", near, { target })
+C.frames(15)
+H.check("Cercle Incandescent, impact : langues de feu de hauteurs variées", fxCount("Fire", true) >= 6, fxCount("Fire", true))
+C.frames(math.ceil(1.6 * 60))
+H.check("Cercle Incandescent : les flammes retombent (la zone n'agit qu'à l'impact côté serveur)", fxCount("Fire", true) == 0, fxCount("Fire", true))
+C.frames(60 * 4)
+H.check("Cercle Incandescent : tout a disparu", fxStats().parts == 0, fxStats().parts)
+
+-- Foudre
+SpellRemotes.SpellCast.OnClientEvent:Fire(mages.lightning.Character, "electric_arc", 9201, origin, near)
+C.frames(3)
+H.check("Arc Électrique, préparation : crépitement dans la main", spellFx("ArcCharge") == 1)
+SpellRemotes.SpellImpact.OnClientEvent:Fire(9201, "electric_arc", near, { target })
 C.frames(2)
-H.check("Cercle Incandescent : anneau annoncé puis mur de flammes", spellFx("BlazeCircle") >= 1 and spellFx("FlameRing") == 1)
+H.check("Arc Électrique : éclair ramifié (nombreux segments brisés)", spellFx("Bolt") >= 8, spellFx("Bolt"))
+C.frames(60 * 3)
+local chainTargets = {
+	dummy("Chaîne1", near + V3.new(8, 0, 0), false),
+	dummy("Chaîne2", near + V3.new(14, 0, 6), false),
+	dummy("Chaîne3", near + V3.new(10, 0, 14), false),
+}
+clearFx()
+SpellRemotes.SpellCast.OnClientEvent:Fire(mages.lightning.Character, "chain_lightning", 9202, origin, near)
+SpellRemotes.SpellImpact.OnClientEvent:Fire(9202, "chain_lightning", root(chainTargets[1]).Position, chainTargets)
+local reached = {}
+for _ = 1, 20 do
+	C.frames(1)
+	for index, model in ipairs(chainTargets) do
+		local position = root(model).Position
+		for _, holder in ipairs(fxFolders()) do
+			for _, child in ipairs(holder:GetChildren()) do
+				if child.Name == "Bolt" and (child.Position - position).Magnitude < 3 then reached[index] = true end
+			end
+		end
+	end
+end
+H.check("Chaîne Foudroyante : l'éclair atteint chaque cible à sa position réelle", reached[1] and reached[2] and reached[3])
+for _, model in ipairs(chainTargets) do model:Destroy() end
+C.frames(60 * 3)
+H.check("Foudre : tout a disparu", fxStats().parts == 0, fxStats().parts)
+
+-- Ombre
+SpellRemotes.SpellCast.OnClientEvent:Fire(mages.shadow.Character, "dark_bolt", 9301, origin, near)
+C.frames(5)
+H.check("Trait Obscur, préparation : volutes sombres vers la main", spellFx("ShadowCharge") == 1)
+C.frames(math.ceil(SpellConfig.get("dark_bolt").castTime * 60))
+local darkBolt = mock.workspace.SpellEffects:FindFirstChild("DarkBolt")
+local trailCount = 0
+for _, d in ipairs(darkBolt and darkBolt:GetChildren() or {}) do
+	if rawget(d, "ClassName") == "Trail" then trailCount += 1 end
+end
+H.check("Trait Obscur : matière sombre avec filaments mouvants", darkBolt ~= nil and trailCount >= 2, trailCount)
+SpellRemotes.SpellImpact.OnClientEvent:Fire(9301, "dark_bolt", near, { target })
+C.frames(4)
+local casterPosition = root(mages.shadow.Character).Position
+local function wispDistance()
+	local best = math.huge
+	for _, holder in ipairs(fxFolders()) do
+		for _, child in ipairs(holder:GetChildren()) do
+			if child.Name == "LifeWisp" then best = math.min(best, (child.Position - casterPosition).Magnitude) end
+		end
+	end
+	return best
+end
+local startDistance = wispDistance()
+C.frames(18)
+H.check("Trait Obscur : l'énergie volée revient vers le lanceur", spellFx("LifeWisp") >= 1 and wispDistance() < startDistance, string.format("%.1f -> %.1f", startDistance, wispDistance()))
+C.frames(60 * 3)
+local shadowCaster = mages.shadow.Character
+shadowCaster:SetAttribute(StatusConfig.ATTRIBUTE_PREFIX .. "veil", mock.workspace:GetServerTimeNow() + 1.5)
+SpellRemotes.SpellCast.OnClientEvent:Fire(shadowCaster, "shadow_veil", 9302, origin, near)
+SpellRemotes.SpellImpact.OnClientEvent:Fire(9302, "shadow_veil", root(shadowCaster).Position, {})
+C.frames(30)
+H.check("Voile des Ombres : filaments sombres en orbite autour du lanceur", spellFx("VeilFilament") >= 2, spellFx("VeilFilament"))
+C.frames(60 * 1.5)
+H.check("Voile des Ombres : se disperse quand le voile du serveur prend fin", spellFx("VeilFilament") == 0, spellFx("VeilFilament"))
+shadowCaster:SetAttribute(StatusConfig.ATTRIBUTE_PREFIX .. "veil", nil)
+C.frames(60 * 3)
+H.check("Ombre : tout a disparu", fxStats().parts == 0, fxStats().parts)
+
+-- Gravité
+local pressPoint = near + V3.new(0, 0, -10)
+SpellRemotes.SpellCast.OnClientEvent:Fire(mages.gravity.Character, "gravity_press", 9401, origin, pressPoint)
+C.frames(math.ceil(SpellConfig.get("gravity_press").castTime * 60))
+local liftedRocks = 0
+for _, holder in ipairs(fxFolders()) do
+	for _, child in ipairs(holder:GetChildren()) do
+		if child.Name == "Rock" and child.Position.Y > pressPoint.Y + 0.6 then liftedRocks += 1 end
+	end
+end
+H.check("Pression Gravitationnelle, préparation : cailloux soulevés au point visé", liftedRocks >= 2, liftedRocks)
+SpellRemotes.SpellImpact.OnClientEvent:Fire(9401, "gravity_press", pressPoint, { target })
+C.frames(3)
+H.check("Pression Gravitationnelle, impact : l'espace s'écrase (lentille)", spellFx("PressureLens") == 1)
+C.frames(20)
+H.check("Pression Gravitationnelle : fissures et onde rasante", spellFx("GroundCrack") >= 3, spellFx("GroundCrack"))
+C.frames(60 * 3)
+H.check("Pression Gravitationnelle : tout a disparu", fxStats().parts == 0, fxStats().parts)
+
+local fieldSpell = SpellConfig.get("gravity_field")
+local fieldPoint = near + V3.new(0, 0, -20)
+SpellRemotes.SpellCast.OnClientEvent:Fire(mages.gravity.Character, "gravity_field", 9402, origin, fieldPoint)
+C.frames(math.ceil((fieldSpell.castTime + 1) * 60))
+local floating = 0
+for _, holder in ipairs(fxFolders()) do
+	for _, child in ipairs(holder:GetChildren()) do
+		if child.Name == "Rock" and child.Position.Y > fieldPoint.Y + 0.6 then floating += 1 end
+	end
+end
+H.check("Champ Gravitationnel : pierres en suspension et limite visible (dôme), aucun disque", floating >= 4 and spellFx("GravityDome") == 1 and fxStats().cylinders == 0, floating)
+-- Le serveur termine plus tôt (rembobinage par exemple) : le champ se referme à l'impact.
+SpellRemotes.SpellImpact.OnClientEvent:Fire(9402, "gravity_field", fieldPoint, { target })
+C.frames(40)
+local stillFloating = 0
+for _, holder in ipairs(fxFolders()) do
+	for _, child in ipairs(holder:GetChildren()) do
+		if child.Name == "Rock" and child.Position.Y > fieldPoint.Y + 1.2 then stillFloating += 1 end
+	end
+end
+H.check("Champ Gravitationnel : à la fin réelle, les pierres retombent", stillFloating == 0, stillFloating)
+C.frames(60 * 4)
+H.check("Gravité : tout a disparu", fxStats().parts == 0, fxStats().parts)
+H.check("aucune pièce d'effet solide (quatre magies)", fxStats().solid == 0)
 C.frames(120)
 C.frames(120)
 H.noNewErrors("sorts client sans erreur")

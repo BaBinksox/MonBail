@@ -23,7 +23,6 @@ local StatusConfig = require(sharedFolder:WaitForChild("Combat"):WaitForChild("S
 local clientFolder = script.Parent.Parent
 local ClientSettings = require(clientFolder:WaitForChild("State"):WaitForChild("ClientSettings") :: ModuleScript)
 local CombatEffects = require(clientFolder:WaitForChild("Combat"):WaitForChild("CombatEffects") :: ModuleScript)
-local MagicFx = require(script.Parent:WaitForChild("MagicFx") :: ModuleScript)
 
 local SPARK_TEXTURE = "rbxasset://textures/particles/sparkles_main.dds"
 local SMOKE_TEXTURE = "rbxasset://textures/particles/smoke_main.dds"
@@ -161,179 +160,7 @@ local IMPACTS: { [string]: ImpactPlayer } = {}
 
 -- ANTIMATIÈRE : voir Vfx/Antimatter (Magies 3.0).
 
--- PYROMANCIE ---------------------------------------------------------------------
-
-local function flameTrail(parent: BasePart, palette: any)
-	local emitter = Instance.new("ParticleEmitter")
-	emitter.Texture = SPARK_TEXTURE
-	emitter.LightEmission = 1
-	emitter.Color = ColorSequence.new(palette.glow, palette.main)
-	emitter.Speed = NumberRange.new(0.5, 2)
-	emitter.Acceleration = Vector3.new(0, 6, 0)
-	emitter.Lifetime = NumberRange.new(0.2, 0.4)
-	emitter.Size = NumberSequence.new(0.8, 0)
-	emitter.Transparency = NumberSequence.new(0.1, 1)
-	emitter.Rate = MagicFx.scaled(40)
-	emitter.Parent = parent
-end
-
--- Braise Ardente : une boule de feu qui crache des flammes dans sa course.
-PROJECTILE_LOOKS.ember = function(palette: any): BasePart
-	local orb = newPart("Ember", Enum.PartType.Ball, Vector3.one * 1, palette.main, MAX_PROJECTILE_LIFETIME)
-	flameTrail(orb, palette)
-	return orb
-end
--- À l'impact : éclat de feu, braises qui retombent, sol noirci.
-IMPACTS.ember = function(_spell: any, position: Vector3, targets: { Model }, _caster: Model?, palette: any)
-	burst(position, palette.main, 22, 14, SPARK_TEXTURE)
-	local scorch = MagicFx.disc("Scorch", MagicFx.groundBelow(position, targets :: { any }), 3.5, Color3.fromRGB(30, 18, 12), Enum.Material.SmoothPlastic, 3)
-	scorch.Transparency = 0.35
-	task.delay(1.4, function()
-		MagicFx.tween(scorch, 1.4, { Transparency = 1 })
-	end)
-	for _, target in targets do
-		CombatEffects.playHitImpact(target, position, palette.main, 8)
-	end
-end
--- Cercle Incandescent : un anneau de braises se dessine autour du lanceur...
-TELEGRAPHS.blazing_circle = function(spell: any, aimPoint: Vector3, palette: any)
-	local duration = math.max(spell.castTime, 0.2)
-	local circle = MagicFx.disc("BlazeCircle", aimPoint, 2, palette.main, Enum.Material.Neon, duration + 0.1)
-	circle.Transparency = 0.7
-	MagicFx.tween(circle, duration, { Size = Vector3.new(0.12, spell.radius * 2, spell.radius * 2), Transparency = 0.4 })
-end
--- ... puis s'embrase en un mur de flammes qui repousse.
-IMPACTS.blazing_circle = function(spell: any, position: Vector3, targets: { Model }, _caster: Model?, palette: any)
-	local wall = MagicFx.part("FlameRing", Enum.PartType.Cylinder, Vector3.new(3, 2, 2), palette.main, Enum.Material.Neon, 0.8)
-	wall.Transparency = 0.15
-	wall.CFrame = CFrame.new(position + Vector3.new(0, 1.5, 0)) * CFrame.Angles(0, 0, math.rad(90))
-	wall.Parent = MagicFx.getFolder()
-	MagicFx.tween(wall, 0.45, { Size = Vector3.new(0.6, spell.radius * 2.2, spell.radius * 2.2), Transparency = 1 }, Enum.EasingStyle.Quart)
-	burst(position + Vector3.new(0, 1, 0), palette.main, 40, spell.radius * 2.5, SPARK_TEXTURE)
-	for _, target in targets do
-		CombatEffects.playHitImpact(target, nil, palette.main, 8)
-	end
-	CombatEffects.shake(0.2, 0.3)
-end
-
--- FOUDRE -------------------------------------------------------------------------
-
-local function flashLight(position: Vector3, color: Color3)
-	local anchor = MagicFx.part("BoltFlash", Enum.PartType.Ball, Vector3.one * 1.4, color, Enum.Material.Neon, 0.25)
-	anchor.CFrame = CFrame.new(position)
-	anchor.Parent = MagicFx.getFolder()
-	local light = Instance.new("PointLight")
-	light.Color = color
-	light.Range = 18
-	light.Brightness = 6
-	light.Parent = anchor
-	MagicFx.tween(anchor, 0.2, { Size = Vector3.one * 3, Transparency = 1 })
-	MagicFx.tween(light, 0.2, { Brightness = 0 })
-end
-
--- Arc Électrique : double éclair instantané, éclat lumineux sur la cible.
-IMPACTS.electric_arc = function(_spell: any, position: Vector3, targets: { Model }, caster: Model?, palette: any)
-	local casterRoot = caster and MagicFx.rootOf(caster)
-	if casterRoot then
-		local from = casterRoot.Position + Vector3.new(0, PROJECTILE_HEIGHT, 0)
-		lightningBolt(from, position, palette.glow)
-		lightningBolt(from, position, palette.main)
-	end
-	flashLight(position, palette.glow)
-	for _, target in targets do
-		CombatEffects.playHitImpact(target, position, palette.glow, 10)
-	end
-end
--- Chaîne Foudroyante : l'éclair saute de cible en cible, chaque rebond éclaire.
-IMPACTS.chain_lightning = function(_spell: any, _position: Vector3, targets: { Model }, caster: Model?, palette: any)
-	local casterRoot = caster and MagicFx.rootOf(caster)
-	local previous = if casterRoot then casterRoot.Position + Vector3.new(0, PROJECTILE_HEIGHT, 0) else nil
-	for index, target in targets do
-		local point = target:GetPivot().Position
-		task.delay((index - 1) * 0.05, function()
-			if previous then
-				lightningBolt(previous, point, palette.glow)
-			end
-			flashLight(point, palette.glow)
-			CombatEffects.playHitImpact(target, point, palette.glow, 8)
-			previous = point
-		end)
-	end
-end
-
--- OMBRE --------------------------------------------------------------------------
-
--- Trait Obscur : une lame d'ombre cerclée de rouge, qui laisse une fumée sombre.
-PROJECTILE_LOOKS.dark_bolt = function(palette: any): BasePart
-	local bolt = newPart("DarkBolt", Enum.PartType.Block, Vector3.new(0.5, 0.5, 1.8), palette.void, MAX_PROJECTILE_LIFETIME)
-	bolt.Material = Enum.Material.SmoothPlastic
-	local rim = Instance.new("Highlight")
-	rim.FillTransparency = 1
-	rim.OutlineColor = palette.main
-	rim.DepthMode = Enum.HighlightDepthMode.Occluded
-	rim.Parent = bolt
-	local smoke = Instance.new("ParticleEmitter")
-	smoke.Texture = SMOKE_TEXTURE
-	smoke.Color = ColorSequence.new(palette.main, palette.void)
-	smoke.Speed = NumberRange.new(0, 0.5)
-	smoke.Lifetime = NumberRange.new(0.3, 0.5)
-	smoke.Size = NumberSequence.new(0.8, 1.6)
-	smoke.Transparency = NumberSequence.new(0.4, 1)
-	smoke.Rate = MagicFx.scaled(30)
-	smoke.Parent = bolt
-	return bolt
-end
--- À l'impact : éclaboussure sombre, puis la vie volée remonte vers le lanceur.
-IMPACTS.dark_bolt = function(_spell: any, position: Vector3, targets: { Model }, caster: Model?, palette: any)
-	burst(position, palette.main, 16, 8, SMOKE_TEXTURE)
-	local casterRoot = caster and MagicFx.rootOf(caster)
-	for _, target in targets do
-		CombatEffects.playHitImpact(target, position, palette.main, 8)
-		if casterRoot then
-			local wisp = MagicFx.part("LifeWisp", Enum.PartType.Ball, Vector3.one * 0.6, palette.glow, Enum.Material.Neon, 0.8)
-			wisp.CFrame = CFrame.new(position)
-			wisp.Parent = MagicFx.getFolder()
-			MagicFx.tween(wisp, 0.5, { Position = casterRoot.Position, Size = Vector3.one * 0.2 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-		end
-	end
-end
--- Voile des Ombres : un manteau de fumée tourbillonne et enveloppe le lanceur.
-IMPACTS.shadow_veil = function(_spell: any, _position: Vector3, _targets: { Model }, caster: Model?, palette: any)
-	local casterRoot = caster and MagicFx.rootOf(caster)
-	if casterRoot == nil then
-		return
-	end
-	local ground = MagicFx.groundBelow(casterRoot.Position, { caster :: Model })
-	local swirl = MagicFx.disc("VeilSwirl", ground, 2, palette.void, Enum.Material.SmoothPlastic, 1.2)
-	swirl.Transparency = 0.3
-	MagicFx.tween(swirl, 0.5, { Size = Vector3.new(0.12, 9, 9), Transparency = 1 })
-	burst(casterRoot.Position, palette.main, 26, 5, SMOKE_TEXTURE)
-end
-
--- GRAVITÉ ------------------------------------------------------------------------
-
--- Pression Gravitationnelle : une colonne de pression s'abat sur le point visé.
-IMPACTS.gravity_press = function(spell: any, position: Vector3, targets: { Model }, _caster: Model?, palette: any)
-	local column = MagicFx.part("PressureColumn", Enum.PartType.Cylinder, Vector3.new(14, spell.radius * 2, spell.radius * 2), palette.main, Enum.Material.ForceField, 0.5)
-	column.Transparency = 0.3
-	column.CFrame = CFrame.new(position + Vector3.new(0, 10, 0)) * CFrame.Angles(0, 0, math.rad(90))
-	column.Parent = MagicFx.getFolder()
-	MagicFx.tween(column, 0.15, { CFrame = CFrame.new(position + Vector3.new(0, 1, 0)) * CFrame.Angles(0, 0, math.rad(90)), Size = Vector3.new(2, spell.radius * 2.2, spell.radius * 2.2) }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-	task.delay(0.15, function()
-		MagicFx.tween(column, 0.25, { Transparency = 1 })
-		ring(position, spell.radius * 1.3, palette.main, 0.35, spell.radius * 0.5)
-		burst(position + Vector3.new(0, 0.5, 0), Color3.fromRGB(150, 145, 160), 14, 8, SMOKE_TEXTURE)
-		for _, target in targets do
-			CombatEffects.playHitImpact(target, nil, palette.main, 6)
-		end
-	end)
-end
--- Champ Gravitationnel : en plus du champ, une pluie de poussière plaquée au sol à chaque impulsion.
-IMPACTS.gravity_field = function(_spell: any, _position: Vector3, targets: { Model }, _caster: Model?, palette: any)
-	for _, target in targets do
-		CombatEffects.playHitImpact(target, nil, palette.main, 4)
-	end
-end
+-- PYROMANCIE, FOUDRE, OMBRE, GRAVITÉ : voir Vfx/Pyromancy, Vfx/Lightning, Vfx/Shadow, Vfx/Gravity.
 
 --------------------------------------------------------------------------------
 -- Magies 3.0 : un module d'effets par magie (Client/Magic/Vfx), qui remplace les effets ci-dessus
@@ -343,7 +170,7 @@ end
 
 type Charge = (caster: Model?, spell: any, palette: any, duration: number) -> ()
 local CHARGES: { [string]: Charge } = {}
-local VFX_MODULES = { "Ice", "Antimatter" }
+local VFX_MODULES = { "Ice", "Antimatter", "Pyromancy", "Lightning", "Shadow", "Gravity" }
 local vfxFolder = script.Parent:WaitForChild("Vfx")
 for _, moduleName in VFX_MODULES do
 	local module = require(vfxFolder:WaitForChild(moduleName) :: ModuleScript) :: any
