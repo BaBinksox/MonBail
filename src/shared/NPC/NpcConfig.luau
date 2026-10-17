@@ -26,6 +26,8 @@ export type Look = {
 	width: number,
 	face: string?, -- id de AvatarConfig.FACE_OPTIONS (visage dessiné, pas de visage moderne)
 	details: { string }?, -- détails de costume (NpcCostume.RECIPES)
+	-- Costume fabriqué (GarmentLibrary : teinture des membres + pièces) ; remplace `outfit`.
+	garment: string?,
 }
 
 export type Npc = {
@@ -58,7 +60,7 @@ local NPCS: { [string]: Npc } = {
 		name = "Le Forgeron",
 		dialogueId = "blacksmith",
 		wanders = false,
-		look = { base = "man", outfit = "black_iron_knight", hair = "brown", skin = SKIN_DARK, height = 1.1, width = 1.1, face = "defiant", details = { "apron_leather" } },
+		look = { base = "man", hair = "brown", skin = SKIN_DARK, height = 1.1, width = 1.1, face = "defiant", garment = "village_smith" },
 	},
 	npc_child = {
 		name = "L'Enfant",
@@ -78,7 +80,7 @@ local NPCS: { [string]: Npc } = {
 		dialogueId = "guildmaster",
 		wanders = false,
 		role = "guild",
-		look = { base = "man", outfit = "midnight_traveler", hair = "librarian", skin = SKIN_PALE, height = 1.05, width = 0.9, face = "detached", details = { "robe_scholar", "guild_stole" } },
+		look = { base = "man", hair = "librarian", skin = SKIN_PALE, height = 1.05, width = 0.9, face = "detached", garment = "village_archivist" },
 	},
 	npc_trainer = {
 		name = "Bran, maître d'armes",

@@ -1,7 +1,7 @@
 --!strict
 --[[
 	ProfileSchema
-	Forme du profil joueur (version 3), valeurs par défaut, migrations v1 -> v2 -> v3 et nettoyage des données
+	Forme du profil joueur (version 4), valeurs par défaut, migrations v1 -> v2 -> v3 -> v4 et nettoyage des données
 	lues dans le DataStore. Utilisé par ProfileStore ; les services passent par PlayerData.
 
 	Version 1 (prototype) : { version = 1, avatar = {...} }
@@ -22,6 +22,8 @@
 		avatar.race  "human" pour les personnages existants ; avatar.skin  "native" (teint inchangé)
 		creation     { destinyRoll, rolledAt }  verdict de la Roulette du Destin, tiré par le serveur
 		             et conservé : il ne change pas à la reconnexion (voir AvatarService)
+	Version 4 : ornements du personnage (barbe, diadème, pendentif) :
+		avatar.ornament  "none" pour les personnages existants (apparence inchangée)
 
 	Règles de prudence :
 		- la migration n'ENLÈVE rien : elle complète ce qui manque ;
@@ -98,7 +100,7 @@ export type Profile = {
 	creation: Creation,
 }
 
-local VERSION = 3
+local VERSION = 4
 
 -- Champs du profil écrits dans le DataStore par ProfileStore (les autres champs de l'enregistrement
 -- ne sont jamais touchés).
@@ -315,6 +317,14 @@ function ProfileSchema.migrateV2toV3(record: { [string]: any })
 	end
 	if record.creation == nil then
 		record.creation = {}
+	end
+end
+
+-- v3 -> v4 : ornement des personnages existants = aucun. Ne supprime ni ne modifie rien d'existant.
+function ProfileSchema.migrateV3toV4(record: { [string]: any })
+	local avatar = record.avatar
+	if type(avatar) == "table" and avatar.ornament == nil then
+		avatar.ornament = "none"
 	end
 end
 

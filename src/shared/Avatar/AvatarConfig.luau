@@ -16,6 +16,8 @@
 	Les assets ci-dessous sont des PLACEHOLDERS du catalogue Roblox, à remplacer par ceux du jeu.
 ]]
 
+local GarmentLibrary = require(script.Parent:WaitForChild("GarmentLibrary") :: ModuleScript)
+
 -- Base du corps : les 5 parties (R15) d'un bundle.
 export type BaseOption = {
 	id: string,
@@ -63,9 +65,18 @@ export type OutfitOption = {
 	id: string,
 	name: string,
 	style: string, -- famille : "vagabond", "chevalier", "mage", "noble"... (classement, récapitulatif)
-	shirtId: number, -- vêtement classique (Shirt)
-	pantsId: number, -- vêtement classique (Pants)
+	-- Tenue FABRIQUÉE (GarmentLibrary) : teinture des membres + pièces sculptées, sans asset externe.
+	-- Quand `garment` est renseigné, les trois champs du catalogue Roblox ci-dessous valent 0.
+	garment: string?,
+	shirtId: number, -- vêtement classique (Shirt) du catalogue Roblox, 0 = aucun
+	pantsId: number, -- vêtement classique (Pants), 0 = aucun
 	backAccessoryId: number, -- accessoire de type Back (cape), 0 = aucun
+}
+
+-- Ornement (barbe, diadème, pendentif) : voir GarmentLibrary.ORNAMENTS.
+export type OrnamentOption = {
+	id: string,
+	name: string,
 }
 
 -- Teint : couleur appliquée à la tête ET à tout le corps visible (6 parties de BodyColors).
@@ -95,6 +106,7 @@ export type Selection = {
 	magicIndex: number, -- index dans MagicConfig.MAGICS
 	raceIndex: number, -- index dans RaceConfig.RACES
 	skinIndex: number, -- index dans SKIN_TONES
+	ornamentIndex: number, -- index dans ORNAMENT_OPTIONS (ajouté en v4 du profil)
 }
 
 -- Image que TU as importée (ou une image du catalogue) : on donne l'ID de l'IMAGE.
@@ -198,13 +210,22 @@ local HAIR_OPTIONS: { HairOption } = {
 }
 
 --[[
-	Tenues. Les trois ci-dessous sont celles déjà présentes dans le projet (placeholders du catalogue).
+	Tenues.
+	Les quatre premières sont FABRIQUÉES dans le jeu (GarmentLibrary) : aucune dépendance au
+	catalogue, elles s'affichent pour tout le monde. Une par peuple d'inspiration ; tous les peuples
+	peuvent les porter.
+	Les trois suivantes sont les tenues historiques du projet (Shirt/Pants du catalogue Roblox,
+	placeholders) : conservées pour les personnages déjà créés (leur `id` est dans les sauvegardes).
 	>>> AJOUTER UNE TENUE : une ligne de plus, avec des ID VÉRIFIÉS en jeu (Toolbox > Marketplace >
 	    Shirts / Pants / Back accessories, puis Play : la vignette du créateur et le personnage doivent
 	    s'afficher). Familles souhaitées et encore à pourvoir : voir OUTFIT_WISHLIST plus bas.
 	Aucun ID n'est inventé : une famille sans ID vérifié reste dans la liste de souhaits.
 ]]
 local OUTFIT_OPTIONS: { OutfitOption } = {
+	{ id = "ash_adventurer", name = "Aventurier des Cendres", style = "aventurier", garment = "ash_adventurer", shirtId = 0, pantsId = 0, backAccessoryId = 0 },
+	{ id = "ellendor_warden", name = "Veilleur d'Ellendor", style = "voyageur des forêts", garment = "ellendor_warden", shirtId = 0, pantsId = 0, backAccessoryId = 0 },
+	{ id = "brasegrise_smith", name = "Forgeron de Brasegrise", style = "artisan des montagnes", garment = "brasegrise_smith", shirtId = 0, pantsId = 0, backAccessoryId = 0 },
+	{ id = "umbral_watcher", name = "Veilleur des Marches d'Ombre", style = "veilleur des ombres", garment = "umbral_watcher", shirtId = 0, pantsId = 0, backAccessoryId = 0 },
 	{
 		id = "midnight_traveler",
 		name = "Voyageur de minuit",
@@ -266,6 +287,12 @@ local SKIN_TONES: { SkinToneOption } = {
 	{ id = "dusk", name = "Crépuscule", color = Color3.fromRGB(118, 122, 150) },
 }
 
+-- Ornements : la liste suit GarmentLibrary.ORNAMENTS (le premier, « Aucun », est le défaut).
+local ORNAMENT_OPTIONS: { OrnamentOption } = {}
+for index, ornament in GarmentLibrary.ORNAMENTS do
+	ORNAMENT_OPTIONS[index] = { id = ornament.id, name = ornament.name }
+end
+
 local HEIGHT_SCALE: ScaleRange = { min = 0.9, max = 1.15, step = 0.05, default = 1 }
 local WIDTH_SCALE: ScaleRange = { min = 0.75, max = 1.1, step = 0.05, default = 1 }
 
@@ -293,6 +320,7 @@ return table.freeze({
 	HAIR_OPTIONS = HAIR_OPTIONS,
 	OUTFIT_OPTIONS = OUTFIT_OPTIONS,
 	OUTFIT_WISHLIST = OUTFIT_WISHLIST,
+	ORNAMENT_OPTIONS = ORNAMENT_OPTIONS,
 	SKIN_TONES = SKIN_TONES,
 	HEIGHT_SCALE = HEIGHT_SCALE, -- HumanoidDescription.HeightScale (BodyHeightScale)
 	WIDTH_SCALE = WIDTH_SCALE, -- HumanoidDescription.WidthScale (BodyWidthScale)

@@ -89,7 +89,7 @@ return function()
 		return {
 			baseIndex = 1, faceIndex = 1, markIndex = 1, hairIndex = 1, outfitIndex = 1,
 			heightScale = 1, widthScale = 1, magicIndex = magicIndex or 1,
-			raceIndex = raceIndex or 1, skinIndex = skinIndex or 1,
+			raceIndex = raceIndex or 1, skinIndex = skinIndex or 1, ornamentIndex = 1,
 		}
 	end
 

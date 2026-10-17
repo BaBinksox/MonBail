@@ -4,12 +4,14 @@
 	Applique un Selection sur un personnage. C'est le seul module qui touche au corps du personnage ;
 	il ne sait rien du Hub, des joueurs ni de la sauvegarde.
 
-	Trois étapes, dans apply() :
-		1. corps, teint, cheveux, tenue, taille (choix x facteurs du peuple) : un HumanoidDescription ;
+	Quatre étapes, dans apply() :
+		1. corps, teint, cheveux, tenue du catalogue, taille (choix x facteurs du peuple) : un
+		   HumanoidDescription ;
 		2. tête classique : remplace la tête animée de Roblox, sur laquelle un Decal s'affiche déformé ;
 		3. visage (Decal), marque (cicatrice, tatouage : image sur un SurfaceGui, placée librement) et
 		   détails du peuple (oreilles effilées des elfes, voile d'ombre des Enfants de l'Ombre), sans
-		   aucun asset externe.
+		   aucun asset externe ;
+		4. tenue fabriquée et ornement (CostumeBuilder : teinture des membres + pièces sculptées).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -18,6 +20,7 @@ local AvatarConfig = require(ReplicatedStorage.Shared.Avatar.AvatarConfig)
 local RaceConfig = require(ReplicatedStorage.Shared.Avatar.RaceConfig)
 
 local CharacterPlacement = require(script.Parent.Parent.Core.CharacterPlacement)
+local CostumeBuilder = require(script.Parent.CostumeBuilder)
 
 type Selection = AvatarConfig.Selection
 
@@ -105,9 +108,12 @@ local function buildDescription(humanoid: Humanoid, selection: Selection): Human
 	description.Face = 0
 
 	description.HairAccessory = tostring(hair.assetId)
-	description.BackAccessory = if outfit.backAccessoryId > 0 then tostring(outfit.backAccessoryId) else ""
-	description.Shirt = outfit.shirtId
-	description.Pants = outfit.pantsId
+	-- Tenue fabriquée (GarmentLibrary) : aucun vêtement du catalogue, la teinture et les pièces de
+	-- CostumeBuilder habillent le corps. Tenue historique : Shirt, Pants et cape du catalogue.
+	local isCrafted = outfit.garment ~= nil
+	description.BackAccessory = if not isCrafted and outfit.backAccessoryId > 0 then tostring(outfit.backAccessoryId) else ""
+	description.Shirt = if isCrafted then 0 else outfit.shirtId
+	description.Pants = if isCrafted then 0 else outfit.pantsId
 	description.HeightScale = math.clamp(selection.heightScale * race.heightFactor, RaceConfig.MIN_HEIGHT_SCALE, RaceConfig.MAX_HEIGHT_SCALE)
 	description.WidthScale = math.clamp(selection.widthScale * race.widthFactor, RaceConfig.MIN_WIDTH_SCALE, RaceConfig.MAX_WIDTH_SCALE)
 
@@ -391,6 +397,9 @@ function AvatarAppearance.apply(character: Model, selection: Selection): boolean
 		return false
 	end
 
+	-- La tenue fabriquée est retirée AVANT ApplyDescription : si celle-ci remplace des membres
+	-- (changement de corps), aucune pièce ne reste détachée, même un instant.
+	pcall(CostumeBuilder.clear, character)
 	local isApplied, errorMessage = pcall(function()
 		humanoid:ApplyDescription(buildDescription(humanoid, selection))
 	end)
@@ -409,6 +418,13 @@ function AvatarAppearance.apply(character: Model, selection: Selection): boolean
 	end)
 	if not isFaceApplied then
 		warn(`[Avatar] Visage non appliqué pour {character.Name} : {faceError}`)
+	end
+	-- Tenue fabriquée et ornement : après la tête classique (les ornements s'y soudent).
+	local outfit = AvatarConfig.OUTFIT_OPTIONS[selection.outfitIndex]
+	local ornament = AvatarConfig.ORNAMENT_OPTIONS[selection.ornamentIndex or 1]
+	local isDressed, dressError = pcall(CostumeBuilder.dress, character, if outfit then outfit.garment else nil, if ornament then ornament.id else nil)
+	if not isDressed then
+		warn(`[Avatar] Tenue non posée pour {character.Name} : {dressError}`)
 	end
 	CharacterPlacement.repairHipHeight(character, expectedHipHeight)
 

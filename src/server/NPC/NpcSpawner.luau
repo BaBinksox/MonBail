@@ -24,6 +24,7 @@ local NpcConfig = require(ReplicatedStorage.Shared.NPC.NpcConfig)
 
 local CharacterPlacement = require(script.Parent.Parent.Core.CharacterPlacement)
 local NpcCostume = require(script.Parent.NpcCostume)
+local CostumeBuilder = require(script.Parent.Parent.Avatar.CostumeBuilder)
 local WorldAnchors = require(script.Parent.Parent.World.WorldAnchors)
 
 local FOLDER_NAME = "NPCs"
@@ -90,7 +91,7 @@ local function buildDescription(definition: NpcConfig.Npc): HumanoidDescription
 		description.RightLeg = base.rightLegId
 	end
 	local outfit = findById(AvatarConfig.OUTFIT_OPTIONS, look.outfit)
-	if outfit then
+	if outfit and look.garment == nil then
 		description.Shirt = outfit.shirtId
 		description.Pants = outfit.pantsId
 		if outfit.backAccessoryId and outfit.backAccessoryId > 0 then
@@ -135,6 +136,13 @@ local function createModel(npcId: string, definition: NpcConfig.Npc): Model?
 		end
 	end
 	NpcCostume.dress(model, definition.look.details)
+	-- Costume fabriqué (même système que les tenues des joueurs).
+	if definition.look.garment then
+		local isDressed, dressError = pcall(CostumeBuilder.dress, model, definition.look.garment, nil)
+		if not isDressed then
+			warn(`[NPC] Costume non posé pour {npcId} : {dressError}`)
+		end
+	end
 	return model
 end
 

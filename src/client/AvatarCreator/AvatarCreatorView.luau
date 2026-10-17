@@ -304,6 +304,34 @@ local function drawThumbnail(thumbnail: Catalog.Thumbnail, parent: Frame, skinDi
 		local face = newImage("Face", image, disc)
 		face.Size = UDim2.fromScale(0.94, 0.94)
 		table.insert(skinDiscs, disc)
+	elseif kind == "swatches" and thumbnail.colors and #thumbnail.colors > 0 then
+		-- Tenue ou ornement fabriqué : ses couleurs en anneaux concentriques, sceau au centre.
+		local colors = thumbnail.colors
+		local outer = newDisc(parent, colors[1], 0)
+		addStroke(outer, COLORS.gold, 0.25, 1.5)
+		local holder: Frame = outer
+		for index = 2, math.min(#colors, 4) do
+			local ring = newDisc(holder, colors[index], 0)
+			ring.Name = "Ring" .. index
+			ring.Size = UDim2.fromScale(0.74, 0.74)
+			holder = ring
+		end
+		local seal = newDisc(holder, COLORS.background, 0.15)
+		seal.Name = "Seal"
+		seal.Size = UDim2.fromScale(0.6, 0.6)
+		addStroke(seal, COLORS.gold, 0.4, 1)
+		Theme.title({
+			name = "Initial",
+			text = thumbnail.text or "",
+			color = COLORS.goldBright,
+			alignX = Enum.TextXAlignment.Center,
+			anchor = Vector2.new(0.5, 0.5),
+			position = UDim2.fromScale(0.5, 0.5),
+			size = UDim2.fromScale(0.62, 0.62),
+			scaled = true,
+			maxTextSize = 48,
+			parent = seal,
+		})
 	elseif kind == "swatch" and thumbnail.color then
 		local disc = newDisc(parent, thumbnail.color, 0)
 		addStroke(disc, COLORS.gold, 0.25, 1.5)

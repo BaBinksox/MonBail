@@ -55,7 +55,8 @@ local costumeParts, solidCostume, dressed = 0, 0, 0
 for _, villager in ipairs(CollectionService:GetTagged("Villager")) do
 	local count = 0
 	for _, d in ipairs(villager:GetDescendants()) do
-		if d:IsA("BasePart") and string.find(d.Name, "^Costume_") then
+		local inCostumeFolder = d.Parent ~= nil and d.Parent.Name == "Costume" -- costumes fabriqués (CostumeBuilder)
+		if d:IsA("BasePart") and (string.find(d.Name, "^Costume_") or inCostumeFolder) then
 			count += 1
 			if d.CanCollide or d.CanQuery or d.CanTouch or not d.Massless then
 				solidCostume += 1

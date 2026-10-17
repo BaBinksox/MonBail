@@ -34,6 +34,7 @@ export type SavedAvatar = {
 	width: number,
 	race: string, -- ajouté en v3 du profil ; absent = RaceConfig.DEFAULT_RACE_ID
 	skin: string, -- ajouté en v3 ; absent = "native" (teint de l'avatar Roblox, comme avant)
+	ornament: string, -- ajouté en v4 ; absent = "none" (aucun ornement, comme avant)
 }
 
 local AvatarSerializer = {}
@@ -86,6 +87,8 @@ function AvatarSerializer.sanitizeSelection(raw: any): Selection?
 	local widthScale = sanitizeScale(raw.widthScale, AvatarConfig.WIDTH_SCALE)
 	local raceIndex = sanitizeIndex(raw.raceIndex, #RaceConfig.RACES)
 	local skinIndex = sanitizeIndex(raw.skinIndex, #AvatarConfig.SKIN_TONES)
+	-- Ornement : un client d'avant la v4 ne l'envoie pas -> « Aucun » (pas un rejet du choix entier).
+	local ornamentIndex = if raw.ornamentIndex == nil then 1 else sanitizeIndex(raw.ornamentIndex, #AvatarConfig.ORNAMENT_OPTIONS)
 	if
 		baseIndex == nil
 		or faceIndex == nil
@@ -97,6 +100,7 @@ function AvatarSerializer.sanitizeSelection(raw: any): Selection?
 		or widthScale == nil
 		or raceIndex == nil
 		or skinIndex == nil
+		or ornamentIndex == nil
 	then
 		return nil
 	end
@@ -112,6 +116,7 @@ function AvatarSerializer.sanitizeSelection(raw: any): Selection?
 		widthScale = widthScale,
 		raceIndex = raceIndex,
 		skinIndex = skinIndex,
+		ornamentIndex = ornamentIndex :: number,
 	}
 end
 
@@ -128,6 +133,7 @@ function AvatarSerializer.toSaved(selection: Selection): SavedAvatar
 		width = selection.widthScale,
 		race = RaceConfig.RACES[selection.raceIndex].id,
 		skin = AvatarConfig.SKIN_TONES[selection.skinIndex].id,
+		ornament = AvatarConfig.ORNAMENT_OPTIONS[selection.ornamentIndex or 1].id,
 	}
 end
 
@@ -150,6 +156,8 @@ function AvatarSerializer.fromSaved(saved: any): Selection?
 		-- Personnages créés avant les peuples et les teints : humain, teint de l'avatar (inchangés).
 		raceIndex = RaceConfig.indexOf(saved.race or RaceConfig.DEFAULT_RACE_ID),
 		skinIndex = findIndexById(AvatarConfig.SKIN_TONES, saved.skin or "native"),
+		-- Personnages créés avant les ornements : aucun (inchangés).
+		ornamentIndex = findIndexById(AvatarConfig.ORNAMENT_OPTIONS, saved.ornament or "none"),
 	}
 end
 

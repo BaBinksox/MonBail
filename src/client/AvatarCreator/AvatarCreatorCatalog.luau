@@ -22,6 +22,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local AvatarConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Avatar"):WaitForChild("AvatarConfig"))
 local RaceConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Avatar"):WaitForChild("RaceConfig"))
+local GarmentLibrary = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Avatar"):WaitForChild("GarmentLibrary"))
 
 type Selection = AvatarConfig.Selection
 
@@ -36,7 +37,9 @@ export type StepKind = "list" | "proportions" | "destiny" | "summary"
 --   "medallion" : médaillon dessiné portant `text` (une initiale)
 --   "none"      : pastille vide (option "aucune")
 --   "swatch"    : pastille de couleur `color` (teint) ; sans couleur, médaillon portant `text`
-export type ThumbnailKind = "image" | "face" | "medallion" | "none" | "swatch"
+--   "swatches"  : médaillon en bandes des couleurs `colors` (tenue ou ornement fabriqué : pas
+--                 d'image d'asset, mais ses vraies couleurs, et `text` en sceau)
+export type ThumbnailKind = "image" | "face" | "medallion" | "none" | "swatch" | "swatches"
 
 export type Thumbnail = {
 	kind: ThumbnailKind,
@@ -44,6 +47,7 @@ export type Thumbnail = {
 	inset: string?,
 	text: string?,
 	color: Color3?,
+	colors: { Color3 }?,
 }
 
 export type OptionEntry = {
@@ -161,16 +165,55 @@ local function buildHairOptions(): { OptionEntry }
 	return entries
 end
 
+local function peopleName(raceId: string?): string?
+	for _, race in RaceConfig.RACES do
+		if race.id == raceId then
+			return race.name
+		end
+	end
+	return nil
+end
+
 local function buildOutfitOptions(): { OptionEntry }
 	local entries: { OptionEntry } = {}
 	for index, option in AvatarConfig.OUTFIT_OPTIONS do
+		local garment = GarmentLibrary.get(option.garment)
+		if garment then
+			-- Tenue fabriquée : ses vraies couleurs en vignette, sa description et son inspiration.
+			local people = peopleName(garment.people)
+			entries[index] = {
+				name = option.name,
+				thumbnail = { kind = "swatches", colors = garment.swatches, text = initial(option.name) },
+				description = table.concat({
+					`<i>Style : {garment.style}{if people then " · inspiration : " .. people else ""}</i>`,
+					garment.description,
+					`<font color="#B0A89C">Portable par tous les peuples.</font>`,
+				}, "\n"),
+			}
+		else
+			entries[index] = {
+				name = option.name,
+				thumbnail = {
+					kind = "image",
+					image = assetThumbnail(option.shirtId),
+					inset = if option.backAccessoryId > 0 then assetThumbnail(option.backAccessoryId) else nil,
+				},
+				description = `<font color="#B0A89C">Tenue historique (vêtements 2D du catalogue Roblox) : son affichage dépend de la disponibilité de ces assets.</font>`,
+			}
+		end
+	end
+	return entries
+end
+
+local function buildOrnamentOptions(): { OptionEntry }
+	local entries: { OptionEntry } = {}
+	for index, option in AvatarConfig.ORNAMENT_OPTIONS do
+		local ornament = GarmentLibrary.getOrnament(option.id)
+		local colors = if ornament then ornament.swatches else {}
 		entries[index] = {
 			name = option.name,
-			thumbnail = {
-				kind = "image",
-				image = assetThumbnail(option.shirtId),
-				inset = if option.backAccessoryId > 0 then assetThumbnail(option.backAccessoryId) else nil,
-			},
+			thumbnail = if #colors == 0 then { kind = "none" } else { kind = "swatches", colors = colors, text = initial(option.name) },
+			description = if ornament then ornament.description else nil,
 		}
 	end
 	return entries
@@ -290,6 +333,24 @@ local STEPS: { Step } = {
 		},
 	},
 	{
+		id = "ornament",
+		kind = "list",
+		numeral = "",
+		label = "Ornement",
+		title = "Ornement",
+		subtitle = "Un détail qui vous distingue.",
+		shot = "face",
+		list = {
+			options = buildOrnamentOptions(),
+			get = function(selection: Selection): number
+				return selection.ornamentIndex
+			end,
+			set = function(selection: Selection, index: number)
+				selection.ornamentIndex = index
+			end,
+		},
+	},
+	{
 		id = "outfit",
 		kind = "list",
 		numeral = "",
@@ -402,6 +463,7 @@ function AvatarCreatorCatalog.defaultSelection(): Selection
 		magicIndex = 1,
 		raceIndex = RaceConfig.indexOf(RaceConfig.DEFAULT_RACE_ID),
 		skinIndex = 1,
+		ornamentIndex = 1,
 	}
 end
 
