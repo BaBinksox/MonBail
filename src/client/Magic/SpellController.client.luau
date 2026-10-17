@@ -209,8 +209,9 @@ SpellRemotes.SpellImpact.OnClientEvent:Connect(function(castId: any, spellId: an
 	end
 	local caster = casters[castId]
 	casters[castId] = nil
+	-- Le son d'impact est joué par le module d'effets de la magie (Vfx/<Magie>), au moment où
+	-- l'impact se VOIT (implosion de la singularité, éclatement d'une cage…) : une seule fois.
 	SpellEffects.impact(castId, spell, position, if type(targets) == "table" then targets else {}, caster)
-	SfxPlayer.play(`impact_{spell.magic}`, position)
 end)
 
 SpellRemotes.ReactionTriggered.OnClientEvent:Connect(function(target: any, reactionId: any, position: any)

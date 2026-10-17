@@ -136,14 +136,22 @@ local REWIND_CHOIR: { Candidate } = {
 	c("1840524246", "Angelic Choir", "?", ROBLOXSONG .. "1840524246-angelic-choir", "range", nil, "Page sans description des voix."),
 }
 
--- Effets sonores : seulement pour les emplacements vides d'AudioConfig.SFX.
+-- Effets sonores : seulement pour les emplacements VIDES d'AudioConfig.SFX (essai automatique).
 local SFX: { [string]: { Candidate } } = {
-	dodge = {
-		c("135315310485417", "sword-swing-whoosh-sound-effect-1-full-pack", "? (Creator Store)", STORE .. "135315310485417/swordswingwhooshsoundeffect1fullpack", "store", nil, "« Pack complet » : peut contenir plusieurs souffles à la suite."),
-	},
 	swordBlocked = {
 		c("7058511334", "Sword Parry", "? (téléversement)", "https://robloxsong.com/artist/76557-the-sword?page=4", "user"),
 		c("7058511971", "Sword Parry 5", "? (téléversement)", "https://robloxsong.com/artist/76557-the-sword?page=4", "user"),
+	},
+	plungeImpact = {
+		c("5540424854", "impact", "? (utilisé par Slap Battles)", "https://roblox-slap-battles.fandom.com/wiki/Sound_Effects", "user"),
+	},
+}
+
+-- Alternatives à ÉCOUTER (AudioAudit.listen("alt:<nom>", n)) pour des emplacements déjà remplis
+-- par un son livré avec Roblox. Jamais utilisées automatiquement.
+local SFX_ALTERNATIVES: { [string]: { Candidate } } = {
+	dodge = {
+		c("135315310485417", "sword-swing-whoosh-sound-effect-1-full-pack", "? (Creator Store)", STORE .. "135315310485417/swordswingwhooshsoundeffect1fullpack", "store", nil, "« Pack complet » : peut contenir plusieurs souffles à la suite."),
 	},
 	impact_lightning = {
 		c("224339201", "lightning bolt", "? (utilisé par Slap Battles)", "https://roblox-slap-battles.fandom.com/wiki/Sound_Effects", "user"),
@@ -151,9 +159,6 @@ local SFX: { [string]: { Candidate } } = {
 	},
 	impact_pyromancy = {
 		c("9114362266", "explosion", "? (utilisé par Slap Battles)", "https://roblox-slap-battles.fandom.com/wiki/Sound_Effects", "user"),
-	},
-	plungeImpact = {
-		c("5540424854", "impact", "? (utilisé par Slap Battles)", "https://roblox-slap-battles.fandom.com/wiki/Sound_Effects", "user"),
 	},
 }
 
@@ -174,5 +179,6 @@ return table.freeze({
 	MUSIC = MUSIC,
 	REWIND_CHOIR = REWIND_CHOIR,
 	SFX = SFX,
+	SFX_ALTERNATIVES = SFX_ALTERNATIVES,
 	EXTERNAL = EXTERNAL,
 })

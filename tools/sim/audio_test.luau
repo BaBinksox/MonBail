@@ -291,11 +291,41 @@ H.check("silence signalé dans la sortie", (function()
 end)())
 
 -- Effets et chœur.
-SfxPlayer.play("dodge") -- premier appel : lance la recherche du candidat
+-- Un effet vide (garde) dont les candidats sont des téléversements : essayés seulement si autorisé.
+SfxPlayer.play("swordBlocked")
 H.advance(1)
-H.check("effet vide : candidat d'essai joué", SfxPlayer.play("dodge") == true)
-local dodgeSound = SoundService:FindFirstChild("Sfx_dodge")
-H.check("le son d'esquive utilise le candidat du Creator Store", dodgeSound ~= nil and dodgeSound.SoundId == "rbxassetid://135315310485417", dodgeSound and dodgeSound.SoundId)
+H.check("téléversements « user » non essayés par défaut (effet vide reste muet)", SfxPlayer.play("swordBlocked") == false)
+AudioConfig.CANDIDATE_TRIAL.licenses.user = true
+CandidateResolver.reset()
+SfxPlayer.play("swordBlocked")
+H.advance(1)
+H.check("effet vide : candidat d'essai joué une fois autorisé", SfxPlayer.play("swordBlocked") == true)
+local blockedSound = SoundService:FindFirstChild("Sfx_swordBlocked")
+H.check("le son de garde utilise le premier candidat", blockedSound ~= nil and blockedSound.SoundId == "rbxassetid://7058511334", blockedSound and blockedSound.SoundId)
+AudioConfig.CANDIDATE_TRIAL.licenses.user = false
+H.advance(1)
+-- Sons des magies : un son distinct (fichier ou hauteur) pour chaque magie, tous rangés dans Effets.
+do
+	local signatures, missing = {}, {}
+	for _, magicId in ipairs({ "pyromancy", "ice", "lightning", "shadow", "antimatter", "gravity" }) do
+		local cast, impact = AudioConfig.SFX["cast_" .. magicId], AudioConfig.SFX["impact_" .. magicId]
+		if cast.id == "" or impact.id == "" then table.insert(missing, magicId) end
+		signatures[cast.id .. "@" .. cast.pitch] = (signatures[cast.id .. "@" .. cast.pitch] or 0) + 1
+		signatures[impact.id .. "@" .. impact.pitch] = (signatures[impact.id .. "@" .. impact.pitch] or 0) + 1
+	end
+	local duplicates = 0
+	for _, n in pairs(signatures) do if n > 1 then duplicates += 1 end end
+	H.check("chaque magie a un son de lancement et d'impact", #missing == 0, table.concat(missing, ","))
+	H.check("aucun son de magie identique à un autre (fichier + hauteur)", duplicates == 0, duplicates)
+	local loud = {}
+	for name, spec in pairs(AudioConfig.SFX) do
+		if spec.volume > 0.75 or spec.pitch * (1 + spec.pitchVariance) > 1.7 then table.insert(loud, name) end
+	end
+	H.check("mixage : aucun effet trop fort ni trop aigu", #loud == 0, table.concat(loud, ","))
+	SfxPlayer.play("impact_ice")
+	local iceSound = SoundService:FindFirstChild("Sfx_impact_ice")
+	H.check("son de magie rangé dans le groupe Effets", iceSound ~= nil and iceSound.SoundGroup == AudioMixer.group("Sfx"))
+end
 AudioConfig.REWIND_CHOIR.id = ""
 H.advance(1)
 TimeLoopRemotes.RewindStarted:FireClient(player, 4)
@@ -323,6 +353,10 @@ H.advance(30)
 local total = #AudioCandidates.REWIND_CHOIR
 for _, list in pairs(AudioCandidates.MUSIC) do total += #list end
 for _, list in pairs(AudioCandidates.SFX) do total += #list end
+for _, list in pairs(AudioCandidates.SFX_ALTERNATIVES) do total += #list end
+for _, spec in pairs(AudioConfig.SFX) do
+	if string.find(spec.id, "^rbxasset://") then total += 1 end -- sons livrés avec Roblox, vérifiés aussi
+end
 H.check("AudioAudit.run teste chaque candidat", finished ~= nil and #finished == total, finished and #finished)
 local failedEntry, infoLine = nil, nil
 for _, entry in ipairs(finished or {}) do
@@ -337,6 +371,37 @@ H.check("snippet : téléversements de particuliers omis par défaut", printed("
 H.check("snippet : rien pour un contexte sans candidat chargé", printed("TRACKS.boss = ") == nil)
 AudioAudit.listen("creator", 2)
 AudioAudit.stop()
+print("== Ultimes : un seul son d'impact chacun (pas de superposition)")
+do
+	local CombatRemotes = H.shared("Combat/CombatRemotes")
+	local function plays(name)
+		local n = 0
+		for _, d in ipairs(mock.game:GetDescendants()) do
+			if rawget(d, "ClassName") == "Sound" and d.Name == name then n += d.PlayCount or 0 end
+		end
+		return n
+	end
+	local doubled = {}
+	for _, magicId in ipairs({ "ice", "antimatter", "pyromancy", "lightning", "shadow", "gravity" }) do
+		local before = plays("Sfx_impact_" .. magicId)
+		CombatRemotes.UltimateFired:FireClient(player, player.Character, H.root(player).Position, {}, magicId)
+		H.advance(3)
+		local count = plays("Sfx_impact_" .. magicId) - before
+		if count ~= 1 then table.insert(doubled, magicId .. "=" .. count) end
+	end
+	H.check("chaque ultime joue son impact une seule fois", #doubled == 0, table.concat(doubled, ","))
+end
+
+print("== Réglages audio conservés après reconnexion")
+do
+	StateRemotes.UpdateSettings:FireServer({ music = 0.4, ambience = 0.6, sfx = 0.7 })
+	H.advance(2)
+	local userId = player.UserId
+	H.leave(player)
+	local again = H.join("Mélodie", userId)
+	local settings = H.profile(again).settings
+	H.check("musique, ambiance et effets retrouvés à la reconnexion", settings.music == 0.4 and settings.ambience == 0.6 and settings.sfx == 0.7, string.format("%s/%s/%s", tostring(settings.music), tostring(settings.ambience), tostring(settings.sfx)))
+end
 H.noNewErrors("audio sans erreur")
 H.printWarnings()
 H.finish()

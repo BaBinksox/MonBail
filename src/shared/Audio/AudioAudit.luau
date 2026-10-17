@@ -22,6 +22,7 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local SoundService = game:GetService("SoundService")
 
 local AudioCandidates = require(script.Parent:WaitForChild("AudioCandidates") :: ModuleScript)
+local AudioConfig = require(script.Parent:WaitForChild("AudioConfig") :: ModuleScript)
 
 -- Même forme que AudioCandidates.Candidate (le type exporté n'est pas visible à travers WaitForChild).
 type Candidate = { id: string, name: string, provider: string, source: string, duration: number?, license: string, note: string? }
@@ -162,6 +163,32 @@ function AudioAudit.entries(): { Entry }
 			table.insert(list, { group = "sfx:" .. name, index = index, candidate = candidate })
 		end
 	end
+	local altNames: { string } = {}
+	for name in AudioCandidates.SFX_ALTERNATIVES do
+		table.insert(altNames, name)
+	end
+	table.sort(altNames)
+	for _, name in altNames do
+		for index, candidate in AudioCandidates.SFX_ALTERNATIVES[name] do
+			table.insert(list, { group = "alt:" .. name, index = index, candidate = candidate })
+		end
+	end
+	-- Sons livrés avec Roblox utilisés par AudioConfig : on vérifie qu'ils existent bien.
+	local builtinNames: { string } = {}
+	for name, spec in AudioConfig.SFX do
+		if string.find(spec.id, "^rbxasset://") then
+			table.insert(builtinNames, name)
+		end
+	end
+	table.sort(builtinNames)
+	for _, name in builtinNames do
+		local spec = AudioConfig.SFX[name]
+		table.insert(list, {
+			group = "builtin:" .. name,
+			index = 1,
+			candidate = { id = spec.id, name = name, provider = "Roblox (son livré avec le client)", source = "installation Roblox", duration = nil, license = "builtin" },
+		})
+	end
 	return list
 end
 
@@ -171,6 +198,8 @@ local function find(group: string, index: number?): Candidate?
 		list = AudioCandidates.REWIND_CHOIR
 	elseif string.sub(group, 1, 4) == "sfx:" then
 		list = AudioCandidates.SFX[string.sub(group, 5)]
+	elseif string.sub(group, 1, 4) == "alt:" then
+		list = AudioCandidates.SFX_ALTERNATIVES[string.sub(group, 5)]
 	else
 		list = AudioCandidates.MUSIC[group]
 	end
@@ -288,7 +317,10 @@ function AudioAudit.snippet(includeUser: boolean?)
 	for _, entry in AudioAudit.results do
 		local probe = entry.probe
 		local allowed = includeUser == true or entry.candidate.license ~= "user"
-		if probe and probe.loaded and not allowed then
+		local prefix = string.sub(entry.group, 1, 4)
+		if entry.candidate.license == "builtin" or prefix == "alt:" then
+			continue -- déjà en place (son livré) ou simple alternative à écouter
+		elseif probe and probe.loaded and not allowed then
 			skippedUser += 1
 		elseif probe and probe.loaded and not seen[entry.group] and AudioAudit.durationMatches(entry.candidate, probe.timeLength) then
 			seen[entry.group] = true

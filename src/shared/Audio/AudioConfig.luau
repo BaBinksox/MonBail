@@ -139,6 +139,16 @@ local CLASSIC_SLASH = "rbxasset://sounds/swordslash.wav"
 local CLASSIC_LUNGE = "rbxasset://sounds/swordlunge.wav"
 local CLASSIC_UNSHEATH = "rbxasset://sounds/unsheath.wav"
 local CHARACTER_JUMP = "rbxasset://sounds/action_jump.mp3"
+-- Sons livrés avec Roblox, utilisés pour donner un son distinct à chaque magie en attendant des
+-- sons importés (docs/MUSIQUE.md, « Sons à importer »). Leur présence est vérifiée dans Studio par
+-- AudioAudit.run() (ligne « [builtin:...] ») ; un fichier absent reste muet, sans erreur de jeu.
+local SWOOSH = "rbxasset://sounds/swoosh.wav"
+local GLASS_BREAK = "rbxasset://sounds/glassbreak.wav"
+local SNAP = "rbxasset://sounds/snap.wav"
+local SPLAT = "rbxasset://sounds/splat.wav"
+local COLLIDE = "rbxasset://sounds/collide.wav"
+local ROCKET_WHOOSH = "rbxasset://sounds/Rocket whoosh 01.wav"
+local ROCKET_SHOT = "rbxasset://sounds/Rocket shot.wav"
 
 local SFX: { [string]: Sfx } = {
 	-- Épée
@@ -154,7 +164,7 @@ local SFX: { [string]: Sfx } = {
 	chargeReady = sfx(CLASSIC_UNSHEATH, 0.4, "Montée métallique brève (attaque chargée prête).", 1.6, 0.02, 0.3, 1),
 	plungeImpact = sfx("", 0.6, "Impact lourd au sol + poussière (attaque plongeante).", 1, 0.05, 0.2, 2),
 	-- Mobilité
-	dodge = sfx("", 0.45, "Souffle d'air rapide (esquive / dash).", 1, 0.08),
+	dodge = sfx(SWOOSH, 0.3, "Souffle d'air rapide (esquive / dash).", 1.1, 0.08),
 	dodgePerfect = sfx("", 0.5, "Souffle + éclat cristallin discret (esquive parfaite).", 1, 0.03, 0.2, 1),
 	doubleJump = sfx(CHARACTER_JUMP, 0.5, "Impulsion d'énergie courte, légèrement magique.", 1.35, 0.05, 0.15, 2),
 	sprintStart = sfx("", 0.25, "Pas qui s'accélèrent / souffle léger (démarrage du sprint).", 1, 0.05, 0.5, 1),
@@ -165,18 +175,18 @@ local SFX: { [string]: Sfx } = {
 	ultimateReady = sfx("", 0.4, "Accord bref et lumineux (jauge de Tension pleine).", 1, 0, 2, 1),
 	ultimateActivate = sfx("", 0.7, "Montée puissante + impact (technique ultime).", 1, 0.02, 0.5, 2),
 	-- Sorts : lancement et impact par élément
-	cast_pyromancy = sfx("", 0.5, "Souffle de flamme projeté (whoosh enflammé).", 1, 0.06),
-	impact_pyromancy = sfx("", 0.55, "Explosion de feu courte, crépitement.", 1, 0.06),
-	cast_ice = sfx("", 0.45, "Cristallisation, givre qui se forme (aigu, fin).", 1, 0.05),
-	impact_ice = sfx("", 0.5, "Éclat de glace qui se brise.", 1, 0.06),
-	cast_lightning = sfx("", 0.5, "Crépitement électrique sec.", 1, 0.08),
-	impact_lightning = sfx("", 0.55, "Claquement de foudre court (pas de tonnerre long).", 1, 0.06),
-	cast_shadow = sfx("", 0.45, "Murmure grave, souffle sombre (pas de cri).", 1, 0.05),
-	impact_shadow = sfx("", 0.5, "Impact étouffé et aspirant.", 1, 0.05),
-	cast_antimatter = sfx("", 0.45, "Distorsion, son inversé qui se contracte.", 1, 0.04),
-	impact_antimatter = sfx("", 0.55, "Implosion sourde.", 1, 0.05),
-	cast_gravity = sfx("", 0.5, "Grondement grave, pression.", 1, 0.04),
-	impact_gravity = sfx("", 0.55, "Écrasement lourd, sol qui tremble.", 1, 0.05),
+	cast_pyromancy = sfx(ROCKET_WHOOSH, 0.3, "Souffle de flamme projeté (whoosh enflammé).", 0.85, 0.06),
+	impact_pyromancy = sfx(ROCKET_SHOT, 0.35, "Explosion de feu courte, crépitement.", 0.75, 0.06),
+	cast_ice = sfx(SWOOSH, 0.26, "Cristallisation, givre qui se forme (aigu, fin).", 1.3, 0.05),
+	impact_ice = sfx(GLASS_BREAK, 0.3, "Éclat de glace qui se brise.", 1.15, 0.06),
+	cast_lightning = sfx(SNAP, 0.28, "Crépitement électrique sec.", 1.2, 0.08),
+	impact_lightning = sfx(SNAP, 0.45, "Claquement de foudre court (pas de tonnerre long).", 0.8, 0.06),
+	cast_shadow = sfx(SWOOSH, 0.3, "Murmure grave, souffle sombre (pas de cri).", 0.6, 0.05),
+	impact_shadow = sfx(SPLAT, 0.3, "Impact étouffé et aspirant.", 0.55, 0.05),
+	cast_antimatter = sfx(SWOOSH, 0.28, "Distorsion, son inversé qui se contracte.", 0.75, 0.04),
+	impact_antimatter = sfx(COLLIDE, 0.4, "Implosion sourde.", 0.5, 0.05),
+	cast_gravity = sfx(SWOOSH, 0.3, "Grondement grave, pression.", 0.45, 0.04),
+	impact_gravity = sfx(COLLIDE, 0.45, "Écrasement lourd, sol qui tremble.", 0.7, 0.05),
 	reaction = sfx("", 0.55, "Éclat bref, mélange de deux éléments (réaction élémentaire).", 1, 0.05, 0.25, 2),
 }
 
